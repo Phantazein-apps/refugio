@@ -811,28 +811,36 @@ async function setupLocalDomain(targetDir, port, fallbackUrl) {
 
 // ── Phase 6b: Local LLM Engine (Ollama) ─────────────────────
 
+const APP_OLLAMA = "/Applications/Ollama.app/Contents/Resources/ollama"
+
 function installOllama() {
-  if (has("ollama")) {
-    if (isAppleSilicon() && isX86Binary(whichCmd("ollama"))) {
-      warn("Existing Ollama is x86_64 (Rosetta) — for GPU speed, reinstall the arm64 build from https://ollama.com/download")
-    }
-    ok("Ollama already installed")
-    return true
+  const appleSilicon = isAppleSilicon()
+  const haveArmApp = fs.existsSync(APP_OLLAMA)
+
+  if (has("ollama") || haveArmApp) {
+    // Already have an arm64-capable Ollama? (the app bundle counts.) On Apple
+    // Silicon an x86_64-only CLI runs CPU-only, so install the arm64 app instead.
+    const needArm = appleSilicon && !haveArmApp && isX86Binary(whichCmd("ollama"))
+    if (!needArm) { ok("Ollama already installed"); return true }
+    warn("Existing Ollama is x86_64 (Rosetta) — installing the arm64 app for GPU speed...")
+  } else {
+    warn("Installing Ollama...")
   }
-  warn("Installing Ollama...")
+
   try {
     if (os.platform() === "darwin") {
       const hasArmBrew = fs.existsSync("/opt/homebrew/bin/brew")
-      if (has("brew") && (!isAppleSilicon() || hasArmBrew)) {
+      if (has("brew") && (!appleSilicon || hasArmBrew)) {
         // Native brew: arm64 brew on Apple Silicon, or Intel brew on an Intel Mac
         run("brew install ollama")
       } else {
-        // Apple Silicon without arm64 brew (or no brew at all): use the official
-        // universal app so Ollama runs arm64, not x86_64 under Rosetta.
+        // Official universal app (runs arm64 on Apple Silicon). Unzip only — the
+        // supervisor runs the binary directly, so we avoid the GUI app's
+        // first-launch onboarding, which would block the server from starting.
         const zip = path.join(os.tmpdir(), "Ollama-darwin.zip")
         run(`curl -fsSL https://ollama.com/download/Ollama-darwin.zip -o "${zip}"`, { shell: true })
-        run(`unzip -o "${zip}" -d /Applications`, { shell: true })
-        try { execSync("open -a Ollama", { stdio: "ignore" }) } catch {}
+        run(`unzip -oq "${zip}" -d /Applications`, { shell: true })
+        try { execSync("xattr -dr com.apple.quarantine /Applications/Ollama.app", { stdio: "ignore" }) } catch {}
       }
     } else if (os.platform() === "linux") {
       run("curl -fsSL https://ollama.com/install.sh | sh", { shell: true })
@@ -848,16 +856,20 @@ function installOllama() {
   } catch (err) {
     warn(`Ollama install hit a snag: ${err.message}`)
   }
-  if (has("ollama")) { ok("Ollama installed"); return true }
+  if (has("ollama") || fs.existsSync(APP_OLLAMA)) { ok("Ollama installed"); return true }
   return false
 }
 
 async function ensureOllamaServing() {
   if (await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)) return true
-  // Server not up — try to start it (brew/manual installs don't auto-run a daemon)
-  if (has("ollama")) {
+  // Server not up — start it. Prefer the macOS app binary and force arm64 on
+  // Apple Silicon so the install-time server (and model pull) uses the GPU build.
+  const ollamaBin = fs.existsSync(APP_OLLAMA) ? APP_OLLAMA : (has("ollama") ? "ollama" : null)
+  if (ollamaBin) {
     try {
-      const child = spawn("ollama", ["serve"], { detached: true, stdio: "ignore" })
+      const cmd = (!isWin && isAppleSilicon()) ? "arch" : ollamaBin
+      const args = (!isWin && isAppleSilicon()) ? ["-arm64", ollamaBin, "serve"] : ["serve"]
+      const child = spawn(cmd, args, { detached: true, stdio: "ignore" })
       child.unref()
     } catch {}
   }
