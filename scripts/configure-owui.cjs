@@ -67,9 +67,9 @@ function loadEnv() {
 async function buildSystemPrompt(env) {
   let prompt = "You are a helpful assistant running locally via REFUGIO."
   prompt += " Do not use <think> blocks or internal reasoning. Respond directly and concisely."
-  prompt += " When a tool is available for the user's request, call it immediately without explaining your reasoning."
-  prompt += " IMPORTANT: Call each tool at most ONCE per user message. After receiving a tool result, present it for the user immediately. Do NOT call another tool unless absolutely necessary."
-  prompt += " If a tool returns empty results, tell the user — do not retry with different queries."
+  prompt += " Answer general questions DIRECTLY from your own knowledge — do NOT call a tool for greetings, math, definitions, or chit-chat."
+  prompt += " Only call a tool when the request clearly needs it: recalling or saving memory, or looking up workplace data (Slack, Jira, Notion, etc.)."
+  prompt += " When you do call a tool, call it at most ONCE, then answer from the result. If a tool returns nothing, just answer normally without retrying."
   prompt += "\n\n## Tool routing — pick the RIGHT tool:"
   prompt += "\n- Writing style, preferences, tone, personal context, saved notes → memory get"
   prompt += "\n- Slack messages, conversations, channels → search_messages / get_channel_history"
