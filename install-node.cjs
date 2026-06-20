@@ -983,12 +983,12 @@ async function startREFUGIO(targetDir, env) {
 
   // Wait for OWUI to be ready
   const waitStart = Date.now()
-  process.stdout.write("  Waiting for Open WebUI to be ready... (first launch takes ~60s) ")
+  process.stdout.write("  Waiting for Open WebUI to be ready... (first launch downloads a model — up to a few min) ")
   const timer = setInterval(() => {
     const elapsed = Math.round((Date.now() - waitStart) / 1000)
     process.stdout.write(`\r  Waiting for Open WebUI to be ready... (${elapsed}s) `)
   }, 1000)
-  const ready = await waitForServer(`http://127.0.0.1:${PORT}/api/config`, 120000)
+  const ready = await waitForServer(`http://127.0.0.1:${PORT}/api/config`, 300000)
   clearInterval(timer)
 
   if (ready) {

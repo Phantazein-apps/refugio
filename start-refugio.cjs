@@ -508,8 +508,15 @@ ${C.bold}============================================================
       owuiEnv.ENABLE_OLLAMA_API = "false"
     }
 
+    // Log OWUI output to a file so first-boot / init problems are visible
+    // (the supervisor otherwise discards child output).
+    let owuiStdio = "ignore"
+    try {
+      const owuiLog = fs.openSync(path.join(home, ".refugio-logs", "open-webui.log"), "a")
+      owuiStdio = ["ignore", owuiLog, owuiLog]
+    } catch {}
     supervisor.start("open-webui", owuiBin, ["serve", "--port", String(PORT), "--host", "127.0.0.1"], {
-      env: owuiEnv
+      env: owuiEnv, stdio: owuiStdio
     })
     ok("Starting Open WebUI...")
 
@@ -540,7 +547,7 @@ ${C.bold}============================================================
       const elapsed = Math.round((Date.now() - waitStart) / 1000)
       process.stdout.write(`\r  Waiting for Open WebUI... (${elapsed}s) `)
     }, 1000)
-    const ready = await waitForServer(`http://127.0.0.1:${PORT}/api/config`, 120000)
+    const ready = await waitForServer(`http://127.0.0.1:${PORT}/api/config`, 300000)
     clearInterval(timer)
 
     if (ready) {
@@ -596,7 +603,9 @@ window.location.href = '/';
       }
     } else {
       process.stdout.write(" timed out\n")
-      warn("Open WebUI is still starting — open " + refugioUrl + " manually")
+      warn("Open WebUI is still starting (first boot downloads an embedding model)")
+      warn("Open " + refugioUrl + " manually once it's up")
+      warn(`If login/tools aren't set up, run: node scripts/configure-owui.cjs --port ${PORT}`)
     }
   } else if (!noOwui) {
     warn("Open WebUI not installed — run the installer to set it up")
