@@ -516,39 +516,38 @@ async function promptCredentials(envPath) {
   const env = { ...existing }
 
   console.log(`  ${C.bold}LLM Engine${C.reset}`)
-  let engine = null
 
-  // Detect a running LM Studio server (OpenAI-compatible on :1234)
+  // LM Studio is a GUI app we can't auto-install, so we connect to its local
+  // server (OpenAI-compatible on :1234). Detect whether it's already running.
   const lmStudioUp = await probeHttp(`${LMSTUDIO_URL}/models`)
-  if (lmStudioUp) {
-    console.log(`    ${C.green}Detected LM Studio${C.reset} server on http://localhost:1234`)
-    if (await confirm("  Use the running LM Studio server?", true)) {
-      env.OPENAI_API_BASE_URL = LMSTUDIO_URL
-      env.OPENAI_API_KEY = "lm-studio"
-      delete env.OLLAMA_BASE_URL
-      env.REFUGIO_ENGINE = "lmstudio"
-      engine = "lmstudio"
-      ok("Using LM Studio (http://localhost:1234)")
-    }
-  }
+  console.log(`    1) Ollama — auto-install and run a local model (recommended)`)
+  console.log(`    2) LM Studio — connect to its local server on :1234${lmStudioUp ? `  ${C.green}(detected)${C.reset}` : `  ${C.dim}(start it first)${C.reset}`}`)
+  console.log(`    3) Skip — set up a backend later`)
+  const llmChoice = await ask("Choose", lmStudioUp ? "2" : "1")
 
-  if (!engine) {
-    console.log(`    1) Ollama — auto-install and run a local model (recommended)`)
-    console.log(`    2) Skip — set up a backend later`)
-    const llmChoice = await ask("Choose", "1")
-    if (llmChoice === "1") {
-      env.OLLAMA_BASE_URL = OLLAMA_URL
-      env.REFUGIO_ENGINE = "ollama"
-      env.REFUGIO_MODEL = env.REFUGIO_MODEL || pickModelForRam()
-      // Clear any stale OpenAI-style backend
-      delete env.OPENAI_API_BASE_URL
-      delete env.OPENAI_API_KEY
-      engine = "ollama"
-      ok(`Using local Ollama — model: ${env.REFUGIO_MODEL} (sized to ${Math.round(os.totalmem() / (1024 ** 3))} GB RAM)`)
-    } else {
-      env.REFUGIO_ENGINE = ""
-      ok("Skipping LLM engine — configure later in ~/.refugio.env")
+  if (llmChoice === "2") {
+    env.OPENAI_API_BASE_URL = LMSTUDIO_URL
+    env.OPENAI_API_KEY = "lm-studio"
+    delete env.OLLAMA_BASE_URL
+    delete env.REFUGIO_MODEL
+    env.REFUGIO_ENGINE = "lmstudio"
+    if (!lmStudioUp) {
+      warn("LM Studio server not detected on http://localhost:1234")
+      warn("In LM Studio: load a model → Developer tab → Start Server (port 1234)")
+      warn("REFUGIO will use it automatically once it's running")
     }
+    ok("Using LM Studio (http://localhost:1234)")
+  } else if (llmChoice === "3") {
+    env.REFUGIO_ENGINE = ""
+    ok("Skipping LLM engine — configure later in ~/.refugio.env")
+  } else {
+    env.OLLAMA_BASE_URL = OLLAMA_URL
+    env.REFUGIO_ENGINE = "ollama"
+    env.REFUGIO_MODEL = env.REFUGIO_MODEL || pickModelForRam()
+    // Clear any stale OpenAI-style backend
+    delete env.OPENAI_API_BASE_URL
+    delete env.OPENAI_API_KEY
+    ok(`Using local Ollama — model: ${env.REFUGIO_MODEL} (sized to ${Math.round(os.totalmem() / (1024 ** 3))} GB RAM)`)
   }
   console.log("")
 

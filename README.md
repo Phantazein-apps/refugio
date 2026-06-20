@@ -49,7 +49,7 @@ REFUGIO **auto-starts on login** — no need to relaunch after a reboot.
 REFUGIO runs the model **on your machine** — nothing is sent to any external service.
 
 - **Ollama** (default) is installed automatically and a model is pulled for you.
-- **LM Studio** — if you already run its local server (OpenAI-compatible on `http://localhost:1234`), the installer detects it and offers to use it instead.
+- **LM Studio** — choose it in the installer to connect to LM Studio's local server (OpenAI-compatible on `http://localhost:1234`). Start the server first (LM Studio → Developer → Start Server); the installer also auto-detects and defaults to it when it's already running.
 
 ### Model auto-selection
 
