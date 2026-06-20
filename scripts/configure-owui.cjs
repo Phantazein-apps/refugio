@@ -186,6 +186,15 @@ async function main() {
   const password = env.OWUI_PASSWORD || "changeme"
   const defaultModel = env.REFUGIO_MODEL || ""
 
+  // Scale tool behavior to the machine. Small models (3b, ≤8 GB) can't drive
+  // native tool-calling without over-firing for every message, so they get
+  // prompt-based calling + a modest context. Capable systems (8b+/16 GB+) get
+  // native function-calling and a larger context — tools "just work" there.
+  const ramGb = os.totalmem() / (1024 ** 3)
+  const capable = ramGb > 8
+  const fnCalling = capable ? "native" : "default"
+  const ctxSize = capable ? 16384 : 8192
+
   if (!email) {
     log("⚠", "OWUI_EMAIL not set in ~/.refugio.env — skipping account setup")
     log("→", `Open http://127.0.0.1:${port} and create your account manually`)
@@ -230,7 +239,7 @@ async function main() {
     if (env.OLLAMA_BASE_URL || env.REFUGIO_ENGINE) {
       if (!settings.params) settings.params = {}
       settings.params.num_predict = 2048
-      settings.params.num_ctx = 8192
+      settings.params.num_ctx = ctxSize
     }
 
     await api("POST", "/api/v1/users/user/settings/update", settings, token)
@@ -347,16 +356,15 @@ async function main() {
     for (const m of modelsList) {
       const mid = m.id || ""
       if (!mid) continue
-      // Attach the (lean) tool set, but use PROMPT-BASED function calling, not
-      // "native": native makes OWUI inject built-in tools (query_knowledge_bases)
-      // that small models call indiscriminately, wrecking plain chat. Prompt-based
-      // keeps chat clean and correct; capable models can be switched to native in
-      // Admin → Models if reliable tool use is needed.
+      // Attach the (lean) tool set. Function-calling mode scales with the system:
+      // "native" on capable machines (tools work well), "default" (prompt-based)
+      // on small ones — native makes a 3b inject/over-call built-in tools like
+      // query_knowledge_bases for every message, wrecking plain chat.
       const payload = {
         id: mid,
         name: m.name || mid,
         meta: { hidden: false, toolIds: toolServerIds },
-        params: { function_calling: "default", num_ctx: 8192 }
+        params: { function_calling: fnCalling, num_ctx: ctxSize }
       }
       await api("POST", "/api/v1/models/create", payload, token)
       await api("POST", `/api/v1/models/model/update?id=${encodeURIComponent(mid)}`, payload, token)
@@ -373,6 +381,7 @@ async function main() {
     log("⚠", `Model config: ${e.message}`)
   }
 
+  log("→", `Tool mode: ${capable ? `native — tools auto-fire (capable system, ${Math.round(ramGb)} GB)` : `prompt-based — clean chat, tools on request (${Math.round(ramGb)} GB)`}`)
   log("✓", "Configuration complete")
   console.log("")
   console.log(`  REFUGIO → http://127.0.0.1:${port}`)
