@@ -226,11 +226,15 @@ async function main() {
 
     if (!settings.ui) settings.ui = {}
     settings.ui.system = sysPrompt
+    settings.tool_ids = []   // tools off by default — enable per-chat via the wrench icon
 
-    // Cap output length for local models so responses stay snappy
+    // Tune local-model params: cap output length, and set a context window big
+    // enough for the system prompt. Tools are off by default (see below), so a
+    // small model isn't flooded with tool schemas that overflow its context.
     if (env.OLLAMA_BASE_URL || env.REFUGIO_ENGINE) {
       if (!settings.params) settings.params = {}
       settings.params.num_predict = 2048
+      settings.params.num_ctx = 8192
     }
 
     await api("POST", "/api/v1/users/user/settings/update", settings, token)
@@ -282,16 +286,10 @@ async function main() {
         TOOL_SERVER_CONNECTIONS: connections
       }, token)
       log("✓", `Registered ${connections.length} tool server(s) via MCPO: ${connections.map(c => c.url.split('/').pop()).join(", ")}`)
-
-      // Auto-enable tool servers for every new chat (user settings)
-      try {
-        let settings = await api("GET", "/api/v1/users/user/settings", null, token) || {}
-        settings.tool_ids = toolServerIds
-        await api("POST", "/api/v1/users/user/settings/update", settings, token)
-        log("✓", `Tools auto-enabled: ${toolServerIds.join(", ")}`)
-      } catch (e) {
-        log("⚠", `Auto-enable tools: ${e.message}`)
-      }
+      // NOTE: tools are NOT auto-enabled. Small local models choke when dozens of
+      // tool schemas are injected into every message (context overflow, random
+      // tool calls). They're available on demand via the wrench icon in the chat.
+      log("→", "Tools available via the wrench icon (off by default for snappy chat)")
     }
   } catch (e) {
     log("⚠", `Tool server registration: ${e.message}`)
@@ -346,11 +344,13 @@ async function main() {
     for (const m of modelsList) {
       const mid = m.id || ""
       if (!mid) continue
+      // Clean defaults: visible, no forced tools/native-function-calling, and a
+      // context window sized for the system prompt. Keeps small-model chat fast.
       const payload = {
         id: mid,
         name: m.name || mid,
-        meta: { hidden: false, toolIds: toolServerIds },
-        params: { function_calling: "native" }
+        meta: { hidden: false },
+        params: { num_ctx: 8192 }
       }
       await api("POST", "/api/v1/models/create", payload, token)
       await api("POST", `/api/v1/models/model/update?id=${encodeURIComponent(mid)}`, payload, token)
