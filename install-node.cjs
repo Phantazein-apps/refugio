@@ -189,10 +189,12 @@ const LMSTUDIO_URL = "http://localhost:1234/v1"
 // Pick an Ollama model sized to the machine's RAM. All are tool-calling capable.
 function pickModelForRam() {
   const gb = os.totalmem() / (1024 ** 3)
-  if (gb < 8) return "llama3.2:3b"     // ~2 GB  — light laptops
-  if (gb < 16) return "llama3.1:8b"    // ~4.7 GB — solid native tool-calling
-  if (gb < 32) return "qwen2.5:14b"    // ~9 GB
-  return "gpt-oss:20b"                  // ~13 GB — strongest tool-calling
+  // Leave headroom for macOS + Open WebUI + browser. An 8 GB machine cannot run
+  // an 8b model comfortably, so it stays on the 3b tier.
+  if (gb <= 8) return "llama3.2:3b"     // ~2 GB  — 8 GB and under
+  if (gb <= 16) return "llama3.1:8b"    // ~4.7 GB — 16 GB, solid tool-calling
+  if (gb <= 32) return "qwen2.5:14b"    // ~9 GB  — 32 GB
+  return "gpt-oss:20b"                   // ~13 GB — 48 GB+, strongest tool-calling
 }
 
 // Probe an HTTP endpoint — resolves true on any response within the timeout

@@ -57,10 +57,12 @@ The installer picks a tool-calling-capable Ollama model sized to your system mem
 
 | System RAM | Default model | Approx. download |
 |------------|---------------|------------------|
-| < 8 GB | `llama3.2:3b` | ~2 GB |
-| 8–16 GB | `llama3.1:8b` | ~4.7 GB |
-| 16–32 GB | `qwen2.5:14b` | ~9 GB |
-| ≥ 32 GB | `gpt-oss:20b` | ~13 GB |
+| ≤ 8 GB | `llama3.2:3b` | ~2 GB |
+| 9–16 GB | `llama3.1:8b` | ~4.7 GB |
+| 17–32 GB | `qwen2.5:14b` | ~9 GB |
+| > 32 GB | `gpt-oss:20b` | ~13 GB |
+
+> On Apple Silicon, make sure Ollama is the **arm64** build — an x86_64/Rosetta Ollama runs CPU-only (no Metal GPU) and is far too slow for any but the smallest models.
 
 Pull more models any time with `ollama pull <model>`, then pick them in the model selector. To override the default at install time, set `REFUGIO_MODEL` (e.g. `REFUGIO_MODEL=llama3.1:8b`).
 
