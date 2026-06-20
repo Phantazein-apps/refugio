@@ -445,7 +445,7 @@ ${C.bold}============================================================
     ? path.join(home, ".local", "bin", "mempalace-mcp.exe")
     : path.join(home, ".local", "bin", "mempalace-mcp")
   const useMemPalace = env.REFUGIO_MEMORY === "mempalace" && fs.existsSync(mempalaceMcpBin)
-  if (useMemPalace) ok("memory (MemPalace, local) → via MCPO (stdio)")
+  if (useMemPalace) ok("memory (MemPalace, lean 2-tool wrapper) → via MCPO (stdio)")
 
   // ── Generate MCPO config and start proxy ────────────────────
   const MCPO_PORT = 8010
@@ -463,11 +463,13 @@ ${C.bold}============================================================
       }
     }
 
-    // MemPalace is a stdio MCP server — MCPO spawns and proxies it as "memory"
+    // Memory: MCPO spawns our lean wrapper (servers/memory-lite.js), which
+    // re-exposes just 2 MemPalace tools (search/save) so small models aren't
+    // flooded with MemPalace's 33 tools.
     if (useMemPalace) {
       mcpoConfig.mcpServers["memory"] = {
-        command: mempalaceMcpBin,
-        args: []
+        command: nodeBin,
+        args: [path.join(REFUGIO_DIR, "servers", "memory-lite.js")]
       }
     }
 

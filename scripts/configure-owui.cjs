@@ -150,12 +150,9 @@ async function buildSystemPrompt(env) {
   }
 
   if (env.REFUGIO_MEMORY === "mempalace") {
-    prompt += "\n\n## Memory (MemPalace — local)"
-    prompt += "\n- Use the memory tools to RECALL past context (semantic search over stored memory)"
-    prompt += "\n  and to REMEMBER new facts the user wants kept."
-    prompt += "\n\nMemory rules:"
-    prompt += '\n- Search memory when the user references previous context, preferences, or asks "what do you know".'
-    prompt += '\n- Save to memory when the user says "remember this" or "save this".'
+    prompt += "\n\n## Memory (local, MemPalace)"
+    prompt += "\n- memory_search: search your long-term memory. Use when the user refers to past context or preferences, or asks \"what do you know\"."
+    prompt += '\n- memory_save: save a fact or note. Use when the user says "remember this" or "save this".'
     prompt += "\n- Use the EXACT content returned — do not paraphrase stored memories."
   } else if (env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO) {
     prompt += "\n\n## Memory (GitHub-backed)"
@@ -226,7 +223,6 @@ async function main() {
 
     if (!settings.ui) settings.ui = {}
     settings.ui.system = sysPrompt
-    settings.tool_ids = []   // tools off by default — enable per-chat via the wrench icon
 
     // Tune local-model params: cap output length, and set a context window big
     // enough for the system prompt. Tools are off by default (see below), so a
@@ -286,10 +282,17 @@ async function main() {
         TOOL_SERVER_CONNECTIONS: connections
       }, token)
       log("✓", `Registered ${connections.length} tool server(s) via MCPO: ${connections.map(c => c.url.split('/').pop()).join(", ")}`)
-      // NOTE: tools are NOT auto-enabled. Small local models choke when dozens of
-      // tool schemas are injected into every message (context overflow, random
-      // tool calls). They're available on demand via the wrench icon in the chat.
-      log("→", "Tools available via the wrench icon (off by default for snappy chat)")
+
+      // Auto-enable tool servers for every new chat. Safe now: memory is exposed
+      // through the lean 2-tool wrapper, so a small model isn't flooded.
+      try {
+        let settings = await api("GET", "/api/v1/users/user/settings", null, token) || {}
+        settings.tool_ids = toolServerIds
+        await api("POST", "/api/v1/users/user/settings/update", settings, token)
+        log("✓", `Tools auto-enabled: ${toolServerIds.join(", ")}`)
+      } catch (e) {
+        log("⚠", `Auto-enable tools: ${e.message}`)
+      }
     }
   } catch (e) {
     log("⚠", `Tool server registration: ${e.message}`)
@@ -344,13 +347,13 @@ async function main() {
     for (const m of modelsList) {
       const mid = m.id || ""
       if (!mid) continue
-      // Clean defaults: visible, no forced tools/native-function-calling, and a
-      // context window sized for the system prompt. Keeps small-model chat fast.
+      // Enable native tool-calling + attach the (lean) tool set, with a context
+      // window sized for the system prompt plus a couple of tools.
       const payload = {
         id: mid,
         name: m.name || mid,
-        meta: { hidden: false },
-        params: { num_ctx: 8192 }
+        meta: { hidden: false, toolIds: toolServerIds },
+        params: { function_calling: "native", num_ctx: 8192 }
       }
       await api("POST", "/api/v1/models/create", payload, token)
       await api("POST", `/api/v1/models/model/update?id=${encodeURIComponent(mid)}`, payload, token)
