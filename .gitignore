@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Secrets
+.env
+.env.*
+credentials.json
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Notion (generated index and user config with page IDs)
+notion_index.json
+notion_roots.json
+certs/
+Caddyfile
+.webui_secret_key
+branding/env.py
+app/
