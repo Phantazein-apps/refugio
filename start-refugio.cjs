@@ -432,16 +432,19 @@ ${C.bold}============================================================
   const nodeBin = process.execPath  // full path to node, safe for launchd
 
   for (const s of servers) {
-    // When MemPalace is the chosen memory backend, don't also start the
-    // GitHub-backed memory server (MemPalace is wired via MCPO below).
-    if (s.server === "memory" && env.REFUGIO_MEMORY === "mempalace") continue
-    if (env[s.key]) {
-      supervisor.start(`${s.server}-mcp`, nodeBin, [`servers/${s.server}.js`, "--http"], {
-        env: { ...mergedEnv, MCP_SSE_PORT: String(s.port) }
-      })
-      ok(`${s.server} MCP server → http://localhost:${s.port}/mcp`)
-      activeMcpServers.push(s)
+    if (s.server === "memory") {
+      // GitHub-backed memory only when explicitly chosen AND fully configured.
+      // (MemPalace is wired separately via MCPO below.) This prevents a stray or
+      // partial GITHUB_TOKEN from starting a broken memory server.
+      if (env.REFUGIO_MEMORY !== "github" || !env.GITHUB_TOKEN || !env.GITHUB_OWNER || !env.GITHUB_REPO) continue
+    } else if (!env[s.key]) {
+      continue
     }
+    supervisor.start(`${s.server}-mcp`, nodeBin, [`servers/${s.server}.js`, "--http"], {
+      env: { ...mergedEnv, MCP_SSE_PORT: String(s.port) }
+    })
+    ok(`${s.server} MCP server → http://localhost:${s.port}/mcp`)
+    activeMcpServers.push(s)
   }
 
   // ── MemPalace (local memory) — stdio MCP server proxied via MCPO ──

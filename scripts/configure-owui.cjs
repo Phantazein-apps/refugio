@@ -266,7 +266,8 @@ async function main() {
   const mempalaceMcpBin = isWin
     ? path.join(os.homedir(), ".local", "bin", "mempalace-mcp.exe")
     : path.join(os.homedir(), ".local", "bin", "mempalace-mcp")
-  const memActive = !!env.GITHUB_TOKEN ||
+  const memActive =
+    (env.REFUGIO_MEMORY === "github" && env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO) ||
     (env.REFUGIO_MEMORY === "mempalace" && fs.existsSync(mempalaceMcpBin))
   const isActive = (s) => s.name === "memory" ? memActive : !!env[s.key]
 

@@ -181,15 +181,33 @@ const GITHUB_FIELDS = [
   { key: "GITHUB_MEMORY_PATH", prompt: "Memory file path", defaultVal: "MEMORY.md" }
 ]
 
+// Prompts for GitHub-backed memory credentials. Returns false if the user skips
+// (no token) — most people won't have a PAT + private repo ready, so the token
+// prompt offers a clean exit instead of trapping them.
 async function promptGithubFields(env, existing) {
-  console.log(`    ${C.dim}https://github.com/settings/tokens?type=beta → Fine-grained PAT → Permissions: Contents → Read and write${C.reset}`)
-  for (const field of GITHUB_FIELDS) {
+  console.log(`    ${C.dim}Needs a GitHub fine-grained PAT + a private repo. Don't have one yet?${C.reset}`)
+  console.log(`    ${C.dim}Press Enter at the token prompt to skip — re-run the installer later to set it up.${C.reset}`)
+  console.log(`    ${C.dim}Token: https://github.com/settings/tokens?type=beta → Permissions: Contents → Read and write${C.reset}`)
+  const [tokenField, ...rest] = GITHUB_FIELDS
+  const curTok = existing[tokenField.key] || ""
+  const tok = await ask(`${tokenField.prompt} (Enter to skip)`, curTok ? `****${curTok.slice(-4)}` : "", true)
+  if ((!tok || tok.startsWith("****")) && !curTok) return false   // skipped
+  env[tokenField.key] = (tok && !tok.startsWith("****")) ? tok : curTok
+  for (const field of rest) {
     const current = existing[field.key] || field.defaultVal || ""
     const display = field.secret && current ? `****${current.slice(-4)}` : current
     const value = await ask(field.prompt, display, field.secret)
     if (value && !value.startsWith("****")) env[field.key] = value
     else if (current) env[field.key] = current
   }
+  // Need token + owner + repo to actually work. If anything's missing, skip
+  // cleanly (and drop the partial values) rather than leaving a broken connector.
+  if (!env.GITHUB_TOKEN || !env.GITHUB_OWNER || !env.GITHUB_REPO) {
+    warn("Incomplete GitHub details — skipping memory (re-run the installer to add it later)")
+    delete env.GITHUB_TOKEN; delete env.GITHUB_OWNER; delete env.GITHUB_REPO; delete env.GITHUB_MEMORY_PATH
+    return false
+  }
+  return true
 }
 
 // ── LLM engine ───────────────────────────────────────────────
@@ -623,9 +641,13 @@ async function promptCredentials(envPath) {
       console.log(`    2) GitHub-backed (PACK-style) — lightweight; syncs to a private GitHub repo`)
       const memChoice = await ask("Choose", existing.REFUGIO_MEMORY === "github" ? "2" : "1")
       if (memChoice === "2") {
-        env.REFUGIO_MEMORY = "github"
-        await promptGithubFields(env, existing)
-        ok("Using GitHub-backed memory (PACK-style)")
+        if (await promptGithubFields(env, existing)) {
+          env.REFUGIO_MEMORY = "github"
+          ok("Using GitHub-backed memory (PACK-style)")
+        } else {
+          env.REFUGIO_MEMORY = ""
+          ok("Memory skipped — re-run the installer anytime to set it up")
+        }
       } else {
         env.REFUGIO_MEMORY = "mempalace"
         ok("Using MemPalace (local semantic memory)")
@@ -636,9 +658,13 @@ async function promptCredentials(envPath) {
       console.log(`    2) None — model only`)
       const memChoice = await ask("Choose", "1")
       if (memChoice === "1") {
-        env.REFUGIO_MEMORY = "github"
-        await promptGithubFields(env, existing)
-        ok("Using GitHub-backed memory (lightweight)")
+        if (await promptGithubFields(env, existing)) {
+          env.REFUGIO_MEMORY = "github"
+          ok("Using GitHub-backed memory (lightweight)")
+        } else {
+          env.REFUGIO_MEMORY = ""
+          ok("No persistent memory — re-run the installer anytime to add it")
+        }
       } else {
         env.REFUGIO_MEMORY = ""
         ok("No persistent memory (model only)")
