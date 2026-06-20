@@ -389,13 +389,27 @@ ${C.bold}============================================================
   // (the macOS app / Windows service / Linux systemd unit).
   const wantsOllama = env.REFUGIO_ENGINE === "ollama" ||
     (env.OLLAMA_BASE_URL && /(localhost|127\.0\.0\.1):11434/.test(env.OLLAMA_BASE_URL))
-  if (wantsOllama && has("ollama")) {
+  if (wantsOllama) {
     const ollamaUp = await probeHttp("http://127.0.0.1:11434/api/tags")
-    if (!ollamaUp) {
-      supervisor.start("ollama", "ollama", ["serve"], { env: mergedEnv })
-      ok("Ollama server → http://localhost:11434")
-    } else {
+    if (ollamaUp) {
       ok("Ollama already running → http://localhost:11434")
+    } else {
+      // Prefer the macOS app's Ollama binary; fall back to PATH.
+      const appOllama = "/Applications/Ollama.app/Contents/Resources/ollama"
+      const ollamaBin = fs.existsSync(appOllama) ? appOllama : (has("ollama") ? "ollama" : null)
+      if (ollamaBin) {
+        // On Apple Silicon, force the arm64 slice so Ollama uses the GPU (Metal).
+        // A universal binary spawned from an x86_64/Rosetta node would otherwise
+        // run CPU-only — unusably slow.
+        let appleSilicon = false
+        try { appleSilicon = execSync("sysctl -n hw.optional.arm64", { encoding: "utf-8" }).trim() === "1" } catch {}
+        const cmd = (!isWin && appleSilicon) ? "arch" : ollamaBin
+        const cargs = (!isWin && appleSilicon) ? ["-arm64", ollamaBin, "serve"] : ["serve"]
+        supervisor.start("ollama", cmd, cargs, { env: mergedEnv })
+        ok(`Ollama server → http://localhost:11434${appleSilicon ? " (arm64/Metal)" : ""}`)
+      } else {
+        warn("Ollama not found — install it or start it manually")
+      }
     }
   }
 
