@@ -488,9 +488,14 @@ ${C.bold}============================================================
     // so OWUI's own config.py copies our branded assets into static/ on startup
     applyBranding()
 
+    // Persist OWUI data (account, chats, settings) OUTSIDE the venv so it
+    // survives reinstalls/updates — the venv is wiped (--clear) on every re-run.
+    const dataDir = path.join(REFUGIO_DIR, "data")
+    try { fs.mkdirSync(dataDir, { recursive: true }) } catch {}
     const owuiEnv = {
       ...process.env,
       WEBUI_NAME: "REFUGIO",
+      DATA_DIR: dataDir,
       CHAT_RESPONSE_MAX_TOOL_CALL_RETRIES: "2",
       ENABLE_VERSION_UPDATE_CHECK: "false"
     }

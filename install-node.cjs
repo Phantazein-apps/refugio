@@ -124,7 +124,8 @@ const CONNECTORS = [
     id: "account", name: "Your Account",
     fields: [
       { key: "OWUI_NAME", prompt: "Your display name" },
-      { key: "OWUI_EMAIL", prompt: "Your email address" }
+      { key: "OWUI_EMAIL", prompt: "Your email address" },
+      { key: "OWUI_PASSWORD", prompt: "Set a password", secret: true, defaultVal: "changeme" }
     ]
   },
   {
@@ -477,7 +478,7 @@ function readEnvFile(envPath) {
 function writeEnvFile(envPath, env) {
   const sections = [
     { header: "LLM Engine", keys: ["REFUGIO_ENGINE", "OLLAMA_BASE_URL", "OPENAI_API_BASE_URL", "OPENAI_API_KEY", "REFUGIO_MODEL"] },
-    { header: "Your Account", keys: ["OWUI_NAME", "OWUI_EMAIL"] },
+    { header: "Your Account", keys: ["OWUI_NAME", "OWUI_EMAIL", "OWUI_PASSWORD"] },
     { header: "Slack", keys: ["SLACK_TOKEN"] },
     { header: "Notion", keys: ["NOTION_TOKEN"] },
     { header: "Jira", keys: ["JIRA_DOMAIN", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
@@ -1017,7 +1018,7 @@ async function startREFUGIO(targetDir, env) {
       try {
         const http = require("http")
         const signin = await new Promise((resolve, reject) => {
-          const data = JSON.stringify({ email: env.OWUI_EMAIL, password: "changeme" })
+          const data = JSON.stringify({ email: env.OWUI_EMAIL, password: env.OWUI_PASSWORD || "changeme" })
           const req = http.request({
             hostname: "127.0.0.1", port: PORT, path: "/api/v1/auths/signin",
             method: "POST", headers: { "Content-Type": "application/json", "Content-Length": data.length }

@@ -186,7 +186,7 @@ async function main() {
   const env = loadEnv()
   const name = env.OWUI_NAME || "Admin"
   const email = env.OWUI_EMAIL
-  const password = "changeme"
+  const password = env.OWUI_PASSWORD || "changeme"
   const defaultModel = env.REFUGIO_MODEL || ""
 
   if (!email) {
@@ -214,7 +214,7 @@ async function main() {
     return
   }
 
-  log("✓", `Account ready: ${email} (password: changeme — change in Settings)`)
+  log("✓", `Account ready: ${email}${password === "changeme" ? " (password: changeme — set OWUI_PASSWORD in ~/.refugio.env to change)" : ""}`)
 
   const sysPrompt = await buildSystemPrompt(env)
 

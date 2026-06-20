@@ -18,6 +18,8 @@ notion_index.json
 notion_roots.json
 certs/
 Caddyfile
+mcpo-config.json
 .webui_secret_key
 branding/env.py
 app/
+data/
