@@ -405,8 +405,12 @@ ${C.bold}============================================================
         try { appleSilicon = execSync("sysctl -n hw.optional.arm64", { encoding: "utf-8" }).trim() === "1" } catch {}
         const cmd = (!isWin && appleSilicon) ? "arch" : ollamaBin
         const cargs = (!isWin && appleSilicon) ? ["-arm64", ollamaBin, "serve"] : ["serve"]
-        supervisor.start("ollama", cmd, cargs, { env: mergedEnv })
-        ok(`Ollama server → http://localhost:11434${appleSilicon ? " (arm64/Metal)" : ""}`)
+        // On small machines, unload the model soon after idle so it doesn't hold
+        // ~1-3 GB of RAM hostage between messages (keeps the whole Mac responsive).
+        const ramGb = os.totalmem() / (1024 ** 3)
+        const keepAlive = ramGb <= 8 ? "30s" : "5m"
+        supervisor.start("ollama", cmd, cargs, { env: { ...mergedEnv, OLLAMA_KEEP_ALIVE: keepAlive } })
+        ok(`Ollama server → http://localhost:11434${appleSilicon ? " (arm64/Metal)" : ""} · keep-alive ${keepAlive}`)
       } else {
         warn("Ollama not found — install it or start it manually")
       }

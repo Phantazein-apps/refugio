@@ -57,10 +57,13 @@ The installer picks a tool-calling-capable Ollama model sized to your system mem
 
 | System RAM | Default model | Approx. download |
 |------------|---------------|------------------|
-| ≤ 8 GB | `llama3.2:3b` | ~2 GB |
-| 9–16 GB | `llama3.1:8b` | ~4.7 GB |
-| 17–32 GB | `qwen2.5:14b` | ~9 GB |
-| > 32 GB | `gpt-oss:20b` | ~13 GB |
+| ≤ 8 GB | `llama3.2:1b` | ~0.8 GB |
+| 9–16 GB | `llama3.2:3b` | ~2 GB |
+| 17–32 GB | `llama3.1:8b` | ~4.7 GB |
+| 33–48 GB | `qwen2.5:14b` | ~9 GB |
+| > 48 GB | `gpt-oss:20b` | ~13 GB |
+
+Sizes account for macOS + your other apps, not just total RAM. On **≤ 8 GB** machines REFUGIO also unloads the model shortly after you stop chatting (so it doesn't hold RAM hostage between messages).
 
 > On Apple Silicon, make sure Ollama is the **arm64** build — an x86_64/Rosetta Ollama runs CPU-only (no Metal GPU) and is far too slow for any but the smallest models.
 
@@ -83,9 +86,10 @@ Tools are exposed to Open WebUI through [MCPO](https://github.com/open-webui/mcp
 
 ### Memory
 
-**[MemPalace](https://github.com/MemPalace/mempalace) is the default** — local-first semantic memory. No account, nothing leaves your machine. Installed via `uv tool install mempalace` and proxied as a stdio MCP server.
+Memory scales to your RAM:
 
-If you specifically need cloud-synced memory (rarely needed), pick the **GitHub-backed (PACK-style)** backend instead — a markdown memory document synced to a private GitHub repo via the bundled `servers/memory.js` (`get` / `update` tools). Requires a fine-grained PAT with Contents read/write.
+- **16 GB+ → [MemPalace](https://github.com/MemPalace/mempalace)** (default) — local-first semantic memory (ChromaDB + a local embedding model); nothing leaves your machine. Exposed through a lean 2-tool wrapper (`memory_search` / `memory_save`) so small models aren't flooded with its 33 tools.
+- **≤ 8 GB → GitHub-backed (PACK-style)** — MemPalace's embeddings (~1.5 GB) are too heavy alongside the model here, so the lightweight backend is offered instead: a markdown memory doc synced to a private GitHub repo via the bundled `servers/memory.js` (`get` / `update`), **no local embeddings (~0 RAM)**. Needs a fine-grained PAT with Contents read/write — or choose **None** for model-only.
 
 ## Day-to-Day Usage
 

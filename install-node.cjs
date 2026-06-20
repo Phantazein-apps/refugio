@@ -181,6 +181,17 @@ const GITHUB_FIELDS = [
   { key: "GITHUB_MEMORY_PATH", prompt: "Memory file path", defaultVal: "MEMORY.md" }
 ]
 
+async function promptGithubFields(env, existing) {
+  console.log(`    ${C.dim}https://github.com/settings/tokens?type=beta → Fine-grained PAT → Permissions: Contents → Read and write${C.reset}`)
+  for (const field of GITHUB_FIELDS) {
+    const current = existing[field.key] || field.defaultVal || ""
+    const display = field.secret && current ? `****${current.slice(-4)}` : current
+    const value = await ask(field.prompt, display, field.secret)
+    if (value && !value.startsWith("****")) env[field.key] = value
+    else if (current) env[field.key] = current
+  }
+}
+
 // ── LLM engine ───────────────────────────────────────────────
 
 const OLLAMA_URL = "http://localhost:11434"
@@ -189,12 +200,14 @@ const LMSTUDIO_URL = "http://localhost:1234/v1"
 // Pick an Ollama model sized to the machine's RAM. All are tool-calling capable.
 function pickModelForRam() {
   const gb = os.totalmem() / (1024 ** 3)
-  // Leave headroom for macOS + Open WebUI + browser. An 8 GB machine cannot run
-  // an 8b model comfortably, so it stays on the 3b tier.
-  if (gb <= 8) return "llama3.2:3b"     // ~2 GB  — 8 GB and under
-  if (gb <= 16) return "llama3.1:8b"    // ~4.7 GB — 16 GB, solid tool-calling
-  if (gb <= 32) return "qwen2.5:14b"    // ~9 GB  — 32 GB
-  return "gpt-oss:20b"                   // ~13 GB — 48 GB+, strongest tool-calling
+  // Sized to fit alongside macOS (~2.5 GB wired) + the user's apps, not just in
+  // total RAM. An 8 GB Mac can't hold a 3b (~2.8 GB) without swapping once other
+  // apps are open, so it gets the 1b.
+  if (gb <= 8) return "llama3.2:1b"     // ~0.8 GB — 8 GB and under
+  if (gb <= 16) return "llama3.2:3b"    // ~2 GB   — 16 GB
+  if (gb <= 32) return "llama3.1:8b"    // ~4.7 GB — 32 GB
+  if (gb <= 48) return "qwen2.5:14b"    // ~9 GB
+  return "gpt-oss:20b"                   // ~13 GB  — 48 GB+
 }
 
 // Probe an HTTP endpoint — resolves true on any response within the timeout
@@ -596,33 +609,39 @@ async function promptCredentials(envPath) {
     console.log("")
   }
 
-  // ── Memory backend ───────────────────────────────────────
-  // Default ON where there's RAM headroom; opt-in on small machines, where
-  // local memory (MemPalace's ChromaDB + embeddings) competes with the model.
+  // ── Memory backend (tier-aware) ──────────────────────────
+  // MemPalace runs a local ChromaDB + embedding model (~1.5 GB) — great on
+  // 16 GB+, too heavy on 8 GB alongside the model. So on small machines we offer
+  // only the lightweight GitHub-backed memory (no local embeddings, ~0 RAM).
   console.log(`  ${C.bold}Memory${C.reset}`)
+  const memCapable = os.totalmem() / (1024 ** 3) > 8
   const memAlready = existing.REFUGIO_MEMORY || existing.GITHUB_TOKEN
-  const memDefault = !!memAlready || (os.totalmem() / (1024 ** 3) > 8)
-  if (!memDefault) {
-    console.log(`    ${C.dim}(off by default on ≤8 GB — local memory adds RAM pressure alongside the model)${C.reset}`)
-  }
-  if (await confirm("Configure persistent memory?", memDefault)) {
-    console.log(`    1) MemPalace — local semantic memory, no account (recommended)`)
-    console.log(`    2) GitHub-backed (PACK-style) — sync memory to a private GitHub repo (rarely needed)`)
-    const memChoice = await ask("Choose", existing.REFUGIO_MEMORY === "github" ? "2" : "1")
-    if (memChoice === "2") {
-      env.REFUGIO_MEMORY = "github"
-      console.log(`    ${C.dim}https://github.com/settings/tokens?type=beta → Fine-grained PAT → Permissions: Contents → Read and write${C.reset}`)
-      for (const field of GITHUB_FIELDS) {
-        const current = existing[field.key] || field.defaultVal || ""
-        const display = field.secret && current ? `****${current.slice(-4)}` : current
-        const value = await ask(field.prompt, display, field.secret)
-        if (value && !value.startsWith("****")) env[field.key] = value
-        else if (current) env[field.key] = current
+  if (await confirm("Configure persistent memory?", !!memAlready || memCapable)) {
+    if (memCapable) {
+      console.log(`    1) MemPalace — local semantic memory, no account (recommended)`)
+      console.log(`    2) GitHub-backed (PACK-style) — lightweight; syncs to a private GitHub repo`)
+      const memChoice = await ask("Choose", existing.REFUGIO_MEMORY === "github" ? "2" : "1")
+      if (memChoice === "2") {
+        env.REFUGIO_MEMORY = "github"
+        await promptGithubFields(env, existing)
+        ok("Using GitHub-backed memory (PACK-style)")
+      } else {
+        env.REFUGIO_MEMORY = "mempalace"
+        ok("Using MemPalace (local semantic memory)")
       }
-      ok("Using GitHub-backed memory (PACK-style)")
     } else {
-      env.REFUGIO_MEMORY = "mempalace"
-      ok("Using MemPalace (local semantic memory)")
+      console.log(`    ${C.dim}MemPalace (local semantic memory) needs ~16 GB RAM — not offered on this device.${C.reset}`)
+      console.log(`    1) GitHub-backed (PACK-style) — lightweight, no local embeddings (recommended)`)
+      console.log(`    2) None — model only`)
+      const memChoice = await ask("Choose", "1")
+      if (memChoice === "1") {
+        env.REFUGIO_MEMORY = "github"
+        await promptGithubFields(env, existing)
+        ok("Using GitHub-backed memory (lightweight)")
+      } else {
+        env.REFUGIO_MEMORY = ""
+        ok("No persistent memory (model only)")
+      }
     }
   } else {
     env.REFUGIO_MEMORY = ""

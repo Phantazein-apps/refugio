@@ -28,6 +28,7 @@ const fail = m => console.log(`  ${C.r}✗${C.x} ${m}`)
 
 // HuggingFace GGUF source per Ollama tag (verified). Q4_K_M unless noted.
 const HF = {
+  "llama3.2:1b": ["bartowski/Llama-3.2-1B-Instruct-GGUF", "Llama-3.2-1B-Instruct-Q4_K_M.gguf"],
   "llama3.2:3b": ["bartowski/Llama-3.2-3B-Instruct-GGUF", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"],
   "llama3.1:8b": ["bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"],
   "qwen2.5:14b": ["bartowski/Qwen2.5-14B-Instruct-GGUF", "Qwen2.5-14B-Instruct-Q4_K_M.gguf"],

@@ -193,7 +193,7 @@ async function main() {
   const ramGb = os.totalmem() / (1024 ** 3)
   const capable = ramGb > 8
   const fnCalling = capable ? "native" : "default"
-  const ctxSize = capable ? 16384 : 8192
+  const ctxSize = capable ? 16384 : 4096   // smaller KV cache on tight machines
 
   if (!email) {
     log("⚠", "OWUI_EMAIL not set in ~/.refugio.env — skipping account setup")
