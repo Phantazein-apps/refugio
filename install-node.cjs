@@ -869,52 +869,7 @@ async function ensureOllamaServing() {
   return await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)
 }
 
-async function ollamaHasModel(model) {
-  try {
-    const http = require("http")
-    const tags = await new Promise(resolve => {
-      http.get(`${OLLAMA_URL}/api/tags`, res => {
-        let b = ""; res.on("data", c => b += c)
-        res.on("end", () => { try { resolve(JSON.parse(b)) } catch { resolve({}) } })
-      }).on("error", () => resolve({}))
-    })
-    return (tags.models || []).some(m => m.name === model || m.model === model)
-  } catch { return false }
-}
-
-async function pullModelApi(model) {
-  // Stream pull progress from the Ollama HTTP API (works without the CLI)
-  const http = require("http")
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify({ name: model, stream: true })
-    const req = http.request(`${OLLAMA_URL}/api/pull`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) }
-    }, res => {
-      let last = ""
-      res.on("data", chunk => {
-        for (const line of chunk.toString().split("\n")) {
-          if (!line.trim()) continue
-          try {
-            const o = JSON.parse(line)
-            if (o.error) { reject(new Error(o.error)); return }
-            const status = o.status || ""
-            if (status && status !== last) {
-              process.stdout.write(`\r  ${C.dim}${status.slice(0, 60).padEnd(60)}${C.reset}`)
-              last = status
-            }
-          } catch {}
-        }
-      })
-      res.on("end", () => { process.stdout.write("\n"); resolve(true) })
-    })
-    req.on("error", reject)
-    req.write(data)
-    req.end()
-  })
-}
-
-async function setupLLMEngine(env) {
+async function setupLLMEngine(env, targetDir) {
   if (env.REFUGIO_ENGINE !== "ollama") return  // LM Studio / skipped — nothing to install
 
   console.log(`${C.bold}Setting up local LLM (Ollama)...${C.reset}\n`)
@@ -925,7 +880,7 @@ async function setupLLMEngine(env) {
   if (!serving) {
     warn("Ollama isn't responding on http://localhost:11434 yet")
     if (has("ollama")) {
-      warn(`Start it with: ollama serve  — then: ollama pull ${env.REFUGIO_MODEL || pickModelForRam()}`)
+      warn("Start it with: ollama serve, then re-run this installer")
     } else {
       warn("Open the Ollama app (it starts the server), then re-run this installer")
     }
@@ -934,22 +889,16 @@ async function setupLLMEngine(env) {
   }
   ok("Ollama is running (http://localhost:11434)")
 
+  // Provision the model via the resilient puller: it tries the Ollama registry,
+  // and if that's unreachable (e.g. Cloudflare R2 blocked) it imports the GGUF
+  // from HuggingFace instead — so the install still completes on locked-down nets.
   const model = env.REFUGIO_MODEL || pickModelForRam()
-  if (await ollamaHasModel(model)) {
-    ok(`Model already downloaded: ${model}`)
-  } else {
-    ok(`Downloading model: ${model} (this can take several minutes)`)
-    try {
-      if (has("ollama")) {
-        run(`ollama pull ${model}`, { shell: true })
-      } else {
-        await pullModelApi(model)
-      }
-      ok(`Model ready: ${model}`)
-    } catch (err) {
-      warn(`Model download failed: ${err.message}`)
-      warn(`Retry later: ollama pull ${model}`)
-    }
+  const pullScript = path.join(targetDir, "scripts", "pull-model.cjs")
+  try {
+    run(`"${process.execPath}" "${pullScript}" ${model}`, { env: { ...process.env, REFUGIO_MODEL: model } })
+  } catch (err) {
+    warn(`Model provisioning failed: ${err.message}`)
+    warn(`Retry later: node ${pullScript} ${model}`)
   }
   console.log("")
 }
@@ -1234,7 +1183,7 @@ async function main() {
   // Skip in headless mode: pulling a multi-GB model / installing MemPalace is
   // heavy work that only makes sense when we're about to launch the service.
   if (!flags.has("--non-interactive")) {
-    await setupLLMEngine(env)
+    await setupLLMEngine(env, targetDir)
     // Install MemPalace if the user chose it as their memory backend
     await setupMemPalace(env)
   }
