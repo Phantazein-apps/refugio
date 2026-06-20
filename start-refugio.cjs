@@ -515,12 +515,17 @@ ${C.bold}============================================================
     // survives reinstalls/updates — the venv is wiped (--clear) on every re-run.
     const dataDir = path.join(REFUGIO_DIR, "data")
     try { fs.mkdirSync(dataDir, { recursive: true }) } catch {}
+    const lowRam = os.totalmem() / (1024 ** 3) <= 8
     const owuiEnv = {
       ...process.env,
       WEBUI_NAME: "REFUGIO",
       DATA_DIR: dataDir,
       CHAT_RESPONSE_MAX_TOOL_CALL_RETRIES: "2",
-      ENABLE_VERSION_UPDATE_CHECK: "false"
+      ENABLE_VERSION_UPDATE_CHECK: "false",
+      // On low-RAM machines, offload RAG embeddings to Ollama so Open WebUI does
+      // NOT load PyTorch + a sentence-transformers model (~1-1.5 GB) at startup.
+      // That fixed cost is what OOM-loops OWUI's first boot on 8 GB.
+      ...(lowRam ? { RAG_EMBEDDING_ENGINE: "ollama" } : {})
     }
     if (env.OPENAI_API_BASE_URL) {
       owuiEnv.ENABLE_OPENAI_API = "true"
