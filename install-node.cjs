@@ -615,8 +615,9 @@ async function promptCredentials(envPath) {
   // only the lightweight GitHub-backed memory (no local embeddings, ~0 RAM).
   console.log(`  ${C.bold}Memory${C.reset}`)
   const memCapable = os.totalmem() / (1024 ** 3) > 8
-  const memAlready = existing.REFUGIO_MEMORY || existing.GITHUB_TOKEN
-  if (await confirm("Configure persistent memory?", !!memAlready || memCapable)) {
+  // Default ON only where there's RAM headroom; low-performance (≤8 GB) devices
+  // default to NO so memory never competes with the model for scarce RAM.
+  if (await confirm("Configure persistent memory?", memCapable)) {
     if (memCapable) {
       console.log(`    1) MemPalace — local semantic memory, no account (recommended)`)
       console.log(`    2) GitHub-backed (PACK-style) — lightweight; syncs to a private GitHub repo`)
