@@ -597,9 +597,15 @@ async function promptCredentials(envPath) {
   }
 
   // ── Memory backend ───────────────────────────────────────
+  // Default ON where there's RAM headroom; opt-in on small machines, where
+  // local memory (MemPalace's ChromaDB + embeddings) competes with the model.
   console.log(`  ${C.bold}Memory${C.reset}`)
   const memAlready = existing.REFUGIO_MEMORY || existing.GITHUB_TOKEN
-  if (await confirm("Configure persistent memory?", !!memAlready)) {
+  const memDefault = !!memAlready || (os.totalmem() / (1024 ** 3) > 8)
+  if (!memDefault) {
+    console.log(`    ${C.dim}(off by default on ≤8 GB — local memory adds RAM pressure alongside the model)${C.reset}`)
+  }
+  if (await confirm("Configure persistent memory?", memDefault)) {
     console.log(`    1) MemPalace — local semantic memory, no account (recommended)`)
     console.log(`    2) GitHub-backed (PACK-style) — sync memory to a private GitHub repo (rarely needed)`)
     const memChoice = await ask("Choose", existing.REFUGIO_MEMORY === "github" ? "2" : "1")
