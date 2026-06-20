@@ -28,7 +28,7 @@ irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refug
 2. Clones REFUGIO to `~/refugio`
 3. Sets up your **local LLM engine**:
    - Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM, **or**
-   - Detects a running **[LM Studio](https://lmstudio.ai/)** server and offers to use it
+   - Lets you choose **[LM Studio](https://lmstudio.ai/)** instead (connects to its local server on `:1234`; auto-detected and preferred if already running)
 4. Walks you through optional connector credentials (Slack, Notion, Jira, etc.) and a memory backend
 5. Installs **Open WebUI** in an isolated virtual environment
 6. Optionally sets up **https://refugio** as a local domain (mkcert + Caddy)
