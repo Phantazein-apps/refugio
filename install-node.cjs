@@ -14,6 +14,11 @@ const readline = require("readline")
 const isWin = os.platform() === "win32"
 const home = os.homedir()
 
+// Resolved uv command. On Apple Silicon this may become an absolute path to a
+// native arm64 uv so we never build an x86_64 Python env (which lacks macOS
+// wheels for onnxruntime / cryptography). Set by installUV().
+let UV = "uv"
+
 const C = process.stdout.isTTY ? {
   green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m",
   bold: "\x1b[1m", dim: "\x1b[2m", reset: "\x1b[0m"
@@ -36,6 +41,30 @@ function run(cmd, opts = {}) {
 
 function runQuiet(cmd) {
   return execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim()
+}
+
+// True on Apple Silicon hardware — reported even when the current process is
+// running under Rosetta (x86_64), so it reflects the machine, not the toolchain.
+function isAppleSilicon() {
+  if (os.platform() !== "darwin") return false
+  try { return runQuiet("sysctl -n hw.optional.arm64") === "1" } catch { return false }
+}
+
+// Is a given binary an x86_64 Mach-O? (used to spot Rosetta/Intel toolchains)
+function isX86Binary(bin) {
+  try { return /x86_64/.test(runQuiet(`file "${bin}"`)) } catch { return false }
+}
+
+function whichCmd(cmd) {
+  try { return runQuiet(isWin ? `where ${cmd}` : `command -v ${cmd}`).split("\n")[0].trim() } catch { return "" }
+}
+
+// The Python request for uv. On Apple Silicon we pin the ARCH explicitly so uv
+// won't reuse a cached x86_64 interpreter (which would re-break onnxruntime), and
+// we pin the VERSION to 3.12 so native deps like cryptography have prebuilt wheels
+// (uv otherwise defaults to 3.14/3.15, which lack them and trigger source builds).
+function pyArg() {
+  return isAppleSilicon() ? "cpython-3.12-macos-aarch64-none" : "3.12"
 }
 
 async function ask(question, defaultVal = "", secret = false) {
@@ -197,30 +226,57 @@ ${C.bold}============================================================
 // ── Phase 2: Check Dependencies ──────────────────────────────
 
 function installUV() {
+  const appleSilicon = isAppleSilicon()
+
+  // On Apple Silicon, REFUGIO needs an ARM64 uv. Common trap: an Intel Homebrew
+  // under Rosetta supplies an x86_64 uv, which builds an x86_64 Python env that
+  // has NO macOS wheels for onnxruntime (Open WebUI) or cryptography (mcpo) — so
+  // the install fails. Detect that and install a native arm64 uv instead.
   if (has("uv")) {
-    ok(`uv (${runQuiet("uv --version")})`)
-    return true
+    const p = whichCmd("uv")
+    const needArm = appleSilicon && isX86Binary(p) && !p.includes("/.local/bin/")
+    if (!needArm) {
+      UV = "uv"
+      ok(`uv (${runQuiet("uv --version")})`)
+      return true
+    }
+    warn(`Found x86_64 uv (${p}) on Apple Silicon — installing a native arm64 uv...`)
+  } else {
+    warn("Installing uv (Python package manager)...")
   }
 
-  warn("Installing uv (Python package manager)...")
   try {
     if (isWin) {
       run("powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\"", { shell: true })
       // Refresh PATH
       const newPath = execSync("cmd /c echo %PATH%", { encoding: "utf-8" }).trim()
       process.env.PATH = newPath
+    } else if (appleSilicon) {
+      // Force the installer to run arm64 even when invoked from an x86_64 (Rosetta)
+      // node, so it fetches the arm64 uv build.
+      run("arch -arm64 /bin/sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'", { shell: true })
+      const armUv = path.join(home, ".local", "bin", "uv")
+      if (fs.existsSync(armUv)) UV = armUv
+      process.env.PATH = `${home}/.local/bin:${process.env.PATH}`
     } else {
       run("curl -LsSf https://astral.sh/uv/install.sh | sh", { shell: true })
       // uv installs to ~/.local/bin (or ~/.cargo/bin)
       process.env.PATH = `${home}/.local/bin:${home}/.cargo/bin:${process.env.PATH}`
     }
 
-    if (has("uv")) {
-      ok(`uv installed (${runQuiet("uv --version")})`)
+    const uvCmd = UV === "uv" ? "uv" : `"${UV}"`
+    const ver = runQuiet(`${uvCmd} --version`)
+    if (ver) {
+      if (appleSilicon && UV !== "uv" && isX86Binary(UV)) {
+        warn("uv still reports x86_64 — Open WebUI / MCPO wheels may not resolve")
+      }
+      ok(`uv installed (${ver})`)
       return true
     }
   } catch {}
 
+  // Last resort — use whatever uv is on PATH, even if its arch is suboptimal
+  if (has("uv")) { UV = "uv"; warn("Using existing uv (architecture may be suboptimal)"); return true }
   fail("Could not install uv — install manually from https://docs.astral.sh/uv/")
   return false
 }
@@ -581,28 +637,35 @@ async function setupOpenWebUI(targetDir) {
 
   console.log(`${C.bold}Installing Open WebUI...${C.reset}\n`)
 
+  // Genuine Intel Macs: onnxruntime (an Open WebUI dependency) no longer ships
+  // x86_64 macOS wheels, so the native install can't resolve. Warn up front.
+  if (os.platform() === "darwin" && !isAppleSilicon()) {
+    warn("Intel macOS detected — Open WebUI's onnxruntime dependency has no Intel-mac wheels.")
+    warn("If the install below fails, use an Apple Silicon Mac, Linux, or Windows.")
+  }
+
   const appDir = path.join(targetDir, "app")
   const envDir = path.join(appDir, "env")
   if (!fs.existsSync(appDir)) fs.mkdirSync(appDir, { recursive: true })
 
   try {
     // uv downloads the right Python automatically — no system Python needed
-    run(`uv venv "${envDir}" --python 3.12 --clear`, { cwd: appDir })
+    run(`"${UV}" venv "${envDir}" --python ${pyArg()} --clear`, { cwd: appDir })
     const activate = isWin
       ? `"${path.join(envDir, "Scripts", "activate")}"`
       : `source "${path.join(envDir, "bin", "activate")}"`
-    run(`${activate} && uv pip install "open-webui==0.8.12" itsdangerous`, {
+    run(`${activate} && "${UV}" pip install "open-webui==0.8.12" itsdangerous`, {
       cwd: appDir, shell: true
     })
     ok("Open WebUI installed")
   } catch (err) {
     warn(`Open WebUI install failed: ${err.message}`)
-    warn("You can install it manually later: uv pip install open-webui")
+    warn(`You can install it manually later: "${UV}" pip install open-webui`)
   }
 
   // Install MCPO (MCP-to-OpenAPI proxy) for reliable tool integration
   try {
-    run("uv tool install mcpo --force", { shell: true })
+    run(`"${UV}" tool install mcpo --python ${pyArg()} --force`, { shell: true })
     ok("MCPO proxy installed")
   } catch {}
   console.log("")
@@ -748,16 +811,22 @@ async function setupLocalDomain(targetDir, port, fallbackUrl) {
 
 function installOllama() {
   if (has("ollama")) {
+    if (isAppleSilicon() && isX86Binary(whichCmd("ollama"))) {
+      warn("Existing Ollama is x86_64 (Rosetta) — for GPU speed, reinstall the arm64 build from https://ollama.com/download")
+    }
     ok("Ollama already installed")
     return true
   }
   warn("Installing Ollama...")
   try {
     if (os.platform() === "darwin") {
-      if (has("brew")) {
+      const hasArmBrew = fs.existsSync("/opt/homebrew/bin/brew")
+      if (has("brew") && (!isAppleSilicon() || hasArmBrew)) {
+        // Native brew: arm64 brew on Apple Silicon, or Intel brew on an Intel Mac
         run("brew install ollama")
       } else {
-        // No Homebrew — download the official macOS app
+        // Apple Silicon without arm64 brew (or no brew at all): use the official
+        // universal app so Ollama runs arm64, not x86_64 under Rosetta.
         const zip = path.join(os.tmpdir(), "Ollama-darwin.zip")
         run(`curl -fsSL https://ollama.com/download/Ollama-darwin.zip -o "${zip}"`, { shell: true })
         run(`unzip -o "${zip}" -d /Applications`, { shell: true })
@@ -894,7 +963,7 @@ async function setupMemPalace(env) {
   console.log(`${C.bold}Installing MemPalace (local memory)...${C.reset}\n`)
   try {
     // Installs the `mempalace-mcp` stdio MCP server into ~/.local/bin (via uv)
-    run("uv tool install mempalace --force", { shell: true })
+    run(`"${UV}" tool install mempalace --python ${pyArg()} --force`, { shell: true })
     ok("MemPalace installed")
   } catch (err) {
     warn(`MemPalace install failed: ${err.message}`)
