@@ -347,13 +347,16 @@ async function main() {
     for (const m of modelsList) {
       const mid = m.id || ""
       if (!mid) continue
-      // Enable native tool-calling + attach the (lean) tool set, with a context
-      // window sized for the system prompt plus a couple of tools.
+      // Attach the (lean) tool set, but use PROMPT-BASED function calling, not
+      // "native": native makes OWUI inject built-in tools (query_knowledge_bases)
+      // that small models call indiscriminately, wrecking plain chat. Prompt-based
+      // keeps chat clean and correct; capable models can be switched to native in
+      // Admin → Models if reliable tool use is needed.
       const payload = {
         id: mid,
         name: m.name || mid,
         meta: { hidden: false, toolIds: toolServerIds },
-        params: { function_calling: "native", num_ctx: 8192 }
+        params: { function_calling: "default", num_ctx: 8192 }
       }
       await api("POST", "/api/v1/models/create", payload, token)
       await api("POST", `/api/v1/models/model/update?id=${encodeURIComponent(mid)}`, payload, token)
