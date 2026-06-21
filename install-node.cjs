@@ -405,6 +405,12 @@ async function preflight(targetDir) {
     }
   }
 
+  // Migrate from a previous IBEX install (REFUGIO's predecessor): stop/disable its
+  // auto-start service FIRST, so it isn't respawning its own Open WebUI on :8080
+  // (otherwise the refugio hostname shows the IBEX login screen). Must run before
+  // the port check below — killing :8080 is futile while IBEX's KeepAlive respawns.
+  cleanupLegacyIbex()
+
   // Check if port 8080 is in use
   try {
     const portCheck = isWin
@@ -1112,6 +1118,52 @@ window.location.href = '/';
 }
 
 // ── Phase 8: Auto-Start on Login ─────────────────────────────
+
+// Migrate from the predecessor "IBEX" install (REFUGIO is a fork of
+// Percona-Lab/IBEX). A leftover IBEX auto-start service keeps running its OWN
+// Open WebUI on :8080, so the refugio hostname shows the IBEX login screen. Stop
+// + disable + remove that service (and kill stragglers). We do NOT delete the
+// user's IBEX files/data — only the conflicting service.
+function cleanupLegacyIbex() {
+  let found = false
+  try {
+    if (os.platform() === "darwin") {
+      const laDir = path.join(home, "Library", "LaunchAgents")
+      let plists = []
+      try { plists = fs.readdirSync(laDir).filter(f => /ibex/i.test(f) && f.endsWith(".plist")) } catch {}
+      for (const f of plists) {
+        const p = path.join(laDir, f)
+        const label = f.replace(/\.plist$/, "")
+        try { execSync(`launchctl bootout gui/$(id -u)/${label}`, { stdio: "ignore" }) } catch {}
+        try { execSync(`launchctl bootout gui/$(id -u) "${p}"`, { stdio: "ignore" }) } catch {}
+        try { execSync(`launchctl unload "${p}"`, { stdio: "ignore" }) } catch {}
+        try { fs.unlinkSync(p) } catch {}
+        found = true
+      }
+    } else if (os.platform() === "linux") {
+      for (const unit of ["ibex.service", "com.percona.ibex.service"]) {
+        try { execSync(`systemctl --user stop ${unit}`, { stdio: "ignore" }) } catch {}
+        try { execSync(`systemctl --user disable ${unit}`, { stdio: "ignore" }) } catch {}
+        const up = path.join(home, ".config", "systemd", "user", unit)
+        try { if (fs.existsSync(up)) { fs.unlinkSync(up); found = true } } catch {}
+      }
+      try { execSync("systemctl --user daemon-reload", { stdio: "ignore" }) } catch {}
+    } else if (isWin) {
+      const startup = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+      for (const f of ["IBEX.vbs", "ibex.vbs"]) {
+        const p = path.join(startup, f)
+        try { if (fs.existsSync(p)) { fs.unlinkSync(p); found = true } } catch {}
+      }
+    }
+    // Kill a still-running IBEX supervisor/OWUI (macOS/Linux KeepAlive is gone now;
+    // on Windows the .vbs was fire-once, so the port-8080 check below handles it).
+    if (!isWin) { try { execSync("pkill -f start-ibex", { stdio: "ignore" }) } catch {} }
+  } catch {}
+  if (found) {
+    warn("Found a previous IBEX install — disabled its auto-start so it won't conflict with REFUGIO on :8080")
+    warn("Your old IBEX files were left untouched (remove ~/IBEX manually if you no longer need it)")
+  }
+}
 
 // Returns true if REFUGIO was registered to auto-start on login (caller relies on
 // the service having started the supervisor); false in on-demand (low-RAM) mode,
