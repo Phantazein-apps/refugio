@@ -42,7 +42,36 @@ function has(cmd) {
 function ollamaBin() {
   const app = "/Applications/Ollama.app/Contents/Resources/ollama"
   if (!isWin && fs.existsSync(app)) return app
-  return has("ollama") ? "ollama" : null
+  if (has("ollama")) return "ollama"
+  if (isWin) {
+    // Installed but maybe not on this session's PATH.
+    for (const c of [path.join(process.env.LOCALAPPDATA || "", "Programs", "Ollama", "ollama.exe"), "C:\\Program Files\\Ollama\\ollama.exe"]) {
+      try { if (c && fs.existsSync(c)) return c } catch {}
+    }
+  }
+  return null
+}
+
+// Download a URL to a file using Node's https (no external `curl` — not present
+// by default on Windows). Follows redirects (HuggingFace 302s to its CDN).
+function downloadFile(url, dest, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error("too many redirects"))
+    const lib = url.startsWith("https") ? https : http
+    const req = lib.get(url, { headers: { "User-Agent": "refugio" } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume()
+        return resolve(downloadFile(new URL(res.headers.location, url).toString(), dest, redirects + 1))
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode} for ${url}`)) }
+      const file = fs.createWriteStream(dest)
+      res.pipe(file)
+      file.on("finish", () => file.close(() => resolve()))
+      file.on("error", reject)
+    })
+    req.on("error", reject)
+    req.setTimeout(900000, () => { req.destroy(); reject(new Error("download timed out")) })
+  })
 }
 function run(cmd) { execSync(cmd, { stdio: "inherit", shell: true }) }
 
@@ -67,7 +96,7 @@ async function hasModel(m) {
   return (t.models || []).some(x => x.name === m || x.model === m)
 }
 
-function hfImport(model) {
+async function hfImport(model) {
   const src = HF[model]
   if (!src) throw new Error(`no HuggingFace fallback for "${model}" — try a different model or fix Cloudflare R2 access`)
   const [repo, file] = src
@@ -78,7 +107,7 @@ function hfImport(model) {
   const gguf = path.join(tmp, "model.gguf")
   try {
     ok(`Downloading ${model} from HuggingFace (bypassing Cloudflare R2)...`)
-    run(`curl -L --fail --retry 3 -o "${gguf}" "${url}"`)
+    await downloadFile(url, gguf)
     fs.writeFileSync(path.join(tmp, "Modelfile"), `FROM ${gguf}\n`)
     ok(`Importing into Ollama as ${model}...`)
     run(`"${bin}" create ${model} -f "${path.join(tmp, "Modelfile")}"`)
@@ -115,7 +144,7 @@ async function main() {
   }
 
   try {
-    hfImport(model)
+    await hfImport(model)
     if (await hasModel(model)) { ok(`Model ready: ${model} (via HuggingFace)`); return }
     fail(`Import finished but ${model} isn't present`); process.exit(1)
   } catch (e) {

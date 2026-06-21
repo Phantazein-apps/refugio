@@ -228,6 +228,10 @@ function pickModelForRam() {
   return "gpt-oss:20b"                   // ~13 GB  — 48 GB+
 }
 
+// On low-RAM machines REFUGIO doesn't auto-start on login (Open WebUI would sit
+// resident ~0.6 GB all day); the user launches it on demand instead.
+const isLowRam = () => os.totalmem() / (1024 ** 3) <= 8
+
 // Probe an HTTP endpoint — resolves true on any response within the timeout
 function probeHttp(url, timeout = 1500) {
   return new Promise(resolve => {
@@ -706,7 +710,7 @@ async function setupOpenWebUI(targetDir) {
     // uv downloads the right Python automatically — no system Python needed
     run(`"${UV}" venv "${envDir}" --python ${pyArg()} --clear`, { cwd: appDir })
     const activate = isWin
-      ? `"${path.join(envDir, "Scripts", "activate")}"`
+      ? `call "${path.join(envDir, "Scripts", "activate.bat")}"`
       : `source "${path.join(envDir, "bin", "activate")}"`
     run(`${activate} && "${UV}" pip install "open-webui==0.8.12" itsdangerous`, {
       cwd: appDir, shell: true
@@ -1001,14 +1005,30 @@ async function setupMemPalace(env) {
   console.log("")
 }
 
-async function startREFUGIO(targetDir, env) {
+async function startREFUGIO(targetDir, env, autoStarted) {
   console.log(`${C.bold}Starting REFUGIO...${C.reset}\n`)
 
   const PORT = 8080
 
-  // The supervisor (start-refugio.cjs) is already running via launchd/systemd
-  // (setupAutoStart runs before this function)
-  ok("REFUGIO supervisor started via auto-start service")
+  if (autoStarted) {
+    // The supervisor (start-refugio.cjs) is already running via launchd/systemd
+    // (setupAutoStart runs before this function)
+    ok("REFUGIO supervisor started via auto-start service")
+  } else {
+    // On-demand mode (low-RAM): no login service, so launch the supervisor now
+    // (detached) for this session. It won't relaunch on future logins.
+    try {
+      const out = fs.openSync(path.join(home, ".refugio-logs", "refugio.log"), "a")
+      const child = spawn(process.execPath, [path.join(targetDir, "start-refugio.cjs"), "--no-browser"], {
+        detached: true, stdio: ["ignore", out, out], cwd: targetDir
+      })
+      child.unref()
+      try { fs.closeSync(out) } catch {}  // child inherited the fd; parent doesn't need it
+      ok("REFUGIO supervisor started (on-demand)")
+    } catch (e) {
+      warn(`Could not start supervisor: ${e.message} — run: refugio`)
+    }
+  }
 
   // Wait for OWUI to be ready
   const waitStart = Date.now()
@@ -1093,9 +1113,18 @@ window.location.href = '/';
 
 // ── Phase 8: Auto-Start on Login ─────────────────────────────
 
+// Returns true if REFUGIO was registered to auto-start on login (caller relies on
+// the service having started the supervisor); false in on-demand (low-RAM) mode,
+// where the caller must start the supervisor itself for this session.
 function setupAutoStart(targetDir) {
   const nodePath = process.execPath
   const startScript = path.join(targetDir, "start-refugio.cjs")
+
+  // Low-RAM: set up on-demand launchers instead of login auto-start.
+  if (isLowRam()) {
+    setupOnDemand(targetDir, nodePath, startScript)
+    return false
+  }
 
   if (os.platform() === "darwin") {
     // macOS: launchd plist
@@ -1159,7 +1188,7 @@ Description=REFUGIO
 After=network.target
 
 [Service]
-ExecStart=${nodePath} ${startScript} --no-browser
+ExecStart="${nodePath}" "${startScript}" --no-browser
 WorkingDirectory=${targetDir}
 Restart=always
 RestartSec=5
@@ -1187,6 +1216,90 @@ WantedBy=default.target
     } catch {
       warn("Could not register auto-start — run manually: node ~/refugio/start-refugio.cjs")
     }
+  }
+
+  return true
+}
+
+// On-demand setup for low-RAM machines: create convenient launchers (a `refugio`
+// CLI + a clickable shortcut) and ensure NO login auto-start remains, so Open
+// WebUI isn't resident all day. The user starts REFUGIO when they want it and
+// frees the RAM by quitting (Ctrl+C / `refugio stop`).
+function setupOnDemand(targetDir, nodePath, startScript) {
+  try { fs.mkdirSync(path.join(home, ".refugio-logs"), { recursive: true }) } catch {}
+
+  // Remove any existing login auto-start so it truly won't launch at boot.
+  if (os.platform() === "darwin") {
+    const plistPath = path.join(home, "Library", "LaunchAgents", "com.phantazein.refugio.plist")
+    try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
+    try { if (fs.existsSync(plistPath)) fs.unlinkSync(plistPath) } catch {}
+  } else if (os.platform() === "linux") {
+    try { execSync("systemctl --user disable refugio.service", { stdio: "ignore" }) } catch {}
+    try { fs.unlinkSync(path.join(home, ".config", "systemd", "user", "refugio.service")) } catch {}
+    try { execSync("systemctl --user daemon-reload", { stdio: "ignore" }) } catch {}
+  } else if (isWin) {
+    try {
+      const vbsPath = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "REFUGIO.vbs")
+      if (fs.existsSync(vbsPath)) fs.unlinkSync(vbsPath)
+    } catch {}
+  }
+
+  if (!isWin) {
+    // `refugio` CLI on PATH (~/.local/bin is on PATH via uv): start | stop | status
+    const binDir = path.join(home, ".local", "bin")
+    try { fs.mkdirSync(binDir, { recursive: true }) } catch {}
+    const cli = `#!/bin/sh
+# REFUGIO on-demand launcher
+NODE="${nodePath}"
+DIR="${targetDir}"
+PIDF="$HOME/.refugio-logs/supervisor.pid"
+case "$1" in
+  stop)
+    if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "REFUGIO stopped (RAM freed)"; else echo "REFUGIO is not running"; fi ;;
+  status)
+    if curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080"; else echo "stopped"; fi ;;
+  *)
+    echo "Starting REFUGIO... (Ctrl+C or 'refugio stop' to stop and free RAM)"
+    exec "$NODE" "$DIR/start-refugio.cjs" ;;
+esac
+`
+    const cliPath = path.join(binDir, "refugio")
+    try { fs.writeFileSync(cliPath, cli); fs.chmodSync(cliPath, 0o755) } catch {}
+
+    if (os.platform() === "darwin") {
+      const cmd = `#!/bin/sh\nexec "${nodePath}" "${targetDir}/start-refugio.cjs"\n`
+      const cmdPath = path.join(targetDir, "Start REFUGIO.command")
+      try { fs.writeFileSync(cmdPath, cmd); fs.chmodSync(cmdPath, 0o755) } catch {}
+    } else {
+      const appsDir = path.join(home, ".local", "share", "applications")
+      try { fs.mkdirSync(appsDir, { recursive: true }) } catch {}
+      const desktop = `[Desktop Entry]\nType=Application\nName=REFUGIO\nComment=Start your local AI\nExec="${nodePath}" "${targetDir}/start-refugio.cjs"\nTerminal=true\nCategories=Utility;\n`
+      try { fs.writeFileSync(path.join(appsDir, "refugio.desktop"), desktop) } catch {}
+    }
+  } else {
+    // Windows: clickable start + stop .bat (no `refugio` shell CLI on Windows).
+    const bat = `@echo off\r\ncall "${nodePath}" "${targetDir}\\start-refugio.cjs"\r\n`
+    try { fs.writeFileSync(path.join(targetDir, "Start-REFUGIO.bat"), bat) } catch {}
+    const stop = [
+      "@echo off",
+      "setlocal enabledelayedexpansion",
+      'set "PIDF=%USERPROFILE%\\.refugio-logs\\supervisor.pid"',
+      'if not exist "%PIDF%" ( echo REFUGIO is not running & exit /b )',
+      'set /p PID=<"%PIDF%"',
+      "taskkill /PID !PID! /T /F >nul 2>&1 && echo REFUGIO stopped (RAM freed) || echo REFUGIO is not running",
+    ].join("\r\n") + "\r\n"
+    try { fs.writeFileSync(path.join(targetDir, "Stop-REFUGIO.bat"), stop) } catch {}
+  }
+
+  ok("Low-RAM mode: REFUGIO will NOT auto-start on login (keeps your RAM free)")
+  if (!isWin) {
+    ok("Start anytime:  refugio   ·   stop + free RAM:  refugio stop")
+    const onPath = (process.env.PATH || "").split(":").includes(path.join(home, ".local", "bin"))
+    if (!onPath) ok(`(if 'refugio' isn't found: run ${path.join(home, ".local", "bin", "refugio")}, or add ~/.local/bin to PATH)`)
+    if (os.platform() === "darwin") ok(`Or double-click:  ${path.join(targetDir, "Start REFUGIO.command")}`)
+  } else {
+    ok(`Start: double-click ${path.join(targetDir, "Start-REFUGIO.bat")}`)
+    ok(`Stop + free RAM: double-click ${path.join(targetDir, "Stop-REFUGIO.bat")}`)
   }
 }
 
@@ -1266,15 +1379,16 @@ async function main() {
     await setupMemPalace(env)
   }
 
-  // Set up auto-start on login (starts the supervisor via launchd/systemd)
-  // Must happen BEFORE startREFUGIO so we don't spawn a duplicate supervisor
+  // Set up auto-start (login service on capable machines; on-demand launchers on
+  // low-RAM). Must happen BEFORE startREFUGIO so we don't spawn a duplicate.
+  let autoStarted = false
   if (!flags.has("--no-start") && !flags.has("--non-interactive")) {
-    setupAutoStart(targetDir)
+    autoStarted = setupAutoStart(targetDir)
   }
 
   // Wait for OWUI to be ready and open browser
   if (!flags.has("--no-start") && !flags.has("--non-interactive")) {
-    await startREFUGIO(targetDir, env)
+    await startREFUGIO(targetDir, env, autoStarted)
   }
 
   console.log(`${C.bold}============================================================`)
@@ -1284,10 +1398,28 @@ async function main() {
   console.log(`  Installation:  ${targetDir}`)
   console.log(`  Credentials:   ${envPath}`)
   console.log("")
-  console.log(`  To start REFUGIO manually:`)
-  console.log(`    node ${path.join(targetDir, "start-refugio.cjs")}`)
-  console.log("")
-  console.log(`  REFUGIO will auto-start on login.`)
+  if (flags.has("--non-interactive")) {
+    // Headless: nothing was auto-started or launcher-installed.
+    console.log(`  To start REFUGIO:`)
+    console.log(`    node ${path.join(targetDir, "start-refugio.cjs")}`)
+  } else if (isLowRam()) {
+    if (isWin) {
+      console.log(`  Start REFUGIO:     double-click ${path.join(targetDir, "Start-REFUGIO.bat")}`)
+      console.log(`  Stop + free RAM:   double-click ${path.join(targetDir, "Stop-REFUGIO.bat")}`)
+    } else {
+      const extra = os.platform() === "darwin" ? `   (or double-click "Start REFUGIO.command")` : ""
+      console.log(`  Start REFUGIO:     refugio${extra}`)
+      console.log(`  Stop + free RAM:   refugio stop`)
+    }
+    console.log("")
+    console.log(`  Low-RAM mode: REFUGIO does NOT auto-start on login, so it only`)
+    console.log(`  uses memory while you're actually using it.`)
+  } else {
+    console.log(`  To start REFUGIO manually:`)
+    console.log(`    node ${path.join(targetDir, "start-refugio.cjs")}`)
+    console.log("")
+    console.log(`  REFUGIO will auto-start on login.`)
+  }
   console.log("")
 }
 

@@ -424,7 +424,13 @@ ${C.bold}============================================================
     } else {
       // Prefer the macOS app's Ollama binary; fall back to PATH.
       const appOllama = "/Applications/Ollama.app/Contents/Resources/ollama"
-      const ollamaBin = fs.existsSync(appOllama) ? appOllama : (has("ollama") ? "ollama" : null)
+      let ollamaBin = fs.existsSync(appOllama) ? appOllama : (has("ollama") ? "ollama" : null)
+      if (!ollamaBin && isWin) {
+        // Ollama may be installed but not on this session's PATH on Windows.
+        for (const c of [path.join(process.env.LOCALAPPDATA || "", "Programs", "Ollama", "ollama.exe"), "C:\\Program Files\\Ollama\\ollama.exe"]) {
+          try { if (c && fs.existsSync(c)) { ollamaBin = c; break } } catch {}
+        }
+      }
       if (ollamaBin) {
         // On Apple Silicon, force the arm64 slice so Ollama uses the GPU (Metal).
         // A universal binary spawned from an x86_64/Rosetta node would otherwise
@@ -435,8 +441,9 @@ ${C.bold}============================================================
         const cargs = (!isWin && appleSilicon) ? ["-arm64", ollamaBin, "serve"] : ["serve"]
         // On small machines, unload the model soon after idle so it doesn't hold
         // ~1-3 GB of RAM hostage between messages (keeps the whole Mac responsive).
-        const ramGb = os.totalmem() / (1024 ** 3)
-        const keepAlive = ramGb <= 8 ? "30s" : "5m"
+        // Tight memory (small machine OR busy right now) → unload the model fast
+        // so it doesn't hold RAM hostage. Same available-RAM signal as model fit.
+        const keepAlive = offloadEmbeddings ? "30s" : "5m"
         supervisor.start("ollama", cmd, cargs, { env: { ...mergedEnv, OLLAMA_KEEP_ALIVE: keepAlive } })
         ok(`Ollama server → http://localhost:11434${appleSilicon ? " (arm64/Metal)" : ""} · keep-alive ${keepAlive}`)
       } else {
@@ -564,7 +571,7 @@ ${C.bold}============================================================
   // ── Start Open WebUI ────────────────────────────────────────
   const PORT = 8080
   const owuiBin = isWin
-    ? path.join(REFUGIO_DIR, "app", "env", "Scripts", "open-webui")
+    ? path.join(REFUGIO_DIR, "app", "env", "Scripts", "open-webui.exe")
     : path.join(REFUGIO_DIR, "app", "env", "bin", "open-webui")
 
   if (!noOwui && fs.existsSync(owuiBin)) {
