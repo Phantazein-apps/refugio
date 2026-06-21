@@ -194,14 +194,23 @@ async function main() {
   // prompt-based calling + a modest context. This keeps a downshifted model on a
   // big machine behaving sanely too.
   const ramGb = os.totalmem() / (1024 ** 3)
-  let capable = ramGb > 8   // fallback when the model isn't on the known ladder
-  try {
-    const { ladderIndex } = require("./mem-fit.cjs")
-    const idx = ladderIndex(defaultModel)
-    if (idx >= 0) capable = idx >= 2   // llama3.1:8b and up
-  } catch {}
+  let memFit = null
+  try { memFit = require("./mem-fit.cjs") } catch {}
+  const canMeasure = !!memFit
+  // Tool-calling mode follows the model actually running: only 8b+ drive native
+  // function-calling cleanly (small models over-fire tools). Default to the SAFE
+  // mode (prompt-based) whenever we can't positively confirm the model supports
+  // native — native is the risky one, so an unknown model must never get it.
+  let capable = false
+  if (canMeasure && memFit.ladderIndex(defaultModel) >= 0) capable = memFit.supportsNativeTools(defaultModel)
   const fnCalling = capable ? "native" : "default"
   const ctxSize = capable ? 16384 : 4096   // smaller KV cache on tight machines
+  // Snapshot of free RAM now — used to label models in the picker so a manual
+  // switch to one that won't fit is an informed choice. If we CAN'T measure it,
+  // use 0 and skip RAM claims rather than using total RAM (which would falsely
+  // tell a busy machine that heavy models "fit").
+  const availGb = canMeasure ? memFit.availableMemGb() : 0
+  const owuiOverhead = (ramGb <= 8 || availGb < 6) ? 0.7 : 1.5
 
   if (!email) {
     log("⚠", "OWUI_EMAIL not set in ~/.refugio.env — skipping account setup")
@@ -347,7 +356,14 @@ async function main() {
   // Configure models: enable native tool-calling on every model, and pin the
   // default to the model REFUGIO pulled (if any).
   try {
-    if (defaultModel) {
+    const modelsResp = await api("GET", "/api/models", null, token)
+    const modelsList = modelsResp.data || modelsResp || []
+    const availableIds = modelsList.map(m => m.id || "").filter(Boolean)
+
+    // Pin the default ONLY if it actually exists in OWUI — otherwise OWUI boots
+    // pointing at a model Ollama can't serve, and the first chat fails with
+    // "model not found" (e.g. if /api/tags was unreadable during launch).
+    if (defaultModel && availableIds.includes(defaultModel)) {
       await api("POST", "/api/v1/configs/models", {
         DEFAULT_MODELS: defaultModel,
         DEFAULT_PINNED_MODELS: null,
@@ -355,25 +371,50 @@ async function main() {
         DEFAULT_MODEL_METADATA: {},
         DEFAULT_MODEL_PARAMS: {}
       }, token)
+    } else if (defaultModel) {
+      log("⚠", `Default model ${defaultModel} not present yet — leaving OWUI's default`)
     }
 
-    const modelsResp = await api("GET", "/api/models", null, token)
-    const modelsList = modelsResp.data || modelsResp || []
-
-    // Enable native function calling + tool access on each available model so
-    // tools work regardless of which model the user selects.
+    // For each model: attach the (lean) tool set; set tool-calling mode + context
+    // to THAT model's capability (so a manual switch behaves correctly); and label
+    // its name/description by whether it fits the RAM free right now — the warning
+    // the user sees in the picker before switching to a too-heavy model.
     for (const m of modelsList) {
       const mid = m.id || ""
       if (!mid) continue
-      // Attach the (lean) tool set. Function-calling mode scales with the system:
-      // "native" on capable machines (tools work well), "default" (prompt-based)
-      // on small ones — native makes a 3b inject/over-call built-in tools like
-      // query_knowledge_bases for every message, wrecking plain chat.
+      const onLadder = canMeasure && memFit.ladderIndex(mid) >= 0
+      // Default to the SAFE (prompt-based) mode unless we positively know the
+      // model supports native tool-calling — never give an unknown model native.
+      const mNative = onLadder ? memFit.supportsNativeTools(mid) : false
+      const mCtx = mNative ? 16384 : 4096
+
+      // Label the picker for CURRENT free RAM (the warning on manual switch).
+      let displayName = mid
+      let description = ""
+      if (onLadder) {
+        const needGb = memFit.modelRamGb(mid) + owuiOverhead
+        if (mid === defaultModel) {
+          displayName = `${mid} ✓`
+          description = `Active now — fits your ~${availGb.toFixed(1)} GB free RAM.`
+        } else if (needGb > availGb) {
+          displayName = `${mid} ⚠ needs ~${Math.ceil(needGb)} GB free`
+          description = `⚠ Needs ~${needGb.toFixed(1)} GB free; you have ~${availGb.toFixed(1)} GB now. May be slow or crash — close some apps before switching to this model.`
+        } else {
+          description = `Fits current RAM (~${availGb.toFixed(1)} GB free).`
+        }
+      } else {
+        // Off-ladder / custom model — we can't validate its RAM needs.
+        if (mid === defaultModel) displayName = `${mid} ✓`
+        description = canMeasure
+          ? `Custom model — RAM needs unknown (you have ~${availGb.toFixed(1)} GB free now).`
+          : `Custom model — RAM needs unknown.`
+      }
+
       const payload = {
         id: mid,
-        name: m.name || mid,
-        meta: { hidden: false, toolIds: toolServerIds },
-        params: { function_calling: fnCalling, num_ctx: ctxSize }
+        name: displayName,
+        meta: { hidden: false, toolIds: toolServerIds, description },
+        params: { function_calling: mNative ? "native" : "default", num_ctx: mCtx }
       }
       await api("POST", "/api/v1/models/create", payload, token)
       await api("POST", `/api/v1/models/model/update?id=${encodeURIComponent(mid)}`, payload, token)
@@ -381,7 +422,7 @@ async function main() {
 
     if (modelsList.length === 0) {
       log("⚠", "No models available yet — pull one with: ollama pull <model>")
-    } else if (defaultModel) {
+    } else if (defaultModel && availableIds.includes(defaultModel)) {
       log("✓", `Default model: ${defaultModel} (${modelsList.length} available)`)
     } else {
       log("✓", `Configured ${modelsList.length} model(s)`)

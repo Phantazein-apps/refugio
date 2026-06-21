@@ -953,16 +953,30 @@ async function setupLLMEngine(env, targetDir) {
   }
   ok("Ollama is running (http://localhost:11434)")
 
-  // Provision the model via the resilient puller: it tries the Ollama registry,
-  // and if that's unreachable (e.g. Cloudflare R2 blocked) it imports the GGUF
-  // from HuggingFace instead — so the install still completes on locked-down nets.
-  const model = env.REFUGIO_MODEL || pickModelForRam()
+  // Provision models via the resilient puller: it tries the Ollama registry, and
+  // if that's unreachable (e.g. Cloudflare R2 blocked) it imports the GGUF from
+  // HuggingFace instead — so the install still completes on locked-down nets.
+  //
+  // Download TWO tiers: the "optimal" model sized to total RAM, plus a lighter
+  // "current" model (one tier down) for when the machine is busy. At each launch
+  // the supervisor activates whichever fits the RAM that's actually free, with no
+  // on-demand download. (Smaller machines may collapse to a single model.)
+  const optimal = env.REFUGIO_MODEL || pickModelForRam()
   const pullScript = path.join(targetDir, "scripts", "pull-model.cjs")
+  let current = null
   try {
-    run(`"${process.execPath}" "${pullScript}" ${model}`, { env: { ...process.env, REFUGIO_MODEL: model } })
-  } catch (err) {
-    warn(`Model provisioning failed: ${err.message}`)
-    warn(`Retry later: node ${pullScript} ${model}`)
+    ({ current } = require(path.join(targetDir, "scripts", "mem-fit.cjs")).installPair(optimal))
+  } catch {}
+  const toPull = [optimal, current].filter(Boolean)
+  for (const m of toPull) {
+    const role = m === optimal ? "optimal" : "lighter (busy-RAM)"
+    try {
+      console.log(`  ${C.dim}→ ${role}: ${m}${C.reset}`)
+      run(`"${process.execPath}" "${pullScript}" ${m}`, { env: { ...process.env, REFUGIO_MODEL: m } })
+    } catch (err) {
+      warn(`Model provisioning failed for ${m}: ${err.message}`)
+      warn(`Retry later: node ${pullScript} ${m}`)
+    }
   }
   console.log("")
 }

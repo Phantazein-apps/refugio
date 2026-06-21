@@ -90,12 +90,6 @@ function getJson(url, timeout = 4000) {
   })
 }
 
-// True if Ollama already has the given model tag downloaded.
-async function ollamaHasModel(tag) {
-  const t = await getJson("http://127.0.0.1:11434/api/tags")
-  return (t.models || []).some(m => m.name === tag || m.model === tag)
-}
-
 // ── Open browser ────────────────────────────────────────────
 
 function openBrowser(url) {
@@ -451,46 +445,36 @@ ${C.bold}============================================================
     }
   }
 
-  // ── Adaptive model: fit the model to RAM available *right now* ──
-  // Install picks by TOTAL RAM (what to download). The real limit at launch is
-  // FREE RAM after the user's apps load, so re-pick the largest model that fits
-  // now — downshifting (and pulling on demand) when the machine is busy. No
-  // troubleshooting required: the target user never has to think about RAM.
+  // ── Adaptive model: activate the model that fits FREE RAM right now ──
+  // Two tiers are installed (optimal + a lighter "busy" one). Each launch we pick
+  // the largest INSTALLED model that fits the RAM actually free now — no on-demand
+  // download, no troubleshooting. If even the lightest is tight, run it anyway and
+  // tell the user to close some apps.
   let runtimeModel = env.REFUGIO_MODEL || ""
-  if (wantsOllama && runtimeModel && memFit) {
+  if (wantsOllama && memFit) {
     try {
-      const { pickRuntimeModel, MODEL_LADDER } = memFit
-      if (MODEL_LADDER.some(m => m.tag === runtimeModel)) {  // skip custom/unknown tags
-        const pick = pickRuntimeModel({ availableGb, owuiOverheadGb: owuiOverhead, ceilingTag: runtimeModel })
-
+      await waitForServer("http://127.0.0.1:11434/api/tags", 15000)
+      const tags = await getJson("http://127.0.0.1:11434/api/tags")
+      const installed = (tags.models || []).map(m => m.name || m.model).filter(Boolean)
+      const pick = memFit.pickInstalledModel({ availableGb, owuiOverheadGb: owuiOverhead, installedTags: installed })
+      if (pick.tag) {
+        runtimeModel = pick.tag
         if (!pick.fits) {
-          warn(`Low memory: ~${availableGb.toFixed(1)} GB free — running the smallest model (${pick.tag}). Close some apps for better results.`)
-        } else if (pick.downshiftedFrom) {
-          warn(`~${availableGb.toFixed(1)} GB free now → running ${pick.tag} (your ${pick.downshiftedFrom} needs more free RAM; close apps to use it)`)
+          warn(`Low memory: ~${availableGb.toFixed(1)} GB free — running the lightest installed model (${pick.tag}). Close some apps for better results.`)
+        } else if (pick.heavier) {
+          ok(`~${availableGb.toFixed(1)} GB free → running ${pick.tag} (heavier "${pick.heavier}" is installed; it activates when more RAM is free)`)
         } else {
           ok(`~${availableGb.toFixed(1)} GB free → running ${pick.tag}`)
         }
-
-        // The downshift target may be a model we never downloaded — fetch it on
-        // demand (HF fallback handles blocked registries). On failure, keep the
-        // model the installer already pulled rather than leaving none.
-        if (pick.tag !== runtimeModel) {
-          await waitForServer("http://127.0.0.1:11434/api/tags", 20000)
-          if (await ollamaHasModel(pick.tag)) {
-            runtimeModel = pick.tag
-          } else {
-            ok(`Fetching ${pick.tag} (first time on this machine)...`)
-            try {
-              execSync(`"${process.execPath}" scripts/pull-model.cjs ${pick.tag}`, {
-                cwd: REFUGIO_DIR, stdio: "inherit", env: { ...mergedEnv, REFUGIO_MODEL: pick.tag }
-              })
-            } catch { /* pull-model logs its own failure */ }
-            runtimeModel = (await ollamaHasModel(pick.tag)) ? pick.tag : (env.REFUGIO_MODEL || pick.tag)
-            if (runtimeModel !== pick.tag) warn(`Could not fetch ${pick.tag} — keeping ${runtimeModel}`)
-          }
-        }
+      } else if (installed.length === 0) {
+        // Ollama wasn't ready / returned no models — keep the install-time model
+        // (the one we know was pulled) rather than guessing, and say so.
+        warn(`Couldn't read installed models yet — defaulting to ${runtimeModel || "Ollama's own default"}`)
+      } else {
+        // Only off-ladder/custom models are installed — use the configured one.
+        warn(`No managed-ladder model installed — using ${runtimeModel || "Ollama's own default"}`)
       }
-    } catch { /* adaptive selection is best-effort; fall back to the install model */ }
+    } catch { /* best-effort; fall back to the install model */ }
   }
   mergedEnv.REFUGIO_RUNTIME_MODEL = runtimeModel
 
