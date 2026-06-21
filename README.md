@@ -65,6 +65,8 @@ The installer picks a tool-calling-capable Ollama model sized to your system mem
 
 Sizes account for macOS + your other apps, not just total RAM. On **≤ 8 GB** machines REFUGIO also unloads the model shortly after you stop chatting (so it doesn't hold RAM hostage between messages).
 
+**Adaptive at launch.** The table above is the *ceiling* — what gets downloaded. Every time REFUGIO starts it also measures how much RAM is actually **free** (after your other apps are loaded) and runs the largest model that fits *right now*, automatically downshifting — and fetching a smaller model if needed — when the machine is busy. If memory is very tight it falls back to the 1B and tells you to close a few apps. No manual tuning, and no troubleshooting required.
+
 > On Apple Silicon, make sure Ollama is the **arm64** build — an x86_64/Rosetta Ollama runs CPU-only (no Metal GPU) and is far too slow for any but the smallest models.
 
 Pull more models any time with `ollama pull <model>`, then pick them in the model selector. To override the default at install time, set `REFUGIO_MODEL` (e.g. `REFUGIO_MODEL=llama3.1:8b`).

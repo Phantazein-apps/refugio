@@ -77,6 +77,25 @@ function probeHttp(url, timeout = 1500) {
   })
 }
 
+// GET a URL and parse JSON; resolves {} on any error/timeout.
+function getJson(url, timeout = 4000) {
+  return new Promise(resolve => {
+    const req = http.get(url, res => {
+      let b = ""
+      res.on("data", c => b += c)
+      res.on("end", () => { try { resolve(JSON.parse(b)) } catch { resolve({}) } })
+    })
+    req.on("error", () => resolve({}))
+    req.setTimeout(timeout, () => { req.destroy(); resolve({}) })
+  })
+}
+
+// True if Ollama already has the given model tag downloaded.
+async function ollamaHasModel(tag) {
+  const t = await getJson("http://127.0.0.1:11434/api/tags")
+  return (t.models || []).some(m => m.name === tag || m.model === tag)
+}
+
 // ── Open browser ────────────────────────────────────────────
 
 function openBrowser(url) {
@@ -383,6 +402,21 @@ ${C.bold}============================================================
 
   const mergedEnv = { ...process.env, ...env }
 
+  // ── Memory snapshot (shared by model selection + OWUI sizing) ──
+  // Measure RAM that's actually FREE now so BOTH the model choice and the
+  // RAG-embedding offload react to the same real constraint. Using total RAM for
+  // one and available for the other would let PyTorch load on a busy high-RAM
+  // machine and OOM the model.
+  let memFit = null
+  try { memFit = require(path.join(REFUGIO_DIR, "scripts", "mem-fit.cjs")) } catch {}
+  const totalGb = os.totalmem() / (1024 ** 3)
+  const availableGb = memFit ? memFit.availableMemGb() : totalGb
+  // Offload OWUI's RAG embeddings to Ollama (skip the ~1-1.5 GB PyTorch load at
+  // boot) when memory is tight — a small machine OR a big one that's busy now.
+  // owuiOverhead below MUST match this so model fit and the offload agree.
+  const offloadEmbeddings = totalGb <= 8 || availableGb < 6
+  const owuiOverhead = offloadEmbeddings ? 0.7 : 1.5
+
   // ── Ensure the local LLM (Ollama) is serving ────────────────
   // For local-model setups, keep `ollama serve` alive under the supervisor so
   // the model is available after a reboot. Skip if something already owns :11434
@@ -416,6 +450,49 @@ ${C.bold}============================================================
       }
     }
   }
+
+  // ── Adaptive model: fit the model to RAM available *right now* ──
+  // Install picks by TOTAL RAM (what to download). The real limit at launch is
+  // FREE RAM after the user's apps load, so re-pick the largest model that fits
+  // now — downshifting (and pulling on demand) when the machine is busy. No
+  // troubleshooting required: the target user never has to think about RAM.
+  let runtimeModel = env.REFUGIO_MODEL || ""
+  if (wantsOllama && runtimeModel && memFit) {
+    try {
+      const { pickRuntimeModel, MODEL_LADDER } = memFit
+      if (MODEL_LADDER.some(m => m.tag === runtimeModel)) {  // skip custom/unknown tags
+        const pick = pickRuntimeModel({ availableGb, owuiOverheadGb: owuiOverhead, ceilingTag: runtimeModel })
+
+        if (!pick.fits) {
+          warn(`Low memory: ~${availableGb.toFixed(1)} GB free — running the smallest model (${pick.tag}). Close some apps for better results.`)
+        } else if (pick.downshiftedFrom) {
+          warn(`~${availableGb.toFixed(1)} GB free now → running ${pick.tag} (your ${pick.downshiftedFrom} needs more free RAM; close apps to use it)`)
+        } else {
+          ok(`~${availableGb.toFixed(1)} GB free → running ${pick.tag}`)
+        }
+
+        // The downshift target may be a model we never downloaded — fetch it on
+        // demand (HF fallback handles blocked registries). On failure, keep the
+        // model the installer already pulled rather than leaving none.
+        if (pick.tag !== runtimeModel) {
+          await waitForServer("http://127.0.0.1:11434/api/tags", 20000)
+          if (await ollamaHasModel(pick.tag)) {
+            runtimeModel = pick.tag
+          } else {
+            ok(`Fetching ${pick.tag} (first time on this machine)...`)
+            try {
+              execSync(`"${process.execPath}" scripts/pull-model.cjs ${pick.tag}`, {
+                cwd: REFUGIO_DIR, stdio: "inherit", env: { ...mergedEnv, REFUGIO_MODEL: pick.tag }
+              })
+            } catch { /* pull-model logs its own failure */ }
+            runtimeModel = (await ollamaHasModel(pick.tag)) ? pick.tag : (env.REFUGIO_MODEL || pick.tag)
+            if (runtimeModel !== pick.tag) warn(`Could not fetch ${pick.tag} — keeping ${runtimeModel}`)
+          }
+        }
+      }
+    } catch { /* adaptive selection is best-effort; fall back to the install model */ }
+  }
+  mergedEnv.REFUGIO_RUNTIME_MODEL = runtimeModel
 
   // ── Start MCP servers ───────────────────────────────────────
   const servers = [
@@ -515,7 +592,7 @@ ${C.bold}============================================================
     // survives reinstalls/updates — the venv is wiped (--clear) on every re-run.
     const dataDir = path.join(REFUGIO_DIR, "data")
     try { fs.mkdirSync(dataDir, { recursive: true }) } catch {}
-    const lowRam = os.totalmem() / (1024 ** 3) <= 8
+    const lowRam = offloadEmbeddings   // tied to AVAILABLE RAM (see memory snapshot above)
     const owuiEnv = {
       ...process.env,
       WEBUI_NAME: "REFUGIO",
@@ -600,7 +677,7 @@ ${C.bold}============================================================
       try {
         const output = execSync(`"${nodeBin}" scripts/configure-owui.cjs --port ${PORT}`, {
           cwd: REFUGIO_DIR, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
-          timeout: 30000
+          timeout: 30000, env: { ...mergedEnv, REFUGIO_RUNTIME_MODEL: runtimeModel }
         }).trim()
         for (const line of output.split("\n")) {
           if (line.startsWith("__TOKEN__=")) {

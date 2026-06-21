@@ -184,14 +184,22 @@ async function main() {
   const name = env.OWUI_NAME || "Admin"
   const email = env.OWUI_EMAIL
   const password = env.OWUI_PASSWORD || "changeme"
-  const defaultModel = env.REFUGIO_MODEL || ""
+  // Prefer the model the supervisor actually chose for current RAM (it may have
+  // downshifted from the install-time pick); fall back to the install model.
+  const defaultModel = env.REFUGIO_RUNTIME_MODEL || env.REFUGIO_MODEL || ""
 
-  // Scale tool behavior to the machine. Small models (3b, ≤8 GB) can't drive
-  // native tool-calling without over-firing for every message, so they get
-  // prompt-based calling + a modest context. Capable systems (8b+/16 GB+) get
-  // native function-calling and a larger context — tools "just work" there.
+  // Scale tool behavior to the model we're ACTUALLY running, not total RAM. Only
+  // 8b+ drive native tool-calling cleanly; small models (1b/3b) over-fire built-in
+  // tools (e.g. query_knowledge_bases for "2+2") under native FC, so they get
+  // prompt-based calling + a modest context. This keeps a downshifted model on a
+  // big machine behaving sanely too.
   const ramGb = os.totalmem() / (1024 ** 3)
-  const capable = ramGb > 8
+  let capable = ramGb > 8   // fallback when the model isn't on the known ladder
+  try {
+    const { ladderIndex } = require("./mem-fit.cjs")
+    const idx = ladderIndex(defaultModel)
+    if (idx >= 0) capable = idx >= 2   // llama3.1:8b and up
+  } catch {}
   const fnCalling = capable ? "native" : "default"
   const ctxSize = capable ? 16384 : 4096   // smaller KV cache on tight machines
 
@@ -382,7 +390,7 @@ async function main() {
     log("⚠", `Model config: ${e.message}`)
   }
 
-  log("→", `Tool mode: ${capable ? `native — tools auto-fire (capable system, ${Math.round(ramGb)} GB)` : `prompt-based — clean chat, tools on request (${Math.round(ramGb)} GB)`}`)
+  log("→", `Tool mode: ${capable ? `native — tools auto-fire (${defaultModel || "model"})` : `prompt-based — clean chat, tools on request (${defaultModel || "small model"})`}`)
   log("✓", "Configuration complete")
   console.log("")
   console.log(`  REFUGIO → http://127.0.0.1:${port}`)
