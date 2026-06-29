@@ -1,6 +1,31 @@
-# 🏔️ REFUGIO
+<div align="center">
+
+<img src="assets/banner.svg" alt="REFUGIO — a self-hosted refuge for your AI" width="100%">
+
+<p>
+  <img src="https://img.shields.io/badge/macOS%20·%20Linux%20·%20Windows-f4f2ee?style=flat-square&labelColor=000000" alt="Cross-platform">
+  <img src="https://img.shields.io/badge/local%20LLM-Ollama%20%2F%20LM%20Studio-ff0018?style=flat-square&labelColor=000000" alt="Local LLM">
+  <img src="https://img.shields.io/badge/connectors-MCP-ff0018?style=flat-square&labelColor=000000" alt="MCP connectors">
+  <img src="https://img.shields.io/badge/license-MIT-a8a5a0?style=flat-square&labelColor=000000" alt="MIT license">
+</p>
 
 **A self-hosted refuge for your AI — runs entirely on your own machine.**
+
+<sub>Part of the <a href="https://phantazein.com">Phantazein</a> toolkit</sub>
+
+</div>
+
+---
+
+<table>
+<tr>
+<td><a href="#install">📦 Install</a></td>
+<td><a href="#local-llm-engine">🧠 LLM engine</a></td>
+<td><a href="#connectors">🔌 Connectors</a></td>
+<td><a href="#day-to-day-usage">⚡ Daily use</a></td>
+<td><a href="#custom-domain">🌐 Domain</a></td>
+</tr>
+</table>
 
 One command installs a **local LLM** (Ollama or LM Studio) and [Open WebUI](https://github.com/open-webui/open-webui), giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your workplace tools — Slack, Notion, Jira, ServiceNow, Salesforce, and persistent memory.
 
@@ -262,3 +287,9 @@ All servers support three transports:
 ## License
 
 MIT
+
+---
+
+<div align="center">
+<sub>Built by <a href="https://phantazein.com">Phantazein</a> · <a href="https://github.com/Phantazein-apps">more tools →</a></sub>
+</div>

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="REFUGIO — Local LLM + Open WebUI + MCP — one command.">
+  <rect width="1200" height="360" fill="#000000"/>
+
+  <!-- bold Phantazein mark bleeding off the right edge -->
+  <g transform="translate(1200,206) scale(2.6)" fill="#ff0018" opacity="0.95"><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(0)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(45)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(90)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(135)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(180)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(225)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(270)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(315)"/></g>
+
+  <!-- editorial hairlines -->
+  <line x1="84" y1="46" x2="1116" y2="46" stroke="#2a2a2a" stroke-width="1"/>
+  <line x1="84" y1="314" x2="1116" y2="314" stroke="#1c1c1c" stroke-width="1"/>
+
+  <!-- kicker row: mark + PHANTAZEIN (left) · status (right) -->
+  <g transform="translate(91,80) scale(0.15)" fill="#ff0018" opacity="1"><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(0)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(45)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(90)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(135)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(180)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(225)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(270)"/><rect x="-5.5" y="-46" width="11" height="34" rx="1.5" transform="rotate(315)"/></g>
+  <text x="108" y="85" fill="#a8a5a0" font-family="'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace" font-size="13" letter-spacing="4">PHANTAZEIN</text>
+  <circle cx="966" cy="80" r="3.5" fill="#ff0018"/>
+  <text x="978" y="85" fill="#5e5c58" font-family="'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace" font-size="13" letter-spacing="2">OPEN SOURCE · MIT</text>
+
+  <!-- red accent tick above the wordmark -->
+  <rect x="84" y="126" width="46" height="4" fill="#ff0018"/>
+
+  <!-- wordmark -->
+  <text x="82" y="200" fill="#f4f2ee" font-family="'Archivo Black','Arial Black','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="76" font-weight="900" letter-spacing="-0.5">REFUGIO</text>
+
+  <!-- greek / descriptor (mono) -->
+  <text x="84" y="232" fill="#a8a5a0" font-family="'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace" font-size="15" letter-spacing="0.5">refugio · a shelter for your AI</text>
+
+  <!-- tagline (sans) -->
+  <text x="84" y="270" fill="#cfccc4" font-family="'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif" font-size="20" font-weight="400">Local LLM + Open WebUI + MCP — one command.</text>
+
+  <!-- bottom rule labels (mono) -->
+  <text x="84" y="338" fill="#5e5c58" font-family="'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace" font-size="12" letter-spacing="1.5"><tspan fill="#ff0018">01</tspan>  —  SELF-HOSTED LOCAL AI</text>
+  <text x="1116" y="338" fill="#5e5c58" font-family="'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace" font-size="12" letter-spacing="1" text-anchor="end">github.com/Phantazein-apps</text>
+</svg>
