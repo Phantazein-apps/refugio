@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>REFUGIO</string>
+  <key>CFBundleDisplayName</key><string>REFUGIO</string>
+  <key>CFBundleIdentifier</key><string>com.phantazein.refugio.menubar</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>0.1</string>
+  <key>CFBundleExecutable</key><string>RefugioBar</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <!-- Menu-bar agent: no Dock icon, lives in the status bar. -->
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>

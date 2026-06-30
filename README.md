@@ -63,7 +63,7 @@ irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refug
 
 ### After install
 
-REFUGIO **auto-starts on login** — no need to relaunch after a reboot.
+On machines with comfortable RAM, REFUGIO **auto-starts on login**. On **low-RAM (≤ 8 GB)** machines it runs **on demand** instead — so it never holds memory when you're not using it (start with `refugio`, stop with `refugio stop`).
 
 1. Open **https://refugio** (or **http://refugio.localhost:8080** on macOS/Linux — **http://127.0.0.1:8080** on Windows — if you skipped the custom domain) — you're already logged in
 2. Start chatting — your local model is ready
@@ -122,17 +122,34 @@ Memory scales to your RAM:
 
 ## Day-to-Day Usage
 
-REFUGIO auto-starts on login. To start it manually:
+**Comfortable RAM (> 8 GB):** REFUGIO auto-starts on login. To start it manually:
 
 ```bash
-node ~/refugio/start-refugio.cjs
-# or
-cd ~/refugio && npm start
+node ~/refugio/start-refugio.cjs   # or: cd ~/refugio && npm start
+```
+
+**Low RAM (≤ 8 GB):** REFUGIO runs **on demand** so it doesn't hold ~0.6 GB all day. (The model itself is always loaded lazily on the first chat and unloaded shortly after — startup never loads a model — so idle cost is just Open WebUI, which on-demand mode frees when you quit.)
+
+```bash
+refugio          # start it (opens the browser)
+refugio stop     # stop everything and free the RAM
+refugio status   # is it running?
+# or double-click "Start REFUGIO.command" (macOS) / "Start-REFUGIO.bat" (Windows)
 ```
 
 To reconfigure or update, run the installer again.
 
-**Auto-start details:**
+### Menu-bar app (macOS)
+
+A tiny native menu-bar app gives non-technical users a one-click **Start / Stop / Open** control, a **Launch at Login** toggle, and **Quit** — no terminal needed. It just drives the existing `~/refugio` supervisor (quitting the app does *not* stop REFUGIO; use **Stop**).
+
+```bash
+cd ~/refugio/menubar && ./install.sh      # builds REFUGIO.app → /Applications, launches it
+```
+
+Requires the Swift toolchain (`xcode-select --install`). Look for the **mountain** icon in the menu bar.
+
+**Auto-start details (> 8 GB):**
 - **macOS**: launchd (`~/Library/LaunchAgents/com.phantazein.refugio.plist`)
 - **Linux**: systemd user service (`~/.config/systemd/user/refugio.service`)
 - **Windows**: Startup folder (`REFUGIO.vbs`)
