@@ -27,7 +27,7 @@
 </tr>
 </table>
 
-One command installs a **local LLM** (Ollama or LM Studio) and [Open WebUI](https://github.com/open-webui/open-webui), giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your **personal** tools — WhatsApp ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)), email ([Epistole](https://github.com/Phantazein-apps/epistole)), Notion, and persistent memory — and, if you want, **business** tools like Slack, Jira, ServiceNow, and Salesforce.
+One command installs a **local LLM** (Ollama or LM Studio) and [Open WebUI](https://github.com/open-webui/open-webui), giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your **personal** tools — WhatsApp ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)), email ([Epistole](https://github.com/Phantazein-apps/epistole)), Apple Reminders, Things 3, Notion, and persistent memory — and, if you want, **business** tools like Slack, Jira, ServiceNow, and Salesforce.
 
 Works on **macOS, Linux, and Windows**. No prerequisites — the installer handles everything (Node.js, Python, Git, the LLM engine, the model, and Open WebUI).
 
@@ -54,7 +54,7 @@ irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refug
 3. Sets up your **local LLM engine**:
    - Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM, **or**
    - Lets you choose **[LM Studio](https://lmstudio.ai/)** instead (connects to its local server on `:1234`; auto-detected and preferred if already running)
-4. Walks you through optional connectors: **personal** first (WhatsApp — with a QR scan in the browser — email, Notion, and a memory backend), then **business** (Slack, Jira, ServiceNow, Salesforce) if you opt in
+4. Walks you through optional connectors: **personal** first (WhatsApp — with a QR scan in the browser — email, Apple Reminders, Things 3, Notion, and a memory backend), then **business** (Slack, Jira, ServiceNow, Salesforce) if you opt in
 5. Installs **Open WebUI** in an isolated virtual environment
 6. Optionally sets up **https://refugio** as a local domain (mkcert + Caddy)
 7. Starts everything, creates your account, and opens the browser — already logged in
@@ -108,6 +108,8 @@ All connectors are **optional** — configure only the ones you want, or none at
 |-----------|-------------|-------|
 | **WhatsApp** ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)) | local, stdio via MCPO | `list_messages`, `list_chats`, `search_contacts`, `send_message`, media, multi-account — 17 tools |
 | **Email** ([Epistole](https://github.com/Phantazein-apps/epistole)) | your own Cloudflare Worker, via [mcp-remote](https://github.com/geelen/mcp-remote) | `read_inbox`, `search_messages`, `semantic_search`, `send_message`, `reply_to_message` — 19 tools |
+| **Apple Reminders** ([just-claude-reminders](https://github.com/Phantazein-apps/just-claude-reminders)) | bundled with REFUGIO, stdio via MCPO | `reminders_get_reminders`, `reminders_create_reminder`, `reminders_complete_reminder` — 7 tools |
+| **Things 3** ([just-claude-things](https://github.com/Phantazein-apps/just-claude-things)) | bundled with REFUGIO, stdio via MCPO | `things3_get_todos`, `things3_create_todo`, `things3_complete_todo` — 10 tools |
 | **Notion** | local server, port 3002 | `search`, `get_page`, `get_block_children`, `query_database` |
 | **Memory** | local server, port 3004 | see below |
 
@@ -122,6 +124,10 @@ Already have your own Hermeneia checkout? Point `HERMENEIA_DIR` at it in `~/.ref
 #### Email (Epistole)
 
 [Epistole](https://github.com/Phantazein-apps/epistole) is a remote MCP server you deploy to **your own Cloudflare account** (free tier; a separate ~30-minute setup — see its README). Once deployed, give the installer its URL: it runs the one-time OAuth flow in your browser (Epistole emails you a code), caches the tokens locally, and from then on REFUGIO connects headlessly via `mcp-remote`.
+
+#### Apple Reminders & Things 3
+
+Both ship **bundled with REFUGIO** as npm dependencies ([just-claude-reminders](https://github.com/Phantazein-apps/just-claude-reminders), [just-claude-things](https://github.com/Phantazein-apps/just-claude-things)) — no credentials, no extra install; the installer just asks whether to enable them (`REFUGIO_REMINDERS=1` / `REFUGIO_THINGS=1` in `~/.refugio.env`). macOS only: they drive the apps via JXA/AppleScript, so the **first tool call** triggers the standard macOS Automation permission prompt (System Settings → Privacy & Security → Automation). Things 3 additionally requires [the app](https://culturedcode.com/things/) to be installed — the installer skips it if it isn't.
 
 ### Business connectors
 
@@ -202,6 +208,7 @@ curl | bash
 Browser → https://refugio (Caddy) → Open WebUI (:8080) ─┬─→ Ollama / LM Studio (local model)
                                                          └─→ MCPO (:8010) ─┬─→ MCP servers (:3001–3007) → APIs
                                                                            ├─→ Hermeneia (stdio) → WhatsApp
+                                                                           ├─→ Reminders / Things 3 (stdio → JXA)
                                                                            └─→ mcp-remote (stdio) → Epistole (your Worker)
 ```
 
@@ -244,6 +251,10 @@ HERMENEIA_DIR=/Users/you/hermeneia
 
 # -- Email (Epistole) — base URL of your deployed Worker --
 EPISTOLE_URL=https://mail.yourdomain.com
+
+# -- Apple Reminders / Things 3 (macOS, bundled — set to 1 to enable) --
+REFUGIO_REMINDERS=1
+REFUGIO_THINGS=1
 
 # -- Notion --
 NOTION_TOKEN=ntn_...
@@ -292,7 +303,7 @@ node servers/salesforce.js --http       # port 3007
 Override the port: `MCP_SSE_PORT=4000 node servers/slack.js --http`
 Verify a server: `curl http://localhost:3001/health`
 
-WhatsApp (Hermeneia) and email (Epistole) have no local ports of their own — the supervisor writes them into `mcpo-config.json` as stdio entries and MCPO spawns them (`node $HERMENEIA_DIR/dist/index.js`, and `mcp-remote $EPISTOLE_URL/mcp` respectively).
+WhatsApp (Hermeneia), email (Epistole), Apple Reminders, and Things 3 have no local ports of their own — the supervisor writes them into `mcpo-config.json` as stdio entries and MCPO spawns them (`node $HERMENEIA_DIR/dist/index.js`, `mcp-remote $EPISTOLE_URL/mcp`, and the bundled `node_modules/{reminders-mcp,just-claude-things}/dist/index.js`).
 
 ## Server Modes
 

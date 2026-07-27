@@ -404,6 +404,36 @@ async function setupEpistole(env, existing, targetDir) {
   console.log("")
 }
 
+// ── Personal connectors: Apple Reminders + Things 3 ──────────
+// Both are local JXA-based MCP servers vendored as npm dependencies of
+// REFUGIO (Phantazein's just-claude-reminders / just-claude-things) — no
+// credentials, no clone, no ports. macOS only: the first tool call triggers
+// the standard macOS Automation permission prompt for the target app.
+
+async function setupAppleReminders(env, existing) {
+  if (os.platform() !== "darwin") return
+  const on = existing.REFUGIO_REMINDERS === "1"
+  console.log(`  ${C.bold}Apple Reminders${C.reset}${on ? ` ${C.green}(enabled)${C.reset}` : ""}`)
+  console.log(`    ${C.dim}Read, create, and complete your reminders. macOS asks for Automation permission on first use.${C.reset}`)
+  env.REFUGIO_REMINDERS = (await confirm("Connect Apple Reminders?", true)) ? "1" : ""
+  console.log("")
+}
+
+async function setupThings(env, existing) {
+  if (os.platform() !== "darwin") return
+  const on = existing.REFUGIO_THINGS === "1"
+  const installed = fs.existsSync("/Applications/Things3.app")
+  if (!installed && !on) {
+    console.log(`    ${C.dim}Things 3 not found in /Applications — skipping that connector.${C.reset}\n`)
+    return
+  }
+  console.log(`  ${C.bold}Things 3${C.reset}${on ? ` ${C.green}(enabled)${C.reset}` : ""}`)
+  console.log(`    ${C.dim}Browse and manage your Things to-dos, projects, and areas. Automation permission on first use.${C.reset}`)
+  if (!installed) warn("Things 3 app not found in /Applications — the connector won't work until it's installed")
+  env.REFUGIO_THINGS = (await confirm("Connect Things 3?", true)) ? "1" : ""
+  console.log("")
+}
+
 // ── LLM engine ───────────────────────────────────────────────
 
 const OLLAMA_URL = "http://localhost:11434"
@@ -719,6 +749,7 @@ function writeEnvFile(envPath, env) {
     { header: "Your Account", keys: ["OWUI_NAME", "OWUI_EMAIL", "OWUI_PASSWORD"] },
     { header: "WhatsApp (Hermeneia)", keys: ["HERMENEIA_DIR"] },
     { header: "Email (Epistole)", keys: ["EPISTOLE_URL"] },
+    { header: "Apple Reminders / Things 3", keys: ["REFUGIO_REMINDERS", "REFUGIO_THINGS"] },
     { header: "Notion", keys: ["NOTION_TOKEN"] },
     { header: "Memory", keys: ["REFUGIO_MEMORY", "GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_MEMORY_PATH"] },
     { header: "Slack", keys: ["SLACK_TOKEN"] },
@@ -841,6 +872,8 @@ async function promptCredentials(envPath, targetDir) {
   console.log(`  ${C.bold}── Personal connectors ──${C.reset} ${C.dim}your messages, mail, and notes${C.reset}\n`)
   await setupHermeneia(env, existing)
   await setupEpistole(env, existing, targetDir)
+  await setupAppleReminders(env, existing)
+  await setupThings(env, existing)
   for (const conn of PERSONAL_CONNECTORS) {
     await promptConnector(conn)
   }

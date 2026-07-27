@@ -29,7 +29,9 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "dotenv": "^16.4.7",
     "googleapis": "^171.4.0",
+    "just-claude-things": "github:Phantazein-apps/just-claude-things",
     "mcp-remote": "^0.1.38",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "reminders-mcp": "github:Phantazein-apps/just-claude-reminders"
   }
 }

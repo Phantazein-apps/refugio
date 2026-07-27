@@ -74,6 +74,8 @@ async function buildSystemPrompt(env) {
   prompt += "\n- Writing style, preferences, tone, personal context, saved notes → memory get"
   prompt += "\n- WhatsApp messages, chats, contacts → list_messages / list_chats / send_message"
   prompt += "\n- Email — inbox, threads, sending mail → read_inbox / search_messages / semantic_search"
+  prompt += "\n- Reminders, alarms, grocery/shopping lists → reminders_get_reminders / reminders_create_reminder"
+  prompt += "\n- To-dos, tasks, projects (Things) → things3_get_todos / things3_create_todo"
   prompt += "\n- Slack messages, conversations, channels → search_messages / get_channel_history"
   prompt += "\n- Jira tickets, sprints, projects → search_issues / get_issue"
   prompt += "\n- Notion pages, docs, databases → search / get_page"
@@ -127,6 +129,22 @@ async function buildSystemPrompt(env) {
     prompt += "\n- get_message: Full email content by UID"
     prompt += "\n- send_message / reply_to_message: Send new mail or reply with threading"
     prompt += "\n- CRITICAL: Before sending or replying, ALWAYS show the user the exact draft and recipients and wait for their confirmation."
+  }
+
+  if (os.platform() === "darwin" && env.REFUGIO_REMINDERS === "1") {
+    prompt += "\n\n## Apple Reminders"
+    prompt += "\n- reminders_get_reminders: List reminders (filter by list, completed, or text)"
+    prompt += "\n- reminders_get_lists: List reminder lists"
+    prompt += "\n- reminders_create_reminder: Create (title, notes, due date, priority, flag)"
+    prompt += "\n- reminders_update_reminder / reminders_complete_reminder / reminders_delete_reminder: Manage"
+  }
+
+  if (os.platform() === "darwin" && env.REFUGIO_THINGS === "1") {
+    prompt += "\n\n## Things 3"
+    prompt += "\n- things3_get_todos: List to-dos (filter by project, area, tag, or list like Today/Inbox)"
+    prompt += "\n- things3_get_projects / things3_get_areas / things3_get_tags: Browse structure"
+    prompt += "\n- things3_create_todo / things3_create_project: Create"
+    prompt += "\n- things3_update_todo / things3_complete_todo / things3_delete_todo: Manage"
   }
 
   if (env.SLACK_TOKEN) {
@@ -295,6 +313,8 @@ async function main() {
   const MCP_SERVERS = [
     { key: "HERMENEIA_DIR", name: "whatsapp" },
     { key: "EPISTOLE_URL", name: "email" },
+    { key: "REFUGIO_REMINDERS", name: "reminders" },
+    { key: "REFUGIO_THINGS", name: "things" },
     { key: "NOTION_TOKEN", name: "notion" },
     { key: "GITHUB_TOKEN", name: "memory" },
     { key: "SLACK_TOKEN", name: "slack" },
@@ -318,10 +338,16 @@ async function main() {
     fs.existsSync(path.join(env.HERMENEIA_DIR, "dist", "index.js"))
   const epistoleActive = !!env.EPISTOLE_URL &&
     fs.existsSync(path.join(__dirname, "..", "node_modules", "mcp-remote", "dist", "proxy.js"))
+  const remindersActive = os.platform() === "darwin" && env.REFUGIO_REMINDERS === "1" &&
+    fs.existsSync(path.join(__dirname, "..", "node_modules", "reminders-mcp", "dist", "index.js"))
+  const thingsActive = os.platform() === "darwin" && env.REFUGIO_THINGS === "1" &&
+    fs.existsSync(path.join(__dirname, "..", "node_modules", "just-claude-things", "dist", "index.js"))
   const isActive = (s) => {
     if (s.name === "memory") return memActive
     if (s.name === "whatsapp") return hermeneiaActive
     if (s.name === "email") return epistoleActive
+    if (s.name === "reminders") return remindersActive
+    if (s.name === "things") return thingsActive
     return !!env[s.key]
   }
 

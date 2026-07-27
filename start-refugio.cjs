@@ -540,12 +540,24 @@ ${C.bold}============================================================
   if (useEpistole) ok(`email (Epistole @ ${env.EPISTOLE_URL}) → via MCPO (mcp-remote)`)
   else if (env.EPISTOLE_URL) warn("EPISTOLE_URL is set but mcp-remote is not installed (run: npm install) — email disabled")
 
+  // ── Apple Reminders / Things 3 — local JXA MCP servers (vendored) ──
+  // Shipped as npm dependencies of REFUGIO; enabled by installer flags.
+  // macOS only (they drive the apps via osascript/JXA).
+  const remindersJs = path.join(REFUGIO_DIR, "node_modules", "reminders-mcp", "dist", "index.js")
+  const useReminders = os.platform() === "darwin" && env.REFUGIO_REMINDERS === "1" && fs.existsSync(remindersJs)
+  if (useReminders) ok("reminders (Apple Reminders) → via MCPO (stdio)")
+
+  const thingsJs = path.join(REFUGIO_DIR, "node_modules", "just-claude-things", "dist", "index.js")
+  const useThings = os.platform() === "darwin" && env.REFUGIO_THINGS === "1" && fs.existsSync(thingsJs)
+  if (useThings) ok("things (Things 3) → via MCPO (stdio)")
+
   // ── Generate MCPO config and start proxy ────────────────────
   const MCPO_PORT = 8010
   const mcpoBin = isWin
     ? path.join(home, ".local", "bin", "mcpo.exe")
     : path.join(home, ".local", "bin", "mcpo")
-  const hasMcpoServers = activeMcpServers.length > 0 || useMemPalace || useHermeneia || useEpistole
+  const hasMcpoServers = activeMcpServers.length > 0 || useMemPalace || useHermeneia || useEpistole ||
+    useReminders || useThings
 
   if (hasMcpoServers && fs.existsSync(mcpoBin)) {
     const mcpoConfig = { mcpServers: {} }
@@ -562,6 +574,12 @@ ${C.bold}============================================================
         command: nodeBin,
         args: [mcpRemoteJs, `${env.EPISTOLE_URL.replace(/\/+$/, "")}/mcp`]
       }
+    }
+    if (useReminders) {
+      mcpoConfig.mcpServers["reminders"] = { command: nodeBin, args: [remindersJs] }
+    }
+    if (useThings) {
+      mcpoConfig.mcpServers["things"] = { command: nodeBin, args: [thingsJs] }
     }
 
     for (const s of activeMcpServers) {
@@ -587,6 +605,8 @@ ${C.bold}============================================================
     const allServers = []
     if (useHermeneia) allServers.push("whatsapp")
     if (useEpistole) allServers.push("email")
+    if (useReminders) allServers.push("reminders")
+    if (useThings) allServers.push("things")
     allServers.push(...activeMcpServers.map(s => s.server))
     if (useMemPalace) allServers.push("memory")
 
