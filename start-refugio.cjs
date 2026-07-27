@@ -641,6 +641,12 @@ ${C.bold}============================================================
     ? path.join(REFUGIO_DIR, "app", "env", "Scripts", "open-webui.exe")
     : path.join(REFUGIO_DIR, "app", "env", "bin", "open-webui")
 
+  // Tracked out here so the closing banner can always tell the user where to
+  // go (or why there's nowhere to go yet). Open WebUI IS the REFUGIO UI —
+  // without it the supervisor runs headless and there is nothing to open.
+  let uiUrl = null
+  let uiState = "missing"   // "ready" | "starting" | "missing" | "skipped"
+
   if (!noOwui && fs.existsSync(owuiBin)) {
     // Apply branding BEFORE starting OWUI — replace source files in frontend/static/
     // so OWUI's own config.py copies our branded assets into static/ on startup
@@ -689,7 +695,7 @@ ${C.bold}============================================================
     ok("Starting Open WebUI...")
 
     // ── Start Caddy ─────────────────────────────────────────────
-    let refugioUrl = `http://refugio.localhost:${PORT}`
+    let refugioUrl = isWin ? `http://127.0.0.1:${PORT}` : `http://refugio.localhost:${PORT}`
     const certFile = path.join(REFUGIO_DIR, "certs", "refugio.pem")
     const keyFile = path.join(REFUGIO_DIR, "certs", "refugio-key.pem")
     const caddyFile = path.join(REFUGIO_DIR, "Caddyfile")
@@ -722,6 +728,8 @@ ${C.bold}============================================================
       const elapsed = Math.round((Date.now() - waitStart) / 1000)
       process.stdout.write(`\r  Waiting for Open WebUI... done (${elapsed}s)\n`)
       ok(`Open WebUI → ${refugioUrl}`)
+      uiUrl = refugioUrl
+      uiState = "ready"
 
       // Wait for MCPO to be ready before configuring tool servers
       if (hasMcpoServers) {
@@ -774,9 +782,41 @@ window.location.href = '/';
       warn("Open WebUI is still starting (first boot downloads an embedding model)")
       warn("Open " + refugioUrl + " manually once it's up")
       warn(`If login/tools aren't set up, run: node scripts/configure-owui.cjs --port ${PORT}`)
+      uiUrl = refugioUrl
+      uiState = "starting"
     }
   } else if (!noOwui) {
-    warn("Open WebUI not installed — run the installer to set it up")
+    // Open WebUI IS the REFUGIO interface — without it there is no chat window,
+    // no browser to open, and https://refugio has nothing behind it. Say so
+    // plainly and give the exact command, instead of a vague "run the installer".
+    uiState = "missing"
+    warn("Open WebUI is NOT installed — REFUGIO has no chat interface yet.")
+    console.log(`    ${C.dim}Open WebUI is the REFUGIO window. Until it's installed, the supervisor`)
+    console.log(`    runs headless: nothing opens in your browser and https://refugio won't load.`)
+    console.log(`    Install it with:${C.reset}  ${C.bold}cd "${REFUGIO_DIR}" && node install-node.cjs${C.reset}`)
+    console.log(`    ${C.dim}(It needs 'uv' — if the installer skipped Open WebUI, that's usually why.)${C.reset}`)
+  } else {
+    uiState = "skipped"
+  }
+
+  // Lead with the one thing the user actually needs: where to go, or why
+  // there's nowhere to go yet.
+  let access
+  if (uiState === "ready") {
+    access = `  ${C.bold}Open REFUGIO:${C.reset}  ${C.bold}${uiUrl}${C.reset}
+  ${C.dim}(a browser tab should have opened already — if not, use the link above)${C.reset}`
+  } else if (uiState === "starting") {
+    access = `  ${C.bold}Open REFUGIO:${C.reset}  ${C.bold}${uiUrl}${C.reset}  ${C.yellow}(still booting — give it a minute)${C.reset}`
+  } else if (uiState === "skipped") {
+    access = `  ${C.dim}Open WebUI was skipped (--no-owui). Tools are up; there's no chat UI.${C.reset}`
+  } else {
+    access = `  ${C.yellow}No chat interface yet${C.reset} — Open WebUI isn't installed, so there is
+  nothing to open in a browser. Install it with:
+
+      ${C.bold}cd "${REFUGIO_DIR}" && node install-node.cjs${C.reset}
+
+  ${C.dim}Your connectors (WhatsApp, etc.) are already wired and will appear
+  automatically once Open WebUI is installed.${C.reset}`
   }
 
   console.log(`
@@ -784,8 +824,10 @@ ${C.bold}============================================================
  🏔️  REFUGIO is running — supervisor active
 ============================================================${C.reset}
 
+${access}
+
   Processes are monitored and auto-restarted if they crash.
-  To stop:  Ctrl+C or kill this process
+  To stop:  Ctrl+C, or ${C.bold}refugio stop${C.reset}
   Logs:     ~/.refugio-logs/
 `)
 
