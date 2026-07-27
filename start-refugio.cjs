@@ -523,13 +523,22 @@ ${C.bold}============================================================
   if (useMemPalace) ok("memory (MemPalace, lean 2-tool wrapper) → via MCPO (stdio)")
 
   // ── WhatsApp (Hermeneia) — stdio MCP server proxied via MCPO ──
-  // A local checkout with a prebuilt dist/ (installed by the installer, or the
-  // user's own — set HERMENEIA_DIR in ~/.refugio.env). MCPO spawns it directly;
-  // on an unlinked account it opens the QR page in the browser by itself.
+  // A local checkout (installed by the installer, or the user's own — set
+  // HERMENEIA_DIR in ~/.refugio.env). Needs both the Node bundle (dist/index.js)
+  // and the platform Go bridge binary (dist/hermeneia-bridge*, fetched by the
+  // installer — it's no longer committed to Hermeneia's repo). MCPO spawns it
+  // directly; on an unlinked account it exposes the QR page (and, on a desktop,
+  // opens the browser itself).
   const hermeneiaJs = env.HERMENEIA_DIR ? path.join(env.HERMENEIA_DIR, "dist", "index.js") : null
-  const useHermeneia = !!(hermeneiaJs && fs.existsSync(hermeneiaJs))
+  const hermeneiaDist = env.HERMENEIA_DIR ? path.join(env.HERMENEIA_DIR, "dist") : null
+  const hermeneiaHasBridge = !!(hermeneiaDist && fs.existsSync(hermeneiaDist) &&
+    fs.readdirSync(hermeneiaDist).some(f => f.startsWith("hermeneia-bridge")))
+  const useHermeneia = !!(hermeneiaJs && fs.existsSync(hermeneiaJs) && hermeneiaHasBridge)
   if (useHermeneia) ok("whatsapp (Hermeneia) → via MCPO (stdio)")
-  else if (env.HERMENEIA_DIR) warn(`HERMENEIA_DIR is set but ${hermeneiaJs} is missing — WhatsApp disabled`)
+  else if (env.HERMENEIA_DIR && hermeneiaJs && !fs.existsSync(hermeneiaJs))
+    warn(`HERMENEIA_DIR is set but ${hermeneiaJs} is missing — WhatsApp disabled`)
+  else if (env.HERMENEIA_DIR && !hermeneiaHasBridge)
+    warn(`HERMENEIA_DIR is set but the Go bridge binary is missing from ${hermeneiaDist} — re-run the installer or build it (npm run build) — WhatsApp disabled`)
 
   // ── Email (Epistole) — remote MCP via mcp-remote ────────────
   // The user's own Cloudflare Worker; mcp-remote proxies stdio↔HTTP and reuses
