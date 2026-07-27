@@ -566,7 +566,9 @@ ${C.bold}============================================================
     if (useHermeneia) {
       mcpoConfig.mcpServers["whatsapp"] = {
         command: nodeBin,
-        args: [hermeneiaJs]
+        args: [hermeneiaJs],
+        // Name shown in WhatsApp > Linked Devices for pairings made via REFUGIO
+        env: { HERMENEIA_DEVICE_NAME: "REFUGIO" }
       }
     }
     if (useEpistole) {

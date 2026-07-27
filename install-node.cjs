@@ -272,7 +272,12 @@ async function hermeneiaQRAuth(dir) {
   // opens the browser itself. stdin stays open (pipe) — it's a stdio MCP server.
   const child = spawn(process.execPath, [path.join(dir, "dist", "index.js")], {
     stdio: ["pipe", "ignore", "ignore"],
-    env: { ...process.env, HERMENEIA_QR_PORT: String(HERMENEIA_QR_PORT) }
+    env: {
+      ...process.env,
+      HERMENEIA_QR_PORT: String(HERMENEIA_QR_PORT),
+      // Pairing made here shows up as "REFUGIO" in WhatsApp > Linked Devices
+      HERMENEIA_DEVICE_NAME: "REFUGIO"
+    }
   })
   let spawnFailed = false
   child.on("error", () => { spawnFailed = true })
@@ -1291,19 +1296,22 @@ async function startREFUGIO(targetDir, env, autoStarted) {
     }
   }
 
-  // Wait for OWUI to be ready
+  // Wait for OWUI to be ready. The hint gets its own line — rewriting a line
+  // longer than the terminal width with \r leaves wrapped residue behind.
+  // \x1b[K clears from the cursor to end of line after each rewrite.
   const waitStart = Date.now()
-  process.stdout.write("  Waiting for Open WebUI to be ready... (first launch downloads a model — up to a few min) ")
+  console.log(`  ${C.dim}First launch downloads a model — this can take a few minutes.${C.reset}`)
+  process.stdout.write("  Waiting for Open WebUI to be ready... ")
   const timer = setInterval(() => {
     const elapsed = Math.round((Date.now() - waitStart) / 1000)
-    process.stdout.write(`\r  Waiting for Open WebUI to be ready... (${elapsed}s) `)
+    process.stdout.write(`\r  Waiting for Open WebUI to be ready... (${elapsed}s)\x1b[K`)
   }, 1000)
   const ready = await waitForServer(`http://127.0.0.1:${PORT}/api/config`, 300000)
   clearInterval(timer)
 
   if (ready) {
     const elapsed = Math.round((Date.now() - waitStart) / 1000)
-    process.stdout.write(`\r  Waiting for Open WebUI to be ready... done (${elapsed}s)                \n`)
+    process.stdout.write(`\r  Waiting for Open WebUI to be ready... done (${elapsed}s)\x1b[K\n`)
     ok(`Open WebUI → http://127.0.0.1:${PORT}`)
 
     // Set up https://refugio local domain
