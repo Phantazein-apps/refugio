@@ -1048,7 +1048,15 @@ async function promptCredentials(envPath, targetDir) {
 
 async function setupOpenWebUI(targetDir) {
   if (!has("uv")) {
-    warn("Skipping Open WebUI — uv not available")
+    // Open WebUI is the REFUGIO interface — skipping it leaves the user with a
+    // supervisor that starts, opens no browser, and has no chat window. Make
+    // that consequence explicit rather than a one-line "skipping" notice.
+    warn("Open WebUI SKIPPED — 'uv' is not installed.")
+    console.log(`    ${C.dim}Open WebUI is the REFUGIO window. Without it, REFUGIO starts but has no`)
+    console.log(`    chat interface and nothing opens in your browser.`)
+    console.log(`    Install uv, then re-run this installer:${C.reset}`)
+    console.log(`      ${C.bold}curl -LsSf https://astral.sh/uv/install.sh | sh${C.reset}   ${C.dim}(macOS / Linux)${C.reset}`)
+    console.log("")
     return
   }
 
