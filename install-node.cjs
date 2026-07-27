@@ -118,28 +118,36 @@ async function confirm(question, defaultYes = false) {
 }
 
 // ── Connectors ───────────────────────────────────────────────
+// Connectors are split into two groups: PERSONAL (your own messages, mail, and
+// notes — offered first) and BUSINESS (workplace systems — behind a single
+// opt-in gate). WhatsApp (Hermeneia) and email (Epistole) have their own setup
+// flows with a browser auth step, so they're not in these credential lists.
 
-const CONNECTORS = [
-  {
-    id: "account", name: "Your Account",
-    fields: [
-      { key: "OWUI_NAME", prompt: "Your display name" },
-      { key: "OWUI_EMAIL", prompt: "Your email address" },
-      { key: "OWUI_PASSWORD", prompt: "Set a password", secret: true, defaultVal: "changeme" }
-    ]
-  },
-  {
-    id: "slack", name: "Slack",
-    help: "https://api.slack.com/apps → OAuth & Permissions → User Token Scopes: search:read, channels:history, channels:read, users:read",
-    fields: [
-      { key: "SLACK_TOKEN", prompt: "Slack user token (xoxp-...)", secret: true }
-    ]
-  },
+const ACCOUNT_CONNECTOR = {
+  id: "account", name: "Your Account",
+  fields: [
+    { key: "OWUI_NAME", prompt: "Your display name" },
+    { key: "OWUI_EMAIL", prompt: "Your email address" },
+    { key: "OWUI_PASSWORD", prompt: "Set a password", secret: true, defaultVal: "changeme" }
+  ]
+}
+
+const PERSONAL_CONNECTORS = [
   {
     id: "notion", name: "Notion",
     help: "https://www.notion.so/profile/integrations → New integration → Copy Internal Integration Secret",
     fields: [
       { key: "NOTION_TOKEN", prompt: "Notion integration token (ntn_...)", secret: true }
+    ]
+  }
+]
+
+const BUSINESS_CONNECTORS = [
+  {
+    id: "slack", name: "Slack",
+    help: "https://api.slack.com/apps → OAuth & Permissions → User Token Scopes: search:read, channels:history, channels:read, users:read",
+    fields: [
+      { key: "SLACK_TOKEN", prompt: "Slack user token (xoxp-...)", secret: true }
     ]
   },
   {
@@ -210,6 +218,192 @@ async function promptGithubFields(env, existing) {
   return true
 }
 
+// ── Personal connector: WhatsApp via Hermeneia ───────────────
+// Hermeneia (github.com/Phantazein-apps/hermeneia) is a local WhatsApp MCP
+// server. Its repo ships a prebuilt dist/ (Node bundle + arm64 Go bridge), so
+// "install" is just a shallow clone — no build step. Auth is a QR scan:
+// running the server opens a browser page with the QR, and its local status
+// API reports when the phone has linked. macOS Apple Silicon only for now.
+
+const HERMENEIA_REPO = "https://github.com/Phantazein-apps/hermeneia.git"
+const HERMENEIA_QR_PORT = 3456
+
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+function fetchJson(url, timeout = 1500) {
+  return new Promise(resolve => {
+    try {
+      const req = require("http").get(url, res => {
+        let body = ""
+        res.on("data", c => body += c)
+        res.on("end", () => { try { resolve(JSON.parse(body)) } catch { resolve(null) } })
+      })
+      req.on("error", () => resolve(null))
+      req.setTimeout(timeout, () => { req.destroy(); resolve(null) })
+    } catch { resolve(null) }
+  })
+}
+
+// Has any WhatsApp account already been linked? accounts.json records a phone
+// number after pairing, but older Hermeneia versions leave it null — so also
+// accept an account session DB plus a non-trivial message store as proof.
+function hermeneiaLinked() {
+  const dataDir = process.env.HERMENEIA_DATA_DIR ||
+    path.join(home, "Library", "Application Support", "Hermeneia")
+  try {
+    const accounts = JSON.parse(fs.readFileSync(path.join(dataDir, "accounts.json"), "utf-8"))
+    if (!Array.isArray(accounts) || accounts.length === 0) return false
+    if (accounts.some(a => a && a.phone)) return true
+    const hasSession = accounts.some(a => a && a.id &&
+      fs.existsSync(path.join(dataDir, "accounts", a.id, "whatsmeow.db")))
+    const msgDb = fs.statSync(path.join(dataDir, "messages.db"))
+    return hasSession && msgDb.size > 1024 * 1024
+  } catch { return false }
+}
+
+async function hermeneiaQRAuth(dir) {
+  console.log("")
+  console.log(`    ${C.bold}Link your WhatsApp${C.reset} — a browser page with a QR code will open.`)
+  console.log(`    On your phone: ${C.bold}WhatsApp → Settings → Linked Devices → Link a Device${C.reset},`)
+  console.log(`    then point the camera at the QR code.`)
+  console.log("")
+
+  // Run Hermeneia directly; on an unlinked account it starts the QR page and
+  // opens the browser itself. stdin stays open (pipe) — it's a stdio MCP server.
+  const child = spawn(process.execPath, [path.join(dir, "dist", "index.js")], {
+    stdio: ["pipe", "ignore", "ignore"],
+    env: { ...process.env, HERMENEIA_QR_PORT: String(HERMENEIA_QR_PORT) }
+  })
+  let spawnFailed = false
+  child.on("error", () => { spawnFailed = true })
+
+  const deadline = Date.now() + 180_000
+  let linked = false
+  process.stdout.write("    Waiting for the scan (up to 3 min) ")
+  while (Date.now() < deadline && !spawnFailed) {
+    // Hermeneia's QR server bumps to the next port if 3456 is taken
+    for (const port of [HERMENEIA_QR_PORT, HERMENEIA_QR_PORT + 1]) {
+      const s = await fetchJson(`http://127.0.0.1:${port}/api/status/default`)
+      if (s && s.authenticated) { linked = true; break }
+    }
+    if (linked) break
+    process.stdout.write(".")
+    await sleep(2000)
+  }
+  console.log("")
+
+  if (linked) {
+    ok("WhatsApp linked! (message history syncs in the background once REFUGIO runs)")
+    await sleep(8000)   // let the bridge persist the fresh session before stopping
+  } else {
+    warn("QR not scanned — no problem. The QR page opens again the first time REFUGIO starts.")
+  }
+  try { child.kill("SIGTERM") } catch {}
+  await sleep(1500)   // release Hermeneia's single-instance lock before the supervisor respawns it
+  return linked
+}
+
+async function setupHermeneia(env, existing) {
+  if (!(os.platform() === "darwin" && isAppleSilicon())) {
+    console.log(`    ${C.dim}WhatsApp (Hermeneia) needs a Mac with an Apple chip — not offered on this machine.${C.reset}\n`)
+    return
+  }
+
+  const configured = existing.HERMENEIA_DIR && fs.existsSync(path.join(existing.HERMENEIA_DIR, "dist", "index.js"))
+  if (configured) {
+    env.HERMENEIA_DIR = existing.HERMENEIA_DIR
+    const linked = hermeneiaLinked()
+    console.log(`  ${C.bold}WhatsApp (Hermeneia)${C.reset} ${C.green}(configured)${C.reset}`)
+    console.log(`    ${C.dim}HERMENEIA_DIR=${existing.HERMENEIA_DIR} · phone ${linked ? "linked" : "NOT linked yet"}${C.reset}`)
+    try { execSync("git pull --ff-only", { cwd: env.HERMENEIA_DIR, stdio: "ignore" }) } catch {}
+    if (!linked && await confirm("  Link your WhatsApp now (QR scan)?", true)) {
+      await hermeneiaQRAuth(env.HERMENEIA_DIR)
+    }
+    console.log("")
+    return
+  }
+
+  console.log(`  ${C.bold}WhatsApp (Hermeneia)${C.reset}`)
+  console.log(`    ${C.dim}Read, search, and send your WhatsApp messages — everything stays on this Mac.${C.reset}`)
+  if (!await confirm("Connect WhatsApp?", true)) { console.log(""); return }
+
+  const dir = existing.HERMENEIA_DIR || path.join(home, "hermeneia")
+  try {
+    if (fs.existsSync(path.join(dir, ".git"))) {
+      try { execSync("git pull --ff-only", { cwd: dir, stdio: "ignore" }) } catch {}
+    } else {
+      run(`git clone --depth 1 ${HERMENEIA_REPO} "${dir}"`)
+    }
+  } catch (e) {
+    warn(`Could not download Hermeneia (${e.message}) — skipping WhatsApp`)
+    console.log(""); return
+  }
+  if (!fs.existsSync(path.join(dir, "dist", "index.js"))) {
+    warn("Hermeneia checkout has no dist/index.js — skipping WhatsApp")
+    console.log(""); return
+  }
+  env.HERMENEIA_DIR = dir
+  ok(`Hermeneia installed → ${dir}`)
+
+  if (hermeneiaLinked()) {
+    ok("WhatsApp already linked (existing Hermeneia session found)")
+  } else if (await confirm("  Link your WhatsApp now (QR scan)?", true)) {
+    await hermeneiaQRAuth(dir)
+  } else {
+    warn("Skipped — the QR page opens the first time REFUGIO starts")
+  }
+  console.log("")
+}
+
+// ── Personal connector: email via Epistole ───────────────────
+// Epistole (github.com/Phantazein-apps/epistole) is a remote MCP server the
+// user deploys to their own Cloudflare account (a separate ~30-min setup).
+// Auth is OAuth in the browser (a one-time code emailed to you); mcp-remote
+// runs the flow and caches tokens in ~/.mcp-auth, so the supervisor can
+// reconnect headlessly afterwards.
+
+async function setupEpistole(env, existing, targetDir) {
+  if (existing.EPISTOLE_URL) {
+    env.EPISTOLE_URL = existing.EPISTOLE_URL
+    console.log(`  ${C.bold}Email (Epistole)${C.reset} ${C.green}(configured)${C.reset}`)
+    console.log(`    ${C.dim}EPISTOLE_URL=${existing.EPISTOLE_URL}${C.reset}`)
+    if (!await confirm("  Reconfigure Email?", false)) { console.log(""); return }
+  } else {
+    console.log(`  ${C.bold}Email (Epistole)${C.reset}`)
+    console.log(`    ${C.dim}Your inbox with semantic search, served from your own (free) Cloudflare Worker.${C.reset}`)
+    console.log(`    ${C.dim}Deploy it first: https://github.com/Phantazein-apps/epistole — press Enter to skip.${C.reset}`)
+    if (!await confirm("Connect your email?", false)) { console.log(""); return }
+  }
+
+  let url = (await ask("Epistole server URL (e.g. https://mail.example.com)", existing.EPISTOLE_URL || "")).trim()
+  url = url.replace(/\/+$/, "").replace(/\/mcp$/, "")
+  if (!url) { delete env.EPISTOLE_URL; warn("No URL — skipping email"); console.log(""); return }
+  if (!/^https?:\/\//.test(url)) url = `https://${url}`
+  env.EPISTOLE_URL = url
+
+  // One-time browser authorization so later starts connect without prompting.
+  const client = path.join(targetDir, "node_modules", "mcp-remote", "dist", "client.js")
+  if (!fs.existsSync(client)) {
+    warn("mcp-remote not installed yet — you'll be asked to authorize in the browser on first start")
+    console.log(""); return
+  }
+  console.log(`    ${C.dim}Authorizing in your browser (Epistole emails you a one-time code)...${C.reset}`)
+  const authOk = await new Promise(resolve => {
+    const child = spawn(process.execPath, [client, `${url}/mcp`], { stdio: ["ignore", "pipe", "pipe"] })
+    let done = false
+    const finish = val => { if (done) return; done = true; try { child.kill("SIGTERM") } catch {}; resolve(val) }
+    const watch = data => { if (/Connected successfully/i.test(String(data))) finish(true) }
+    child.stdout.on("data", watch)
+    child.stderr.on("data", watch)
+    child.on("error", () => finish(false))
+    child.on("exit", code => { if (!done) { done = true; resolve(code === 0) } })
+    setTimeout(() => finish(false), 300_000).unref()
+  })
+  if (authOk) ok(`Email connected → ${url}`)
+  else warn("Authorization didn't complete — the browser flow re-opens when REFUGIO starts")
+  console.log("")
+}
+
 // ── LLM engine ───────────────────────────────────────────────
 
 const OLLAMA_URL = "http://localhost:11434"
@@ -254,7 +448,8 @@ ${C.bold}============================================================
 ============================================================${C.reset}
 
  Installs a local LLM (Ollama or LM Studio) + Open WebUI, plus
- optional workplace connectors (Slack, Notion, Jira, and more).
+ optional personal connectors (WhatsApp, email, Notion, memory)
+ and business connectors (Slack, Jira, and more).
 
  No prerequisites — everything installs automatically.
  You can skip any connector and add credentials later.
@@ -522,12 +717,14 @@ function writeEnvFile(envPath, env) {
   const sections = [
     { header: "LLM Engine", keys: ["REFUGIO_ENGINE", "OLLAMA_BASE_URL", "OPENAI_API_BASE_URL", "OPENAI_API_KEY", "REFUGIO_MODEL"] },
     { header: "Your Account", keys: ["OWUI_NAME", "OWUI_EMAIL", "OWUI_PASSWORD"] },
-    { header: "Slack", keys: ["SLACK_TOKEN"] },
+    { header: "WhatsApp (Hermeneia)", keys: ["HERMENEIA_DIR"] },
+    { header: "Email (Epistole)", keys: ["EPISTOLE_URL"] },
     { header: "Notion", keys: ["NOTION_TOKEN"] },
+    { header: "Memory", keys: ["REFUGIO_MEMORY", "GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_MEMORY_PATH"] },
+    { header: "Slack", keys: ["SLACK_TOKEN"] },
     { header: "Jira", keys: ["JIRA_DOMAIN", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
     { header: "ServiceNow", keys: ["SERVICENOW_INSTANCE", "SERVICENOW_USERNAME", "SERVICENOW_PASSWORD"] },
-    { header: "Salesforce", keys: ["SALESFORCE_INSTANCE_URL", "SALESFORCE_USERNAME", "SALESFORCE_PASSWORD", "SALESFORCE_SECURITY_TOKEN"] },
-    { header: "Memory", keys: ["REFUGIO_MEMORY", "GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_MEMORY_PATH"] }
+    { header: "Salesforce", keys: ["SALESFORCE_INSTANCE_URL", "SALESFORCE_USERNAME", "SALESFORCE_PASSWORD", "SALESFORCE_SECURITY_TOKEN"] }
   ]
 
   let content = "# REFUGIO Credentials (chmod 600)\n# Edit values below, then start REFUGIO\n\n"
@@ -552,11 +749,55 @@ function writeEnvFile(envPath, env) {
 
 // ── Phase 5: Interactive Credential Setup ────────────────────
 
-async function promptCredentials(envPath) {
+async function promptCredentials(envPath, targetDir) {
   console.log(`${C.bold}Configure connectors...${C.reset}\n`)
 
   const existing = readEnvFile(envPath)
   const env = { ...existing }
+
+  // Generic prompt for one credential-based connector (used by both groups)
+  async function promptConnector(conn) {
+    const hasExisting = conn.fields.some(f => existing[f.key])
+
+    // Show current values if configured
+    if (hasExisting) {
+      console.log(`  ${C.bold}${conn.name}${C.reset} ${C.green}(configured)${C.reset}`)
+      for (const field of conn.fields) {
+        const val = existing[field.key]
+        if (val) {
+          const display = field.secret ? `****${val.slice(-4)}` : val
+          console.log(`    ${C.dim}${field.key}=${display}${C.reset}`)
+        }
+      }
+      const shouldReconfigure = await confirm(`  Reconfigure ${conn.name}?`, false)
+      if (!shouldReconfigure) {
+        console.log("")
+        return
+      }
+    } else {
+      const shouldConfigure = await confirm(`Configure ${conn.name}?`, conn.id === "account")
+      if (!shouldConfigure) {
+        console.log("")
+        return
+      }
+    }
+
+    if (conn.help) {
+      console.log(`    ${C.dim}${conn.help}${C.reset}`)
+    }
+
+    for (const field of conn.fields) {
+      const current = existing[field.key] || field.defaultVal || ""
+      const display = field.secret && current ? `****${current.slice(-4)}` : current
+      const value = await ask(field.prompt, display, field.secret)
+      if (value && !value.startsWith("****")) {
+        env[field.key] = value
+      } else if (current) {
+        env[field.key] = current
+      }
+    }
+    console.log("")
+  }
 
   console.log(`  ${C.bold}LLM Engine${C.reset}`)
 
@@ -594,47 +835,14 @@ async function promptCredentials(envPath) {
   }
   console.log("")
 
-  for (const conn of CONNECTORS) {
-    const hasExisting = conn.fields.some(f => existing[f.key])
+  await promptConnector(ACCOUNT_CONNECTOR)
 
-    // Show current values if configured
-    if (hasExisting) {
-      console.log(`  ${C.bold}${conn.name}${C.reset} ${C.green}(configured)${C.reset}`)
-      for (const field of conn.fields) {
-        const val = existing[field.key]
-        if (val) {
-          const display = field.secret ? `****${val.slice(-4)}` : val
-          console.log(`    ${C.dim}${field.key}=${display}${C.reset}`)
-        }
-      }
-      const shouldReconfigure = await confirm(`  Reconfigure ${conn.name}?`, false)
-      if (!shouldReconfigure) {
-        console.log("")
-        continue
-      }
-    } else {
-      const shouldConfigure = await confirm(`Configure ${conn.name}?`, conn.id === "account")
-      if (!shouldConfigure) {
-        console.log("")
-        continue
-      }
-    }
-
-    if (conn.help) {
-      console.log(`    ${C.dim}${conn.help}${C.reset}`)
-    }
-
-    for (const field of conn.fields) {
-      const current = existing[field.key] || field.defaultVal || ""
-      const display = field.secret && current ? `****${current.slice(-4)}` : current
-      const value = await ask(field.prompt, display, field.secret)
-      if (value && !value.startsWith("****")) {
-        env[field.key] = value
-      } else if (current) {
-        env[field.key] = current
-      }
-    }
-    console.log("")
+  // ── Personal connectors — your own messages, mail, and notes ──
+  console.log(`  ${C.bold}── Personal connectors ──${C.reset} ${C.dim}your messages, mail, and notes${C.reset}\n`)
+  await setupHermeneia(env, existing)
+  await setupEpistole(env, existing, targetDir)
+  for (const conn of PERSONAL_CONNECTORS) {
+    await promptConnector(conn)
   }
 
   // ── Memory backend (tier-aware) ──────────────────────────
@@ -684,6 +892,20 @@ async function promptCredentials(envPath) {
     env.REFUGIO_MEMORY = ""
   }
   console.log("")
+
+  // ── Business connectors — workplace systems, behind one opt-in gate ──
+  // Most personal installs don't need these; anyone with existing credentials
+  // gets the prompts by default so reconfiguring stays one keypress away.
+  const anyBusiness = BUSINESS_CONNECTORS.some(c => c.fields.some(f => existing[f.key]))
+  console.log(`  ${C.bold}── Business connectors ──${C.reset} ${C.dim}Slack, Jira, ServiceNow, Salesforce${C.reset}`)
+  if (await confirm("Configure business connectors?", anyBusiness)) {
+    console.log("")
+    for (const conn of BUSINESS_CONNECTORS) {
+      await promptConnector(conn)
+    }
+  } else {
+    console.log("")
+  }
 
   writeEnvFile(envPath, env)
   ok(`Credentials saved to ${envPath}`)
@@ -1414,7 +1636,7 @@ async function main() {
     }
     env = readEnvFile(envPath)
   } else {
-    env = await promptCredentials(envPath)
+    env = await promptCredentials(envPath, targetDir)
   }
 
   if (!flags.has("--skip-owui")) {

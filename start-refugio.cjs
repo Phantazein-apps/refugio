@@ -522,15 +522,48 @@ ${C.bold}============================================================
   const useMemPalace = env.REFUGIO_MEMORY === "mempalace" && fs.existsSync(mempalaceMcpBin)
   if (useMemPalace) ok("memory (MemPalace, lean 2-tool wrapper) → via MCPO (stdio)")
 
+  // ── WhatsApp (Hermeneia) — stdio MCP server proxied via MCPO ──
+  // A local checkout with a prebuilt dist/ (installed by the installer, or the
+  // user's own — set HERMENEIA_DIR in ~/.refugio.env). MCPO spawns it directly;
+  // on an unlinked account it opens the QR page in the browser by itself.
+  const hermeneiaJs = env.HERMENEIA_DIR ? path.join(env.HERMENEIA_DIR, "dist", "index.js") : null
+  const useHermeneia = !!(hermeneiaJs && fs.existsSync(hermeneiaJs))
+  if (useHermeneia) ok("whatsapp (Hermeneia) → via MCPO (stdio)")
+  else if (env.HERMENEIA_DIR) warn(`HERMENEIA_DIR is set but ${hermeneiaJs} is missing — WhatsApp disabled`)
+
+  // ── Email (Epistole) — remote MCP via mcp-remote ────────────
+  // The user's own Cloudflare Worker; mcp-remote proxies stdio↔HTTP and reuses
+  // the OAuth tokens cached in ~/.mcp-auth during install (it re-opens the
+  // browser flow if they're missing/expired).
+  const mcpRemoteJs = path.join(REFUGIO_DIR, "node_modules", "mcp-remote", "dist", "proxy.js")
+  const useEpistole = !!env.EPISTOLE_URL && fs.existsSync(mcpRemoteJs)
+  if (useEpistole) ok(`email (Epistole @ ${env.EPISTOLE_URL}) → via MCPO (mcp-remote)`)
+  else if (env.EPISTOLE_URL) warn("EPISTOLE_URL is set but mcp-remote is not installed (run: npm install) — email disabled")
+
   // ── Generate MCPO config and start proxy ────────────────────
   const MCPO_PORT = 8010
   const mcpoBin = isWin
     ? path.join(home, ".local", "bin", "mcpo.exe")
     : path.join(home, ".local", "bin", "mcpo")
-  const hasMcpoServers = activeMcpServers.length > 0 || useMemPalace
+  const hasMcpoServers = activeMcpServers.length > 0 || useMemPalace || useHermeneia || useEpistole
 
   if (hasMcpoServers && fs.existsSync(mcpoBin)) {
     const mcpoConfig = { mcpServers: {} }
+
+    // Personal connectors first — they're the primary use case.
+    if (useHermeneia) {
+      mcpoConfig.mcpServers["whatsapp"] = {
+        command: nodeBin,
+        args: [hermeneiaJs]
+      }
+    }
+    if (useEpistole) {
+      mcpoConfig.mcpServers["email"] = {
+        command: nodeBin,
+        args: [mcpRemoteJs, `${env.EPISTOLE_URL.replace(/\/+$/, "")}/mcp`]
+      }
+    }
+
     for (const s of activeMcpServers) {
       mcpoConfig.mcpServers[s.server] = {
         type: "streamable-http",
@@ -551,7 +584,10 @@ ${C.bold}============================================================
     const mcpoConfigPath = path.join(REFUGIO_DIR, "mcpo-config.json")
     fs.writeFileSync(mcpoConfigPath, JSON.stringify(mcpoConfig, null, 2) + "\n")
 
-    const allServers = activeMcpServers.map(s => s.server)
+    const allServers = []
+    if (useHermeneia) allServers.push("whatsapp")
+    if (useEpistole) allServers.push("email")
+    allServers.push(...activeMcpServers.map(s => s.server))
     if (useMemPalace) allServers.push("memory")
 
     // Wait briefly for MCP servers to be ready before starting MCPO

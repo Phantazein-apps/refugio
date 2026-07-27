@@ -68,10 +68,12 @@ async function buildSystemPrompt(env) {
   let prompt = "You are a helpful assistant running locally via REFUGIO."
   prompt += " Do not use <think> blocks or internal reasoning. Respond directly and concisely."
   prompt += " Answer general questions DIRECTLY from your own knowledge — do NOT call a tool for greetings, math, definitions, or chit-chat."
-  prompt += " Only call a tool when the request clearly needs it: recalling or saving memory, or looking up workplace data (Slack, Jira, Notion, etc.)."
+  prompt += " Only call a tool when the request clearly needs it: recalling or saving memory, or looking up personal data (WhatsApp, email, Notion) or workplace data (Slack, Jira, etc.)."
   prompt += " When you do call a tool, call it at most ONCE, then answer from the result. If a tool returns nothing, just answer normally without retrying."
   prompt += "\n\n## Tool routing — pick the RIGHT tool:"
   prompt += "\n- Writing style, preferences, tone, personal context, saved notes → memory get"
+  prompt += "\n- WhatsApp messages, chats, contacts → list_messages / list_chats / send_message"
+  prompt += "\n- Email — inbox, threads, sending mail → read_inbox / search_messages / semantic_search"
   prompt += "\n- Slack messages, conversations, channels → search_messages / get_channel_history"
   prompt += "\n- Jira tickets, sprints, projects → search_issues / get_issue"
   prompt += "\n- Notion pages, docs, databases → search / get_page"
@@ -106,6 +108,26 @@ async function buildSystemPrompt(env) {
   }
 
   prompt += "\n\nAvailable tools:"
+
+  if (env.HERMENEIA_DIR && fs.existsSync(path.join(env.HERMENEIA_DIR, "dist", "index.js"))) {
+    prompt += "\n\n## WhatsApp (Hermeneia)"
+    prompt += "\n- list_messages: Search/read WhatsApp messages (filter by chat, sender, date, unread)"
+    prompt += "\n- list_chats: Browse conversations with unread counts"
+    prompt += "\n- search_contacts: Find people by name or phone number"
+    prompt += "\n- send_message: Send a WhatsApp message"
+    prompt += "\n- check_status: Connection status (shows a QR link if the phone isn't linked)"
+    prompt += "\n- CRITICAL: Before send_message, ALWAYS show the user the exact draft and recipient and wait for their confirmation."
+  }
+
+  if (env.EPISTOLE_URL) {
+    prompt += "\n\n## Email (Epistole)"
+    prompt += "\n- read_inbox: List recent messages from any folder"
+    prompt += "\n- search_messages: Search by sender, recipient, subject, body, or date"
+    prompt += "\n- semantic_search: Find emails by meaning, not just keywords"
+    prompt += "\n- get_message: Full email content by UID"
+    prompt += "\n- send_message / reply_to_message: Send new mail or reply with threading"
+    prompt += "\n- CRITICAL: Before sending or replying, ALWAYS show the user the exact draft and recipients and wait for their confirmation."
+  }
 
   if (env.SLACK_TOKEN) {
     prompt += "\n\n## Slack"
@@ -268,11 +290,15 @@ async function main() {
   // Register MCPO (MCP-to-OpenAPI proxy) as tool server connections
   // MCPO exposes each MCP server as an OpenAPI endpoint at /server-name/
   const MCPO_PORT = 8010
+  // Personal connectors first, then business — mirrors the order the
+  // supervisor writes into mcpo-config.json.
   const MCP_SERVERS = [
-    { key: "SLACK_TOKEN", name: "slack" },
+    { key: "HERMENEIA_DIR", name: "whatsapp" },
+    { key: "EPISTOLE_URL", name: "email" },
     { key: "NOTION_TOKEN", name: "notion" },
-    { key: "JIRA_DOMAIN", name: "jira" },
     { key: "GITHUB_TOKEN", name: "memory" },
+    { key: "SLACK_TOKEN", name: "slack" },
+    { key: "JIRA_DOMAIN", name: "jira" },
     { key: "SERVICENOW_INSTANCE", name: "servicenow" },
     { key: "SALESFORCE_INSTANCE_URL", name: "salesforce" }
   ]
@@ -286,7 +312,18 @@ async function main() {
   const memActive =
     (env.REFUGIO_MEMORY === "github" && env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO) ||
     (env.REFUGIO_MEMORY === "mempalace" && fs.existsSync(mempalaceMcpBin))
-  const isActive = (s) => s.name === "memory" ? memActive : !!env[s.key]
+  // WhatsApp/email registration mirrors start-refugio.cjs: only register the
+  // MCPO route when the underlying server can actually be spawned.
+  const hermeneiaActive = !!env.HERMENEIA_DIR &&
+    fs.existsSync(path.join(env.HERMENEIA_DIR, "dist", "index.js"))
+  const epistoleActive = !!env.EPISTOLE_URL &&
+    fs.existsSync(path.join(__dirname, "..", "node_modules", "mcp-remote", "dist", "proxy.js"))
+  const isActive = (s) => {
+    if (s.name === "memory") return memActive
+    if (s.name === "whatsapp") return hermeneiaActive
+    if (s.name === "email") return epistoleActive
+    return !!env[s.key]
+  }
 
   // Build tool server connections list
   const connections = MCP_SERVERS

@@ -1,7 +1,7 @@
 {
   "name": "refugio",
   "version": "1.0.0",
-  "description": "REFUGIO — a self-hosted refuge for your AI. One command installs a local LLM (Ollama or LM Studio) + Open WebUI, with optional workplace connectors (Slack, Notion, Jira, ServiceNow, Salesforce, memory) via MCP.",
+  "description": "REFUGIO — a self-hosted refuge for your AI. One command installs a local LLM (Ollama or LM Studio) + Open WebUI, with optional personal connectors (WhatsApp via Hermeneia, email via Epistole, Notion, memory) and business connectors (Slack, Jira, ServiceNow, Salesforce) via MCP.",
   "type": "module",
   "main": "server.js",
   "bin": {
@@ -29,6 +29,7 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "dotenv": "^16.4.7",
     "googleapis": "^171.4.0",
+    "mcp-remote": "^0.1.38",
     "node-fetch": "^3.3.2"
   }
 }

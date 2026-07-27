@@ -27,7 +27,7 @@
 </tr>
 </table>
 
-One command installs a **local LLM** (Ollama or LM Studio) and [Open WebUI](https://github.com/open-webui/open-webui), giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your workplace tools — Slack, Notion, Jira, ServiceNow, Salesforce, and persistent memory.
+One command installs a **local LLM** (Ollama or LM Studio) and [Open WebUI](https://github.com/open-webui/open-webui), giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your **personal** tools — WhatsApp ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)), email ([Epistole](https://github.com/Phantazein-apps/epistole)), Notion, and persistent memory — and, if you want, **business** tools like Slack, Jira, ServiceNow, and Salesforce.
 
 Works on **macOS, Linux, and Windows**. No prerequisites — the installer handles everything (Node.js, Python, Git, the LLM engine, the model, and Open WebUI).
 
@@ -54,7 +54,7 @@ irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refug
 3. Sets up your **local LLM engine**:
    - Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM, **or**
    - Lets you choose **[LM Studio](https://lmstudio.ai/)** instead (connects to its local server on `:1234`; auto-detected and preferred if already running)
-4. Walks you through optional connector credentials (Slack, Notion, Jira, etc.) and a memory backend
+4. Walks you through optional connectors: **personal** first (WhatsApp — with a QR scan in the browser — email, Notion, and a memory backend), then **business** (Slack, Jira, ServiceNow, Salesforce) if you opt in
 5. Installs **Open WebUI** in an isolated virtual environment
 6. Optionally sets up **https://refugio** as a local domain (mkcert + Caddy)
 7. Starts everything, creates your account, and opens the browser — already logged in
@@ -100,18 +100,39 @@ Pull more models any time with `ollama pull <model>`, then pick them in the mode
 
 ## Connectors
 
-All connectors are **optional** — configure only the ones you want, or none at all.
+All connectors are **optional** — configure only the ones you want, or none at all. They come in two groups: **personal** (offered first in the installer) and **business** (behind a single opt-in prompt). Tools are exposed to Open WebUI through [MCPO](https://github.com/open-webui/mcpo) (an MCP-to-OpenAPI proxy).
+
+### Personal connectors
+
+| Connector | How it runs | Tools |
+|-----------|-------------|-------|
+| **WhatsApp** ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)) | local, stdio via MCPO | `list_messages`, `list_chats`, `search_contacts`, `send_message`, media, multi-account — 17 tools |
+| **Email** ([Epistole](https://github.com/Phantazein-apps/epistole)) | your own Cloudflare Worker, via [mcp-remote](https://github.com/geelen/mcp-remote) | `read_inbox`, `search_messages`, `semantic_search`, `send_message`, `reply_to_message` — 19 tools |
+| **Notion** | local server, port 3002 | `search`, `get_page`, `get_block_children`, `query_database` |
+| **Memory** | local server, port 3004 | see below |
+
+#### WhatsApp (Hermeneia)
+
+Requires a **Mac with an Apple chip**. The installer clones [Hermeneia](https://github.com/Phantazein-apps/hermeneia) to `~/hermeneia` (prebuilt — no compile step) and walks you through the **built-in auth step**: a browser page opens with a QR code, and on your phone you go to **WhatsApp → Settings → Linked Devices → Link a Device** and scan it. That's it — the link survives restarts, and your messages stay in a local database on your Mac. If you skip the scan during install, the QR page simply opens again the first time REFUGIO starts.
+
+Already have your own Hermeneia checkout? Point `HERMENEIA_DIR` at it in `~/.refugio.env`.
+
+> **Also using Hermeneia in Claude Desktop?** Both share the same data directory, and Hermeneia enforces a single running instance per data directory — whichever app starts it first holds the WhatsApp connection, and the other's copy exits quietly. Quit the Claude app before starting REFUGIO (or vice versa) if you want to switch.
+
+#### Email (Epistole)
+
+[Epistole](https://github.com/Phantazein-apps/epistole) is a remote MCP server you deploy to **your own Cloudflare account** (free tier; a separate ~30-minute setup — see its README). Once deployed, give the installer its URL: it runs the one-time OAuth flow in your browser (Epistole emails you a code), caches the tokens locally, and from then on REFUGIO connects headlessly via `mcp-remote`.
+
+### Business connectors
+
+For workplace use cases — the installer only prompts for these if you opt in.
 
 | Server | Port | Tools |
 |--------|------|-------|
 | **Slack** | 3001 | `search_messages`, `get_channel_history`, `list_channels`, `get_thread` |
-| **Notion** | 3002 | `search`, `get_page`, `get_block_children`, `query_database` |
 | **Jira** | 3003 | `search_issues`, `get_issue`, `get_projects` |
-| **Memory** | 3004 | see below |
 | **ServiceNow** | 3005 | `query_table`, `get_record`, `list_tables` |
 | **Salesforce** | 3007 | `soql_query`, `get_record`, `search`, `describe_object`, `list_objects` |
-
-Tools are exposed to Open WebUI through [MCPO](https://github.com/open-webui/mcpo) (an MCP-to-OpenAPI proxy).
 
 ### Memory
 
@@ -179,12 +200,14 @@ curl | bash
 
 ```
 Browser → https://refugio (Caddy) → Open WebUI (:8080) ─┬─→ Ollama / LM Studio (local model)
-                                                         └─→ MCPO (:8010) → MCP servers (:3001–3007) → APIs
+                                                         └─→ MCPO (:8010) ─┬─→ MCP servers (:3001–3007) → APIs
+                                                                           ├─→ Hermeneia (stdio) → WhatsApp
+                                                                           └─→ mcp-remote (stdio) → Epistole (your Worker)
 ```
 
 - **Everything runs locally.** The model, the UI, and the connector servers all run on your machine.
 - **Open WebUI** runs natively (no Docker) in a `uv`-managed Python virtual environment.
-- **MCP servers** run as detached Node.js processes, supervised by `start-refugio.cjs` (auto-restarted on crash).
+- **MCP servers** run as detached Node.js processes, supervised by `start-refugio.cjs` (auto-restarted on crash). WhatsApp and email are stdio servers spawned by MCPO itself.
 - **Credentials** are stored in `~/.refugio.env` (chmod 600).
 - **System prompt** is auto-generated from the connectors you enabled.
 
@@ -216,11 +239,26 @@ REFUGIO_MODEL=llama3.1:8b
 OWUI_NAME=
 OWUI_EMAIL=
 
-# -- Slack (user token required for search) --
-SLACK_TOKEN=xoxp-...
+# -- WhatsApp (Hermeneia) — path to a checkout with a built dist/ --
+HERMENEIA_DIR=/Users/you/hermeneia
+
+# -- Email (Epistole) — base URL of your deployed Worker --
+EPISTOLE_URL=https://mail.yourdomain.com
 
 # -- Notion --
 NOTION_TOKEN=ntn_...
+
+# -- Memory --
+# MemPalace (local): REFUGIO_MEMORY=mempalace
+# GitHub-backed:     REFUGIO_MEMORY=github + the GITHUB_* values below
+REFUGIO_MEMORY=mempalace
+GITHUB_TOKEN=
+GITHUB_OWNER=
+GITHUB_REPO=
+GITHUB_MEMORY_PATH=MEMORY.md
+
+# -- Slack (user token required for search) --
+SLACK_TOKEN=xoxp-...
 
 # -- Jira --
 JIRA_DOMAIN=yourcompany.atlassian.net
@@ -237,15 +275,6 @@ SALESFORCE_INSTANCE_URL=https://yourcompany.my.salesforce.com
 SALESFORCE_USERNAME=your.username
 SALESFORCE_PASSWORD=...
 SALESFORCE_SECURITY_TOKEN=...
-
-# -- Memory --
-# MemPalace (local): REFUGIO_MEMORY=mempalace
-# GitHub-backed:     REFUGIO_MEMORY=github + the GITHUB_* values below
-REFUGIO_MEMORY=mempalace
-GITHUB_TOKEN=
-GITHUB_OWNER=
-GITHUB_REPO=
-GITHUB_MEMORY_PATH=MEMORY.md
 ```
 
 ### 3. Start servers individually
@@ -262,6 +291,8 @@ node servers/salesforce.js --http       # port 3007
 
 Override the port: `MCP_SSE_PORT=4000 node servers/slack.js --http`
 Verify a server: `curl http://localhost:3001/health`
+
+WhatsApp (Hermeneia) and email (Epistole) have no local ports of their own — the supervisor writes them into `mcpo-config.json` as stdio entries and MCPO spawns them (`node $HERMENEIA_DIR/dist/index.js`, and `mcp-remote $EPISTOLE_URL/mcp` respectively).
 
 ## Server Modes
 
