@@ -220,13 +220,75 @@ async function promptGithubFields(env, existing) {
 
 // ── Personal connector: WhatsApp via Hermeneia ───────────────
 // Hermeneia (github.com/Phantazein-apps/hermeneia) is a local WhatsApp MCP
-// server. Its repo ships a prebuilt dist/ (Node bundle + arm64 Go bridge), so
-// "install" is just a shallow clone — no build step. Auth is a QR scan:
-// running the server opens a browser page with the QR, and its local status
-// API reports when the phone has linked. macOS Apple Silicon only for now.
+// server and REFUGIO's flagship personal connector. Its bridge is pure Go
+// (no CGO), so it runs on macOS (Apple Silicon + Intel), Linux (x64/arm64),
+// and Windows — which is exactly what lets a headless Linux REFUGIO host talk
+// to WhatsApp. "Install" is a shallow clone (which carries the Node bundle,
+// dist/index.js) plus fetching the matching prebuilt bridge binary from the
+// latest release. Auth is a QR scan: running the server exposes a QR page and
+// its local status API reports when the phone has linked.
 
 const HERMENEIA_REPO = "https://github.com/Phantazein-apps/hermeneia.git"
+const HERMENEIA_RELEASE_BASE = "https://github.com/Phantazein-apps/hermeneia/releases/latest/download"
 const HERMENEIA_QR_PORT = 3456
+
+// Map this machine to the bridge binary Hermeneia publishes, using the SAME
+// naming its dist/bridge.ts resolver expects (win32→windows, x64→amd64).
+// Returns null for a platform/arch combination Hermeneia doesn't build for.
+function hermeneiaBridgeTarget() {
+  const goos = os.platform() === "win32" ? "windows" : os.platform() // darwin | linux | windows
+  const arch = os.arch() // 'x64' | 'arm64' | ...
+  const goarch = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : null
+  if (!goarch) return null
+  const supported = new Set(["darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64", "windows-amd64"])
+  if (!supported.has(`${goos}-${goarch}`)) return null
+  return { goos, goarch, ext: goos === "windows" ? ".exe" : "" }
+}
+
+// Hermeneia's per-platform data directory (mirrors its src/index.ts getDataDir),
+// used to detect whether a WhatsApp account has already been linked.
+function hermeneiaDataDir() {
+  if (process.env.HERMENEIA_DATA_DIR) return process.env.HERMENEIA_DATA_DIR
+  if (os.platform() === "darwin") return path.join(home, "Library", "Application Support", "Hermeneia")
+  if (os.platform() === "win32") return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Hermeneia")
+  return path.join(home, ".hermeneia")
+}
+
+// Ensure the Go bridge binary exists in the checkout's dist/. The binary is no
+// longer committed to Hermeneia's git (it's a large, platform-specific
+// artifact), so after a clone we fetch the matching prebuilt from the latest
+// release. Returns true if a usable bridge is present afterwards.
+function ensureHermeneiaBridge(dir) {
+  const target = hermeneiaBridgeTarget()
+  if (!target) {
+    warn(`No prebuilt WhatsApp bridge for this platform (${os.platform()}/${os.arch()}).`)
+    return false
+  }
+  const { goos, goarch, ext } = target
+  const distDir = path.join(dir, "dist")
+  const binName = `hermeneia-bridge-${goos}-${goarch}${ext}`
+  const binPath = path.join(distDir, binName)
+
+  // Already present — a prior install, or built from source with `npm run build`.
+  if (fs.existsSync(binPath) || fs.existsSync(path.join(distDir, `hermeneia-bridge${ext}`))) return true
+
+  const asset = `hermeneia-bridge-${goos}-${goarch}.tar.gz`
+  const url = `${HERMENEIA_RELEASE_BASE}/${asset}`
+  const tmp = path.join(os.tmpdir(), asset)
+  try {
+    execSync(`curl -fsSL -o "${tmp}" "${url}"`, { stdio: "ignore", shell: true })
+    execSync(`tar xzf "${tmp}" -C "${distDir}"`, { stdio: "ignore", shell: true })
+    if (!isWin) { try { fs.chmodSync(binPath, 0o755) } catch {} }
+    try { fs.unlinkSync(tmp) } catch {}
+  } catch (e) {
+    try { fs.unlinkSync(tmp) } catch {}
+    warn(`Could not fetch the WhatsApp bridge for ${goos}/${goarch}.`)
+    console.log(`    ${C.dim}Tried ${url}${C.reset}`)
+    console.log(`    ${C.dim}If this platform has no release yet, build it from source: cd "${dir}" && npm install && npm run build (needs Go 1.21+).${C.reset}`)
+    return false
+  }
+  return fs.existsSync(binPath)
+}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -244,12 +306,16 @@ function fetchJson(url, timeout = 1500) {
   })
 }
 
-// Has any WhatsApp account already been linked? accounts.json records a phone
-// number after pairing, but older Hermeneia versions leave it null — so also
-// accept an account session DB plus a non-trivial message store as proof.
-function hermeneiaLinked() {
-  const dataDir = process.env.HERMENEIA_DATA_DIR ||
-    path.join(home, "Library", "Application Support", "Hermeneia")
+// Has this machine EVER paired a WhatsApp account? This is only a cheap
+// file-based hint — NOT proof the device is still linked. accounts.json keeps
+// the phone number (and the session DB stays on disk) even after WhatsApp
+// revokes the device server-side or the user removes the "Claude" device from
+// their phone. So this can report "paired" for a connection that's actually
+// dead. Treat a true result as "worth verifying", never as "definitely
+// connected" — only Hermeneia's live status API (see hermeneiaQRAuth) knows
+// the real state.
+function hermeneiaEverPaired() {
+  const dataDir = hermeneiaDataDir()
   try {
     const accounts = JSON.parse(fs.readFileSync(path.join(dataDir, "accounts.json"), "utf-8"))
     if (!Array.isArray(accounts) || accounts.length === 0) return false
@@ -262,14 +328,19 @@ function hermeneiaLinked() {
 }
 
 async function hermeneiaQRAuth(dir) {
+  const setupUrl = `http://127.0.0.1:${HERMENEIA_QR_PORT}/setup`
   console.log("")
-  console.log(`    ${C.bold}Link your WhatsApp${C.reset} — a browser page with a QR code will open.`)
+  console.log(`    ${C.bold}Linking your WhatsApp${C.reset} — a QR page opens in your browser.`)
+  console.log(`    ${C.dim}Headless or remote host? No browser opens — open this yourself`)
+  console.log(`    (tunnel the port over SSH if needed): ${C.reset}${C.bold}${setupUrl}${C.reset}`)
   console.log(`    On your phone: ${C.bold}WhatsApp → Settings → Linked Devices → Link a Device${C.reset},`)
   console.log(`    then point the camera at the QR code.`)
   console.log("")
 
-  // Run Hermeneia directly; on an unlinked account it starts the QR page and
-  // opens the browser itself. stdin stays open (pipe) — it's a stdio MCP server.
+  // Run Hermeneia directly. If the saved session is still valid it just
+  // connects (authenticated=true, no QR). If not — including after WhatsApp
+  // revoked the device — it starts the QR page and, on a desktop, opens the
+  // browser itself. stdin stays open (pipe) — it's a stdio MCP server.
   const child = spawn(process.execPath, [path.join(dir, "dist", "index.js")], {
     stdio: ["pipe", "ignore", "ignore"],
     env: {
@@ -309,19 +380,31 @@ async function hermeneiaQRAuth(dir) {
 }
 
 async function setupHermeneia(env, existing) {
-  if (!(os.platform() === "darwin" && isAppleSilicon())) {
-    console.log(`    ${C.dim}WhatsApp (Hermeneia) needs a Mac with an Apple chip — not offered on this machine.${C.reset}\n`)
+  // Hermeneia is REFUGIO's flagship personal connector and runs anywhere a
+  // prebuilt bridge exists: macOS (Apple Silicon + Intel), Linux (x64/arm64),
+  // Windows (x64). Only bail on a platform with no bridge at all.
+  if (!hermeneiaBridgeTarget()) {
+    console.log(`    ${C.dim}WhatsApp (Hermeneia) has no prebuilt bridge for ${os.platform()}/${os.arch()} — not offered on this machine.${C.reset}\n`)
     return
   }
 
+  // A saved phone number is NOT proof the device is still linked — WhatsApp can
+  // revoke it server-side (or you remove the "Claude" device on your phone) and
+  // nothing on disk changes. So we NEVER suppress the link offer based on the
+  // file heuristic; the QR flow itself is the source of truth (it reports
+  // "already linked!" in seconds if the session is live, or shows a QR if not).
   const configured = existing.HERMENEIA_DIR && fs.existsSync(path.join(existing.HERMENEIA_DIR, "dist", "index.js"))
   if (configured) {
     env.HERMENEIA_DIR = existing.HERMENEIA_DIR
-    const linked = hermeneiaLinked()
+    const everPaired = hermeneiaEverPaired()
     console.log(`  ${C.bold}WhatsApp (Hermeneia)${C.reset} ${C.green}(configured)${C.reset}`)
-    console.log(`    ${C.dim}HERMENEIA_DIR=${existing.HERMENEIA_DIR} · phone ${linked ? "linked" : "NOT linked yet"}${C.reset}`)
+    console.log(`    ${C.dim}HERMENEIA_DIR=${existing.HERMENEIA_DIR}${everPaired ? " · previously paired (not verified)" : " · not linked yet"}${C.reset}`)
     try { execSync("git pull --ff-only", { cwd: env.HERMENEIA_DIR, stdio: "ignore" }) } catch {}
-    if (!linked && await confirm("  Link your WhatsApp now (QR scan)?", true)) {
+    ensureHermeneiaBridge(env.HERMENEIA_DIR)
+    const prompt = everPaired
+      ? "  Verify / re-link your WhatsApp now (QR scan if the link is dead)?"
+      : "  Link your WhatsApp now (QR scan)?"
+    if (await confirm(prompt, !everPaired)) {
       await hermeneiaQRAuth(env.HERMENEIA_DIR)
     }
     console.log("")
@@ -329,7 +412,7 @@ async function setupHermeneia(env, existing) {
   }
 
   console.log(`  ${C.bold}WhatsApp (Hermeneia)${C.reset}`)
-  console.log(`    ${C.dim}Read, search, and send your WhatsApp messages — everything stays on this Mac.${C.reset}`)
+  console.log(`    ${C.dim}Read, search, and send your WhatsApp messages — everything stays on this machine.${C.reset}`)
   if (!await confirm("Connect WhatsApp?", true)) { console.log(""); return }
 
   const dir = existing.HERMENEIA_DIR || path.join(home, "hermeneia")
@@ -347,12 +430,22 @@ async function setupHermeneia(env, existing) {
     warn("Hermeneia checkout has no dist/index.js — skipping WhatsApp")
     console.log(""); return
   }
+  // The Go bridge binary is no longer committed to Hermeneia's repo, so fetch
+  // the prebuilt for this platform. Without it the checkout can't connect.
+  if (!ensureHermeneiaBridge(dir)) {
+    warn("Hermeneia is installed but its WhatsApp bridge binary couldn't be fetched — WhatsApp will stay disabled until it's present.")
+    env.HERMENEIA_DIR = dir
+    console.log(""); return
+  }
   env.HERMENEIA_DIR = dir
   ok(`Hermeneia installed → ${dir}`)
 
-  if (hermeneiaLinked()) {
-    ok("WhatsApp already linked (existing Hermeneia session found)")
-  } else if (await confirm("  Link your WhatsApp now (QR scan)?", true)) {
+  // Always offer to link — see note above; a prior session may be dead.
+  const everPaired = hermeneiaEverPaired()
+  if (everPaired) {
+    console.log(`    ${C.dim}A previous WhatsApp pairing was found on this machine (not verified).${C.reset}`)
+  }
+  if (await confirm("  Link (or re-link) your WhatsApp now (QR scan)?", !everPaired)) {
     await hermeneiaQRAuth(dir)
   } else {
     warn("Skipped — the QR page opens the first time REFUGIO starts")

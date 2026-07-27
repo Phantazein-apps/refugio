@@ -115,9 +115,11 @@ All connectors are **optional** — configure only the ones you want, or none at
 
 #### WhatsApp (Hermeneia)
 
-Requires a **Mac with an Apple chip**. The installer clones [Hermeneia](https://github.com/Phantazein-apps/hermeneia) to `~/hermeneia` (prebuilt — no compile step) and walks you through the **built-in auth step**: a browser page opens with a QR code, and on your phone you go to **WhatsApp → Settings → Linked Devices → Link a Device** and scan it. That's it — the link survives restarts, and your messages stay in a local database on your Mac. If you skip the scan during install, the QR page simply opens again the first time REFUGIO starts.
+WhatsApp is REFUGIO's flagship connector — for many people it's the main reason to run REFUGIO at all. It works on **macOS (Apple Silicon or Intel), Linux (x64/arm64), and Windows** — so it runs on the same headless Linux box as the rest of your REFUGIO stack. The installer clones [Hermeneia](https://github.com/Phantazein-apps/hermeneia) to `~/hermeneia`, fetches the prebuilt bridge binary for your platform from Hermeneia's latest release, and walks you through the **built-in auth step**: a QR page opens (on a headless/remote host it prints the URL — `http://127.0.0.1:3456/setup` — so you can open it over an SSH tunnel), and on your phone you go to **WhatsApp → Settings → Linked Devices → Link a Device** and scan it. The link survives restarts, and your messages stay in a local database on your machine. If you skip the scan during install, the QR page opens again the first time REFUGIO starts.
 
-Already have your own Hermeneia checkout? Point `HERMENEIA_DIR` at it in `~/.refugio.env`.
+Already linked before and it stopped working? WhatsApp can revoke a linked device server-side (or you removed the **"Claude"** device on your phone) without anything on disk changing — so re-run the installer and choose **re-link** when it offers, or ask your assistant to "check my WhatsApp status" for a fresh QR.
+
+Already have your own Hermeneia checkout? Point `HERMENEIA_DIR` at it in `~/.refugio.env`. (If it has no `dist/hermeneia-bridge*` binary, build it with `npm run build` — needs Go 1.21+ — or let the installer fetch the prebuilt.)
 
 > **Also using Hermeneia in Claude Desktop?** Both share the same data directory, and Hermeneia enforces a single running instance per data directory — whichever app starts it first holds the WhatsApp connection, and the other's copy exits quietly. Quit the Claude app before starting REFUGIO (or vice versa) if you want to switch.
 
