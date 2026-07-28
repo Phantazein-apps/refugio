@@ -583,8 +583,16 @@ ${C.bold}============================================================
       mcpoConfig.mcpServers["whatsapp"] = {
         command: nodeBin,
         args: [hermeneiaJs],
-        // Name shown in WhatsApp > Linked Devices for pairings made via REFUGIO
-        env: { HERMENEIA_DEVICE_NAME: "REFUGIO" }
+        env: {
+          // Name shown in WhatsApp > Linked Devices for pairings made via REFUGIO
+          HERMENEIA_DEVICE_NAME: "REFUGIO",
+          // 5 tools instead of 18. Hermeneia's full surface is sized for a large
+          // model, where finer tools mean more precise calls; a local 3B model
+          // loses accuracy as the list grows, and most of the surface (account
+          // management, narrow lookups, internal backfill) is not what anyone
+          // asks a chat window for. Keeps the whole stack under the tool cap too.
+          HERMENEIA_TOOL_PROFILE: "minimal"
+        }
       }
     }
     if (useEpistole) {

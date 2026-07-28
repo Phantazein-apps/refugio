@@ -74,10 +74,16 @@ function modelSupportsTools(tag) {
   return _memFit ? _memFit.supportsTools(tag.split("@")[0]) : null;
 }
 
-// Tool limits. Small local models degrade badly with a large tool surface —
-// they pick wrong or loop — so the count is capped and the agentic loop is
-// bounded. Both are overridable for capable models.
-const TOOL_LIMIT = parseInt(process.env.REFUGIO_TOOL_LIMIT || "24", 10);
+// Tool limits. A large tool surface degrades model accuracy — they pick wrong
+// or loop — so the count is capped and the agentic loop is bounded. Both are
+// overridable.
+//
+// 24 was too low to be safe. A stock install is Hermeneia (18) + reminders (7)
+// + Things (10) = 35, and capping there cut half of WhatsApp — including
+// list_chats, which "summarise my chats" needs. Losing the tool the user is
+// asking for is worse than offering a few too many, and the cap now falls
+// evenly across servers rather than truncating whichever connected last.
+const TOOL_LIMIT = parseInt(process.env.REFUGIO_TOOL_LIMIT || "40", 10);
 const MAX_TOOL_ROUNDS = parseInt(process.env.REFUGIO_MAX_TOOL_ROUNDS || "5", 10);
 const MCP_CONFIG = process.env.REFUGIO_MCPO_CONFIG ||
   join(dirname(__dirname), "mcpo-config.json");
