@@ -78,19 +78,21 @@ REFUGIO runs the model **on your machine** — nothing is sent to any external s
 
 ### Model auto-selection
 
-The installer picks a tool-calling-capable Ollama model sized to your system memory:
+**Minimum: 8 GB RAM.** REFUGIO connects a local AI to your own data — messages, calendar, notes — and that requires a model that can *call tools*. The smallest one that reliably can is `qwen2.5:3b` (~2.6 GB). Smaller models fit on less hardware and hold a perfectly good conversation, but they can't reach your data, which is the whole point. On a machine that can't run the floor model the installer says so and stops rather than leaving you with a chat window whose connectors silently do nothing.
+
+The installer picks a model sized to your system memory. **Every tier below can call tools** — that is the entry requirement, not a feature of the larger ones:
 
 | System RAM | Default model | Approx. download |
 |------------|---------------|------------------|
-| ≤ 8 GB | `llama3.2:1b` | ~0.8 GB |
-| 9–16 GB | `llama3.2:3b` | ~2 GB |
+| ≤ 10 GB | `qwen2.5:3b` | ~1.9 GB |
+| 11–16 GB | `llama3.2:3b` | ~2 GB |
 | 17–32 GB | `llama3.1:8b` | ~4.7 GB |
 | 33–48 GB | `qwen2.5:14b` | ~9 GB |
 | > 48 GB | `gpt-oss:20b` | ~13 GB |
 
 Sizes account for macOS + your other apps, not just total RAM. On **≤ 8 GB** machines REFUGIO also unloads the model shortly after you stop chatting (so it doesn't hold RAM hostage between messages).
 
-**Two tiers, auto-switched.** The table above is the **optimal** model (sized to total RAM). The installer also downloads a lighter **companion** model one tier down — e.g. `llama3.2:3b` + `llama3.2:1b` on a 16 GB Mac, or `llama3.2:1b` + `qwen2.5:0.5b` on 8 GB. Every time REFUGIO starts it measures how much RAM is actually **free** (after your other apps load) and **activates whichever installed model fits right now**: the optimal one when there's headroom, the lighter one when the machine is busy. If even the lightest is tight it runs it anyway and tells you to close a few apps. No downloads at launch, no tuning, no troubleshooting.
+**Two tiers, auto-switched.** The table above is the **optimal** model (sized to total RAM). On larger machines the installer also downloads a lighter **companion** one tier down — e.g. `llama3.1:8b` + `llama3.2:3b` on a 32 GB Mac. Every time REFUGIO starts it measures how much RAM is actually **free** (after your other apps load) and **activates whichever installed model fits right now**. The companion never drops below the tool-calling floor: if free RAM is tight REFUGIO runs the floor model tight and tells you to close some apps, rather than quietly switching to a model that can't use your connectors.
 
 In the model picker each model is labelled for your *current* free RAM — the active one shows **✓**, and one that needs more RAM than is free shows **⚠ needs ~N GB free** plus a warning in its description, so manually switching to a too-heavy model is an informed choice.
 

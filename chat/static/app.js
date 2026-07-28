@@ -124,6 +124,7 @@ async function refreshStatus() {
     els.status.title = n
       ? s.tools.join("\n")
       : "No MCP connectors loaded — check the chat server log for [chat:mcp].";
+    showModelWarning(s);
     els.model.innerHTML = "";
     for (const m of s.models || []) {
       const o = document.createElement("option");
@@ -139,6 +140,30 @@ async function refreshStatus() {
     els.status.className = "status down";
     els.statusText.textContent = "offline";
   }
+}
+
+/** Warn when the running model can't call tools.
+ *
+ *  This failure is invisible without help: the app looks healthy, the model
+ *  answers fluently, and the connectors just never fire. The user concludes
+ *  REFUGIO is broken — which, for what they installed it to do, it is. Say it
+ *  where they are, in the chat, not only in a terminal they closed.
+ *
+ *  Only on an explicit false. A model we haven't rated is unknown, and warning
+ *  about it would train people to ignore this bar. */
+function showModelWarning(s) {
+  const bad = s.modelTools === false && s.model;
+  let bar = document.getElementById("model-warn");
+  if (!bad) { bar?.remove(); return; }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "model-warn";
+    bar.className = "model-warn";
+    els.scroll.parentElement.insertBefore(bar, els.scroll);
+  }
+  bar.textContent =
+    `${s.model} can't use connectors — it will answer from memory and never ` +
+    `read your data. Run: ollama pull qwen2.5:3b`;
 }
 
 async function loadConversations() {

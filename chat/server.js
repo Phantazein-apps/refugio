@@ -15,6 +15,7 @@ import { existsSync } from "fs";
 import { join, dirname, extname, normalize } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
+import { createRequire } from "module";
 import { homedir } from "os";
 
 import * as store from "./store.js";
@@ -56,6 +57,22 @@ function toolPreamble(tools) {
 }
 
 const log = (m) => console.log(`[chat] ${m}`);
+
+// Tool capability comes from the same ladder the installer and supervisor use,
+// so the UI can't disagree with them about what the running model can do.
+// Loaded lazily and tolerantly: the chat UI must still start if scripts/ is
+// missing (a bare checkout, a future split of this directory).
+let _memFit;
+function modelSupportsTools(tag) {
+  if (!tag) return null;
+  if (_memFit === undefined) {
+    try {
+      _memFit = createRequire(import.meta.url)(join(dirname(__dirname), "scripts", "mem-fit.cjs"));
+    } catch { _memFit = null; }
+  }
+  // Bare tag ("qwen2.5:3b") vs. an Ollama name that may carry a digest suffix.
+  return _memFit ? _memFit.supportsTools(tag.split("@")[0]) : null;
+}
 
 // Tool limits. Small local models degrade badly with a large tool surface —
 // they pick wrong or loop — so the count is capped and the agentic loop is
@@ -260,6 +277,9 @@ async function route(req, res, url) {
       models: models.map((m) => m.name),
       ollama: OLLAMA_BASE,
       tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],
+      // true / false / null-when-unrated. The UI warns only on an explicit
+      // false — a model we've never rated is unknown, not incapable.
+      modelTools: modelSupportsTools(model),
     });
   }
 

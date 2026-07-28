@@ -206,6 +206,17 @@ textarea {
 .bubble pre:hover .copy { opacity: 1; }
 .bubble pre .copy:hover { color: var(--ink); border-color: var(--ink-faint); }
 
+/* The running model can't call tools, so REFUGIO can't do its job. Sits above
+   the thread rather than inside it: it describes the whole session, not one
+   answer, and must stay visible as the user scrolls back through history. */
+.model-warn {
+  padding: var(--s2) var(--s5);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent);
+  color: var(--ink);
+  font-size: .75rem; line-height: 1.15rem;
+}
+
 /* Send button becomes Stop while streaming */
 .send.stopping { background: var(--bg-surface-3); color: var(--ink); }
 .send.stopping:hover { background: var(--accent); color: #fff; }
