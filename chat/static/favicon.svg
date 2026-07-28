@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect x="0" y="0" width="512" height="512" rx="92" fill="#1a262f"/>
+  <!-- back mountain -->
+  <polygon points="20.5,430 174,205 307,430" fill="#6e818c"/>
+  <!-- main mountain -->
+  <polygon points="61.4,430 266.2,102.4 460.8,430" fill="#dde5e9"/>
+  <!-- snow cap -->
+  <polygon points="266.2,102.4 222.7,204.8 309.8,204.8" fill="#ffffff"/>
+  <!-- refuge: glow, body, roof, lit window -->
+  <rect x="230.4" y="358.4" width="64" height="76.8" fill="#ff9646" opacity="0.27"/>
+  <rect x="233.0" y="350.7" width="56.3" height="79.4" fill="#212f39"/>
+  <polygon points="222.7,353.3 261.1,307.2 299.5,353.3" fill="#121b21"/>
+  <rect x="249.3" y="371.2" width="23.6" height="58.9" fill="#ffb25c"/>
+</svg>

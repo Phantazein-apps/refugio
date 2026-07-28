@@ -1,0 +1,217 @@
+// REFUGIO chat — purpose-built controller.
+//
+// Written fresh rather than adapted from SHERPA's chat-v2.js: that one is
+// organised around an evidence/citation domain REFUGIO has no equivalent of,
+// and is request/response. Streaming is the whole point here — a local model
+// emits tokens slowly enough that waiting for a complete reply feels broken.
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  convos: $("convos"), thread: $("thread"), scroll: $("scroll"), empty: $("empty"),
+  input: $("input"), send: $("send"), newChat: $("new-chat"),
+  model: $("model-pick"), status: $("status"), statusText: $("status-text"),
+};
+
+const state = { conversationId: null, streaming: false, model: null };
+
+// ── Rendering ───────────────────────────────────────────────
+
+/** Escape everything, then re-introduce only fenced/inline code. Keeps model
+ *  output inert — it is untrusted text and must never become live markup. */
+function renderContent(text) {
+  const esc = (s) => s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+  const parts = text.split(/```/);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) {
+      const body = part.replace(/^[a-zA-Z0-9_-]*\n/, "");
+      return `<pre><code>${esc(body)}</code></pre>`;
+    }
+    return `<p>${esc(part).replace(/`([^`\n]+)`/g, "<code>$1</code>")}</p>`;
+  }).join("");
+}
+
+function addMessage(role, text) {
+  els.empty?.remove();
+  const wrap = document.createElement("div");
+  wrap.className = `msg ${role}`;
+  wrap.innerHTML =
+    `<div class="avatar">${role === "user" ? "You" : "R"}</div>` +
+    `<div class="bubble"></div>`;
+  const bubble = wrap.querySelector(".bubble");
+  bubble.innerHTML = renderContent(text);
+  els.thread.appendChild(wrap);
+  scrollToEnd();
+  return bubble;
+}
+
+function showError(msg) {
+  els.empty?.remove();
+  const d = document.createElement("div");
+  d.className = "err";
+  d.textContent = msg;
+  els.thread.appendChild(d);
+  scrollToEnd();
+}
+
+// Only auto-scroll when the user is already near the bottom, so reading back
+// through a long answer isn't yanked away by incoming tokens.
+let stick = true;
+els.scroll.addEventListener("scroll", () => {
+  stick = els.scroll.scrollHeight - els.scroll.scrollTop - els.scroll.clientHeight < 80;
+});
+function scrollToEnd() { if (stick) els.scroll.scrollTop = els.scroll.scrollHeight; }
+
+// ── API ─────────────────────────────────────────────────────
+
+async function refreshStatus() {
+  try {
+    const s = await (await fetch("/api/chat/status")).json();
+    els.status.className = `status ${s.available ? "ok" : "down"}`;
+    els.statusText.textContent = s.available ? "ready" : "no model";
+    els.model.innerHTML = "";
+    for (const m of s.models || []) {
+      const o = document.createElement("option");
+      o.value = o.textContent = m;
+      if (m === s.model) o.selected = true;
+      els.model.appendChild(o);
+    }
+    if (!s.models?.length) {
+      els.model.innerHTML = "<option>no models</option>";
+    }
+    state.model = s.model;
+  } catch {
+    els.status.className = "status down";
+    els.statusText.textContent = "offline";
+  }
+}
+
+async function loadConversations() {
+  const list = await (await fetch("/api/chat/conversations")).json();
+  els.convos.innerHTML = "";
+  for (const c of list) {
+    const row = document.createElement("div");
+    row.className = "convo" + (c.id === state.conversationId ? " active" : "");
+    row.innerHTML = `<span class="convo-title"></span><button class="convo-del" title="Delete">×</button>`;
+    row.querySelector(".convo-title").textContent = c.title || "Untitled";
+    row.onclick = (e) => {
+      if (e.target.classList.contains("convo-del")) return;
+      openConversation(c.id);
+    };
+    row.querySelector(".convo-del").onclick = async (e) => {
+      e.stopPropagation();
+      await fetch(`/api/chat/conversations/${c.id}`, { method: "DELETE" });
+      if (state.conversationId === c.id) newChat();
+      loadConversations();
+    };
+    els.convos.appendChild(row);
+  }
+}
+
+async function openConversation(id) {
+  const convo = await (await fetch(`/api/chat/conversations/${id}`)).json();
+  state.conversationId = id;
+  els.thread.innerHTML = "";
+  for (const m of convo.messages) addMessage(m.role, m.content);
+  stick = true; scrollToEnd();
+  loadConversations();
+}
+
+function newChat() {
+  state.conversationId = null;
+  els.thread.innerHTML =
+    `<div class="empty" id="empty"><h1>Your AI, on your machine</h1>` +
+    `<div class="sub">Nothing leaves this computer. Ask anything to begin.</div></div>`;
+  els.empty = $("empty");
+  loadConversations();
+  els.input.focus();
+}
+
+/** Send a turn and paint tokens as they arrive over SSE. */
+async function send() {
+  const text = els.input.value.trim();
+  if (!text || state.streaming) return;
+
+  els.input.value = "";
+  els.input.style.height = "auto";
+  addMessage("user", text);
+  setStreaming(true);
+
+  const bubble = addMessage("assistant", "");
+  bubble.classList.add("cursor");
+  let acc = "";
+
+  try {
+    const res = await fetch("/api/chat/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: text,
+        conversation_id: state.conversationId,
+        model: els.model.value || undefined,
+      }),
+    });
+
+    if (!res.ok || !res.body) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `Request failed (${res.status})`);
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+
+      // SSE frames are separated by a blank line; keep any partial frame.
+      const frames = buf.split("\n\n");
+      buf = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        const ev = /^event: (.+)$/m.exec(frame)?.[1];
+        const raw = /^data: (.+)$/m.exec(frame)?.[1];
+        if (!ev || !raw) continue;
+        let data; try { data = JSON.parse(raw); } catch { continue; }
+
+        if (ev === "start") state.conversationId = data.conversation_id;
+        else if (ev === "token") { acc += data.t; bubble.innerHTML = renderContent(acc); scrollToEnd(); }
+        else if (ev === "error") throw new Error(data.error);
+        else if (ev === "done") { state.conversationId = data.conversation_id; loadConversations(); }
+      }
+    }
+    if (!acc) showError("The model returned an empty response.");
+  } catch (err) {
+    showError(err.message || String(err));
+  } finally {
+    bubble.classList.remove("cursor");
+    setStreaming(false);
+    els.input.focus();
+  }
+}
+
+function setStreaming(on) {
+  state.streaming = on;
+  els.send.disabled = on || !els.input.value.trim();
+}
+
+// ── Wiring ──────────────────────────────────────────────────
+
+els.input.addEventListener("input", () => {
+  els.input.style.height = "auto";
+  els.input.style.height = Math.min(els.input.scrollHeight, 192) + "px";
+  els.send.disabled = state.streaming || !els.input.value.trim();
+});
+els.input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+els.send.addEventListener("click", send);
+els.newChat.addEventListener("click", newChat);
+els.model.addEventListener("change", () => { state.model = els.model.value; });
+
+refreshStatus();
+loadConversations();
+setInterval(refreshStatus, 15000);

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REFUGIO</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="rail-head"><span class="brand">REFUGIO<span class="dot">.</span></span></div>
+    <button class="new-chat" id="new-chat">+ New chat</button>
+    <div class="convos" id="convos"></div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <select class="model-pick" id="model-pick" aria-label="Model"></select>
+      <div class="status" id="status"><span class="led"></span><span id="status-text">checking…</span></div>
+    </div>
+
+    <div class="scroll" id="scroll">
+      <div class="thread" id="thread">
+        <div class="empty" id="empty">
+          <h1>Your AI, on your machine</h1>
+          <div class="sub">Nothing leaves this computer. Ask anything to begin.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea id="input" rows="1" placeholder="Message REFUGIO…" autofocus></textarea>
+        <button class="send" id="send" title="Send" disabled>↑</button>
+      </div>
+      <div class="hint">Enter to send · Shift+Enter for a new line</div>
+    </div>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

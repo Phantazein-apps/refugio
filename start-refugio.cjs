@@ -635,6 +635,22 @@ ${C.bold}============================================================
     warn("Install with: uv tool install mcpo")
   }
 
+  // ── Start the built-in chat UI ──────────────────────────────
+  // Node-served, zero extra dependencies — no uv, no Python venv, no PyTorch.
+  // Runs alongside Open WebUI for now; the banner points here first, and OWUI
+  // stays available for anyone who wants its heavier feature set.
+  // Disable with REFUGIO_CHAT=0.
+  const CHAT_PORT = parseInt(env.REFUGIO_CHAT_PORT || "8090", 10)
+  const chatEntry = path.join(REFUGIO_DIR, "chat", "server.js")
+  let chatUrl = null
+  if (env.REFUGIO_CHAT !== "0" && fs.existsSync(chatEntry)) {
+    supervisor.start("chat", nodeBin, ["--no-warnings", chatEntry, "--port", String(CHAT_PORT)], {
+      env: { ...mergedEnv, REFUGIO_DATA_DIR: path.join(REFUGIO_DIR, "data") }
+    })
+    chatUrl = `http://127.0.0.1:${CHAT_PORT}`
+    ok(`REFUGIO chat → ${chatUrl}`)
+  }
+
   // ── Start Open WebUI ────────────────────────────────────────
   const PORT = 8080
   const owuiBin = isWin
@@ -785,6 +801,12 @@ window.location.href = '/';
       uiUrl = refugioUrl
       uiState = "starting"
     }
+  } else if (chatUrl) {
+    // The built-in chat covers the "somewhere to talk to it" case, so a missing
+    // Open WebUI is no longer a dead end — just a missing advanced option.
+    uiUrl = chatUrl
+    uiState = "ready"
+    console.log(`    ${C.dim}Open WebUI not installed — using the built-in chat (that's fine).${C.reset}`)
   } else if (!noOwui) {
     // Open WebUI IS the REFUGIO interface — without it there is no chat window,
     // no browser to open, and https://refugio has nothing behind it. Say so
