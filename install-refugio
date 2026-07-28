@@ -118,9 +118,9 @@ echo ""
 # so a pinned install is pinned end to end.
 #   stable (default):   curl … | bash
 #   bleeding edge:      REFUGIO_VERSION=main curl … | bash
-#   specific release:   REFUGIO_VERSION=v1.0.1 curl … | bash
+#   specific release:   REFUGIO_VERSION=v1.0.2 curl … | bash
 # Use </dev/tty so interactive prompts read from the terminal, not the pipe
-export REFUGIO_VERSION="${REFUGIO_VERSION:-v1.0.1}"
+export REFUGIO_VERSION="${REFUGIO_VERSION:-v1.0.2}"
 TMPFILE=$(mktemp /tmp/refugio-install.XXXXXX)
 trap 'rm -f "$TMPFILE"' EXIT INT TERM
 curl -fsSL "https://raw.githubusercontent.com/Phantazein-apps/refugio/${REFUGIO_VERSION}/install-node.cjs" > "$TMPFILE"
