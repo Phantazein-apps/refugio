@@ -325,7 +325,24 @@ class Supervisor {
 async function main() {
   const args = new Set(process.argv.slice(2))
   const noBrowser = args.has("--no-browser")
-  const noOwui = args.has("--no-owui")
+
+  // Open WebUI is opt-IN now, not opt-out.
+  //
+  // It used to be the only interface, so starting it whenever it was installed
+  // was right. It no longer is: the built-in chat UI is the default surface and
+  // owns the connectors, which leaves OWUI running with no tools while holding
+  // 0.6-1.5 GB. Paying that on every launch for a window the user has stopped
+  // opening is the opposite of what someone installs a local AI for.
+  //
+  // Still one command away for anyone who prefers it — and REFUGIO_CHAT=0 gives
+  // it the connectors back, which is what makes it genuinely usable rather than
+  // merely present.
+  //
+  // Resolved against ~/.refugio.env further down, where loadEnv() has run; only
+  // the flags can be read this early.
+  const owuiFlag = (args.has("--owui") || args.has("--open-webui")) ? true
+    : args.has("--no-owui") ? false
+    : null
 
   // ── Prevent duplicate supervisors ──────────────────────────
   const pidFile = path.join(home, ".refugio-logs", "supervisor.pid")
@@ -379,6 +396,10 @@ ${C.bold}============================================================
 `)
 
   const env = loadEnv()
+
+  // Now that ~/.refugio.env is loaded, settle the Open WebUI question:
+  // explicit flag wins, else REFUGIO_OWUI=1 opts in, else it stays off.
+  const noOwui = owuiFlag === null ? env.REFUGIO_OWUI !== "1" : !owuiFlag
   if (Object.keys(env).length === 0) {
     fail("No credentials found at ~/.refugio.env")
     fail("Run the installer first: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash")
