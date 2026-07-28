@@ -2,8 +2,11 @@ import AppKit
 
 /// REFUGIO menu-bar controller: start / stop the local AI stack, open it, toggle
 /// launch-at-login, quit. Very light — just an NSStatusItem that shells out to the
-/// existing supervisor (~/refugio/start-refugio.cjs). Quitting this app does NOT stop
-/// REFUGIO; use "Stop REFUGIO" for that.
+/// existing supervisor (~/refugio/start-refugio.cjs).
+///
+/// The icon and the stack are separate lifetimes: "Stop REFUGIO" frees the
+/// memory and keeps the icon (so restarting is one click), "Quit REFUGIO"
+/// removes the icon and asks what to do about the stack.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var headerItem: NSMenuItem!
@@ -47,6 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openItem.target = self
         menu.addItem(openItem)
 
+        // Freeing RAM is the common reason people reach for this menu (the stack
+        // can hold GBs) — and it should NOT cost them the menu bar, or there is
+        // nothing left to restart from. So the memory-freeing action is this
+        // toggle, which leaves the icon in place and flips to "Start REFUGIO".
         toggleItem = NSMenuItem(title: "Start REFUGIO", action: #selector(toggleRun), keyEquivalent: "")
         toggleItem.target = self
         menu.addItem(toggleItem)
@@ -58,17 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(loginItem)
 
-        // Two distinct exits. Freeing RAM is the common reason people reach for
-        // the menu bar (the stack can hold GBs), and a plain "Quit" that leaves
-        // the supervisor running is the opposite of what they wanted — so the
-        // memory-freeing action is spelled out and listed first.
-        let stopQuit = NSMenuItem(title: "Stop REFUGIO & Quit",
-                                  action: #selector(stopAndQuit), keyEquivalent: "q")
-        stopQuit.target = self
-        menu.addItem(stopQuit)
-
-        let quit = NSMenuItem(title: "Quit menu bar only (keeps running)",
-                              action: #selector(quitApp), keyEquivalent: "")
+        // One exit, and ⌘Q maps to it. It used to map to "Stop REFUGIO & Quit",
+        // which meant the reflexive keystroke removed the only way back — quit
+        // now asks instead, and the stop-and-quit path lives in that prompt.
+        let quit = NSMenuItem(title: "Quit REFUGIO", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
 
@@ -89,9 +89,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // ── Actions ─────────────────────────────────────────────
+    private lazy var chatWindow = ChatWindow(url: appURL())
+
     @objc private func openApp() {
         if running {
-            NSWorkspace.shared.open(appURL())
+            // Native window — no browser, no address bar. Holding Option opens
+            // in the default browser instead, for anyone who prefers it.
+            if NSEvent.modifierFlags.contains(.option) {
+                NSWorkspace.shared.open(appURL())
+            } else {
+                chatWindow.show(url: appURL())
+            }
         } else {
             // Start with the browser auto-opening when the stack is ready.
             startStack(openBrowser: true)
@@ -107,21 +115,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = LoginItem.isEnabled ? .on : .off
     }
 
-    /// Quit the menu-bar app only. REFUGIO keeps running and keeps its memory —
-    /// warn first when it's actually up, so this can't be mistaken for the
-    /// memory-freeing action.
+    /// Quit the menu-bar app. Quitting the icon is not the same as stopping the
+    /// stack, and either answer can be the one the user meant — so when REFUGIO
+    /// is actually up, ask rather than guess. Cancel is the default button: this
+    /// is reached by reflex (⌘Q), and both other outcomes are worse to get wrong.
     @objc private func quitApp() {
         if running {
             let a = NSAlert()
-            a.messageText = "Leave REFUGIO running?"
-            a.informativeText = "The menu bar will close but REFUGIO keeps running in the background and keeps using memory.\n\nTo free that memory, use “Stop REFUGIO & Quit”."
-            a.addButton(withTitle: "Leave It Running")
-            a.addButton(withTitle: "Stop REFUGIO & Quit")
+            a.messageText = "Quit the REFUGIO menu bar?"
+            a.informativeText = "REFUGIO is running and using memory.\n\nTo free that memory but keep the menu bar — so you can start it again in one click — use “Stop REFUGIO” instead."
             a.addButton(withTitle: "Cancel")
+            a.addButton(withTitle: "Stop REFUGIO & Quit")
+            a.addButton(withTitle: "Quit, Leave It Running")
             switch a.runModal() {
             case .alertSecondButtonReturn: stopAndQuit(); return
-            case .alertThirdButtonReturn: return
-            default: break
+            case .alertThirdButtonReturn: break
+            default: return
             }
         }
         NSApp.terminate(nil)
@@ -144,12 +153,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func appURL() -> URL {
-        // Prefer the custom domain if the cert was set up; otherwise the localhost shortcut.
+        // The built-in chat UI is the default surface; fall back to Open WebUI
+        // (custom domain if a cert was set up, else localhost) when it isn't up.
+        if portOpen(8090) { return URL(string: "http://127.0.0.1:8090")! }
         let cert = refugioDir.appendingPathComponent("certs/refugio.pem")
         if FileManager.default.fileExists(atPath: cert.path) {
             return URL(string: "https://refugio")!
         }
         return URL(string: "http://refugio.localhost:8080")!
+    }
+
+    /// Cheap liveness probe used to choose between the chat UI and Open WebUI.
+    private func portOpen(_ port: UInt16) -> Bool {
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        if sock < 0 { return false }
+        defer { close(sock) }
+        var tv = timeval(tv_sec: 0, tv_usec: 300_000)
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let ok = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
+        return ok
     }
 
     private func startStack(openBrowser: Bool) {
@@ -190,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try task.run()
             startedAt = Date()
             headerItem.title = "REFUGIO — starting…"
-            toggleItem.title = "Stop REFUGIO"
+            toggleItem.title = "Stop REFUGIO (frees memory)"
             setIcon(running: true)
         } catch {
             headerItem.title = "Start failed: \(error.localizedDescription)"
@@ -239,6 +269,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatus() {
+        // The built-in chat UI is the primary surface now, so "running" must be
+        // true when only it is up — Open WebUI may not be installed at all.
+        if portOpen(8090) {
+            DispatchQueue.main.async { self.updateUI(up: true) }
+            return
+        }
         var req = URLRequest(url: healthURL)
         req.timeoutInterval = 1.5
         URLSession.shared.dataTask(with: req) { [weak self] _, resp, _ in
@@ -260,10 +296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             headerItem.title = mb > 0
                 ? String(format: "REFUGIO — running · %.1f GB RAM", Double(mb) / 1024.0)
                 : "REFUGIO — running"
-            toggleItem.title = "Stop REFUGIO"
+            toggleItem.title = "Stop REFUGIO (frees memory)"
         } else if starting {
             headerItem.title = "REFUGIO — starting…"
-            toggleItem.title = "Stop REFUGIO"
+            toggleItem.title = "Stop REFUGIO (frees memory)"
         } else {
             headerItem.title = "REFUGIO — stopped"
             toggleItem.title = "Start REFUGIO"

@@ -118,7 +118,8 @@ body {
   background: var(--bg-surface-3); color: var(--ink-muted);
 }
 .msg.user .avatar { background: var(--accent); color: #fff; }
-.bubble { min-width: 0; flex: 1; }
+.content { min-width: 0; flex: 1; }
+.bubble { min-width: 0; }
 .bubble p { margin: 0 0 var(--s3); white-space: pre-wrap; word-wrap: break-word; }
 .bubble p:last-child { margin-bottom: 0; }
 .bubble pre {
@@ -168,3 +169,54 @@ textarea {
   .rail { display: none; }
   .thread, .composer-inner, .hint { max-width: none; }
 }
+
+/* Tool activity — which connectors a turn actually used. */
+.tools { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s2); }
+.tool-chip {
+  font: 500 .6875rem/1rem var(--font-mono);
+  padding: 3px var(--s2); border-radius: var(--radius-pill);
+  background: var(--bg-surface-3); color: var(--ink-muted);
+  border: 1px solid var(--border-subtle);
+}
+.tool-chip[data-state="running"] { border-color: var(--accent); color: var(--ink); }
+.tool-chip[data-state="ok"]      { border-color: #0dbd8b; }
+.tool-chip[data-state="failed"]  { border-color: var(--accent); color: var(--accent); }
+
+/* Markdown */
+.bubble h3, .bubble h4, .bubble h5, .bubble h6 {
+  margin: var(--s4) 0 var(--s2); line-height: 1.3; font-weight: 600;
+}
+.bubble h3 { font-size: 1.0625rem; }
+.bubble h4 { font-size: .9375rem; }
+.bubble h5, .bubble h6 { font-size: .875rem; color: var(--ink-muted); }
+.bubble ul, .bubble ol { margin: 0 0 var(--s3); padding-left: 1.35rem; }
+.bubble li { margin: 2px 0; }
+.bubble a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.bubble hr { border: 0; border-top: 1px solid var(--border); margin: var(--s4) 0; }
+.bubble strong { font-weight: 600; }
+
+/* Code block copy button */
+.bubble pre { position: relative; }
+.bubble pre .copy {
+  position: absolute; top: 6px; right: 6px; opacity: 0;
+  border: 1px solid var(--border); background: var(--bg-surface);
+  color: var(--ink-muted); border-radius: var(--radius-sm);
+  font: 500 .625rem/1 var(--font-mono); padding: 4px 6px; cursor: pointer;
+}
+.bubble pre:hover .copy { opacity: 1; }
+.bubble pre .copy:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+/* The running model can't call tools, so REFUGIO can't do its job. Sits above
+   the thread rather than inside it: it describes the whole session, not one
+   answer, and must stay visible as the user scrolls back through history. */
+.model-warn {
+  padding: var(--s2) var(--s5);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent);
+  color: var(--ink);
+  font-size: .75rem; line-height: 1.15rem;
+}
+
+/* Send button becomes Stop while streaming */
+.send.stopping { background: var(--bg-surface-3); color: var(--ink); }
+.send.stopping:hover { background: var(--accent); color: #fff; }

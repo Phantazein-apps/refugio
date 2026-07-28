@@ -325,7 +325,24 @@ class Supervisor {
 async function main() {
   const args = new Set(process.argv.slice(2))
   const noBrowser = args.has("--no-browser")
-  const noOwui = args.has("--no-owui")
+
+  // Open WebUI is opt-IN now, not opt-out.
+  //
+  // It used to be the only interface, so starting it whenever it was installed
+  // was right. It no longer is: the built-in chat UI is the default surface and
+  // owns the connectors, which leaves OWUI running with no tools while holding
+  // 0.6-1.5 GB. Paying that on every launch for a window the user has stopped
+  // opening is the opposite of what someone installs a local AI for.
+  //
+  // Still one command away for anyone who prefers it — and REFUGIO_CHAT=0 gives
+  // it the connectors back, which is what makes it genuinely usable rather than
+  // merely present.
+  //
+  // Resolved against ~/.refugio.env further down, where loadEnv() has run; only
+  // the flags can be read this early.
+  const owuiFlag = (args.has("--owui") || args.has("--open-webui")) ? true
+    : args.has("--no-owui") ? false
+    : null
 
   // ── Prevent duplicate supervisors ──────────────────────────
   const pidFile = path.join(home, ".refugio-logs", "supervisor.pid")
@@ -379,6 +396,10 @@ ${C.bold}============================================================
 `)
 
   const env = loadEnv()
+
+  // Now that ~/.refugio.env is loaded, settle the Open WebUI question:
+  // explicit flag wins, else REFUGIO_OWUI=1 opts in, else it stays off.
+  const noOwui = owuiFlag === null ? env.REFUGIO_OWUI !== "1" : !owuiFlag
   if (Object.keys(env).length === 0) {
     fail("No credentials found at ~/.refugio.env")
     fail("Run the installer first: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash")
@@ -466,6 +487,13 @@ ${C.bold}============================================================
       const pick = memFit.pickInstalledModel({ availableGb, owuiOverheadGb: owuiOverhead, installedTags: installed })
       if (pick.tag) {
         runtimeModel = pick.tag
+        // A model that can't call tools is the one failure worth interrupting
+        // the launch banner for: everything looks healthy, the chat answers
+        // fluently, and every connector silently does nothing.
+        if (pick.tools === false) {
+          warn(`${pick.tag} cannot call tools — connectors (WhatsApp, calendar, notes) will NOT work.`)
+          warn(`REFUGIO needs at least ${memFit.TOOL_FLOOR.tag}: ollama pull ${memFit.TOOL_FLOOR.tag}`)
+        }
         if (!pick.fits) {
           warn(`Low memory: ~${availableGb.toFixed(1)} GB free — running the lightest installed model (${pick.tag}). Close some apps for better results.`)
         } else if (pick.heavier) {
@@ -568,7 +596,29 @@ ${C.bold}============================================================
   const hasMcpoServers = activeMcpServers.length > 0 || useMemPalace || useHermeneia || useEpistole ||
     useReminders || useThings
 
-  if (hasMcpoServers && fs.existsSync(mcpoBin)) {
+  // Exactly ONE surface may own the stdio MCP servers.
+  //
+  // MCPO spawns every server in mcpo-config.json to translate MCP → OpenAPI for
+  // Open WebUI. The built-in chat UI speaks MCP directly and spawns them too.
+  // Run both and each connector exists twice — harmless for a stateless one like
+  // Things, fatal for Hermeneia, which is deliberately single-instance: two
+  // processes would fight over one WhatsApp session, so the second detects the
+  // first via a PID file and exits. Cleanly, with status 0 and no error — so the
+  // symptom is simply that WhatsApp is missing from the chat UI's tools while
+  // the stateless connectors work, with nothing anywhere explaining it.
+  //
+  // The chat UI is the default surface, so it wins by default. MCPO exists only
+  // for Open WebUI; set REFUGIO_CHAT=0 to use OWUI instead and hand the
+  // connectors back to it.
+  const chatOwnsConnectors = env.REFUGIO_CHAT !== "0" &&
+    fs.existsSync(path.join(REFUGIO_DIR, "chat", "server.js"))
+
+  // Note the condition is `hasMcpoServers` alone, not "…&& mcpo is installed".
+  // mcpo-config.json is the single declaration of which connectors exist, and
+  // the built-in chat UI reads it too. Gating the file's existence on MCPO's
+  // binary meant a machine without `uv` got a chat UI with no connectors at
+  // all — the same silent-skip failure that hid Open WebUI's absence.
+  if (hasMcpoServers) {
     const mcpoConfig = { mcpServers: {} }
 
     // Personal connectors first — they're the primary use case.
@@ -576,8 +626,16 @@ ${C.bold}============================================================
       mcpoConfig.mcpServers["whatsapp"] = {
         command: nodeBin,
         args: [hermeneiaJs],
-        // Name shown in WhatsApp > Linked Devices for pairings made via REFUGIO
-        env: { HERMENEIA_DEVICE_NAME: "REFUGIO" }
+        env: {
+          // Name shown in WhatsApp > Linked Devices for pairings made via REFUGIO
+          HERMENEIA_DEVICE_NAME: "REFUGIO",
+          // 5 tools instead of 18. Hermeneia's full surface is sized for a large
+          // model, where finer tools mean more precise calls; a local 3B model
+          // loses accuracy as the list grows, and most of the surface (account
+          // management, narrow lookups, internal backfill) is not what anyone
+          // asks a chat window for. Keeps the whole stack under the tool cap too.
+          HERMENEIA_TOOL_PROFILE: "minimal"
+        }
       }
     }
     if (useEpistole) {
@@ -621,18 +679,26 @@ ${C.bold}============================================================
     allServers.push(...activeMcpServers.map(s => s.server))
     if (useMemPalace) allServers.push("memory")
 
-    // Wait briefly for MCP servers to be ready before starting MCPO
-    setTimeout(() => {
-      supervisor.start("mcpo", mcpoBin, [
-        "--port", String(MCPO_PORT),
-        "--config", mcpoConfigPath,
-        "--host", "127.0.0.1"
-      ], { env: mergedEnv })
-      ok(`MCPO proxy → http://localhost:${MCPO_PORT} (${allServers.join(", ")})`)
-    }, 3000)
-  } else if (hasMcpoServers) {
-    warn("MCPO not installed — tools may not work in Open WebUI")
-    warn("Install with: uv tool install mcpo")
+    // The config file is still written either way — the chat UI reads the same
+    // file to know which connectors exist. Only the spawning is exclusive.
+    if (chatOwnsConnectors) {
+      ok(`Connectors → built-in chat UI (${allServers.join(", ")})`)
+      console.log(`    ${C.dim}MCPO not started — it would spawn a second copy of every ` +
+        `connector. Set REFUGIO_CHAT=0 to give them to Open WebUI instead.${C.reset}`)
+    } else if (fs.existsSync(mcpoBin)) {
+      // Wait briefly for MCP servers to be ready before starting MCPO
+      setTimeout(() => {
+        supervisor.start("mcpo", mcpoBin, [
+          "--port", String(MCPO_PORT),
+          "--config", mcpoConfigPath,
+          "--host", "127.0.0.1"
+        ], { env: mergedEnv })
+        ok(`MCPO proxy → http://localhost:${MCPO_PORT} (${allServers.join(", ")})`)
+      }, 3000)
+    } else {
+      warn("MCPO not installed — tools may not work in Open WebUI")
+      warn("Install with: uv tool install mcpo")
+    }
   }
 
   // ── Start the built-in chat UI ──────────────────────────────

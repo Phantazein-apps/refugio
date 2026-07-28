@@ -12,7 +12,7 @@ const els = {
   model: $("model-pick"), status: $("status"), statusText: $("status-text"),
 };
 
-const state = { conversationId: null, streaming: false, model: null };
+const state = { conversationId: null, streaming: false, model: null, abort: null };
 
 // ── Rendering ───────────────────────────────────────────────
 
@@ -26,19 +26,64 @@ function renderContent(text) {
   return parts.map((part, i) => {
     if (i % 2 === 1) {
       const body = part.replace(/^[a-zA-Z0-9_-]*\n/, "");
-      return `<pre><code>${esc(body)}</code></pre>`;
+      return `<pre><button class="copy" title="Copy">copy</button><code>${esc(body)}</code></pre>`;
     }
-    return `<p>${esc(part).replace(/`([^`\n]+)`/g, "<code>$1</code>")}</p>`;
+    return md(esc(part));
   }).join("");
+}
+
+/** Small markdown subset, applied to ALREADY-escaped text so nothing the model
+ *  emits can become live markup. Deliberately not a full parser — headings,
+ *  emphasis, lists, links and rules cover what a chat answer actually uses. */
+function md(t) {
+  const lines = t.split("\n");
+  const out = [];
+  let list = null;               // 'ul' | 'ol' | null
+
+  const inline = (s) => s
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    // Links: only http(s) — never javascript: or data:.
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
+             '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    let m;
+    if (/^\s*$/.test(line)) { closeList(); continue; }
+    if ((m = /^(#{1,4})\s+(.*)$/.exec(line))) {
+      closeList();
+      const lvl = Math.min(m[1].length + 2, 6);
+      out.push(`<h${lvl}>${inline(m[2])}</h${lvl}>`); continue;
+    }
+    if (/^(-{3,}|\*{3,})$/.test(line)) { closeList(); out.push("<hr>"); continue; }
+    if ((m = /^\s*[-*+]\s+(.*)$/.exec(line))) {
+      if (list !== "ul") { closeList(); out.push("<ul>"); list = "ul"; }
+      out.push(`<li>${inline(m[1])}</li>`); continue;
+    }
+    if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) {
+      if (list !== "ol") { closeList(); out.push("<ol>"); list = "ol"; }
+      out.push(`<li>${inline(m[1])}</li>`); continue;
+    }
+    closeList();
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  closeList();
+  return out.join("");
 }
 
 function addMessage(role, text) {
   els.empty?.remove();
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
+  // avatar + a column for [tool chips, text] — the strip must stack ABOVE the
+  // answer, and .msg itself is a flex row.
   wrap.innerHTML =
     `<div class="avatar">${role === "user" ? "You" : "R"}</div>` +
-    `<div class="bubble"></div>`;
+    `<div class="content"><div class="bubble"></div></div>`;
   const bubble = wrap.querySelector(".bubble");
   bubble.innerHTML = renderContent(text);
   els.thread.appendChild(wrap);
@@ -69,7 +114,17 @@ async function refreshStatus() {
   try {
     const s = await (await fetch("/api/chat/status")).json();
     els.status.className = `status ${s.available ? "ok" : "down"}`;
-    els.statusText.textContent = s.available ? "ready" : "no model";
+    // Show the connector count, not just "ready". Without it there is no way to
+    // tell a model that ignored its tools from a model that was never given
+    // any — the two look identical in the thread, and only one is fixable here.
+    const n = s.tools?.length ?? 0;
+    els.statusText.textContent = !s.available ? "no model"
+      : n ? `ready · ${n} tool${n === 1 ? "" : "s"}`
+      : "ready · no tools";
+    els.status.title = n
+      ? s.tools.join("\n")
+      : "No MCP connectors loaded — check the chat server log for [chat:mcp].";
+    showModelWarning(s);
     els.model.innerHTML = "";
     for (const m of s.models || []) {
       const o = document.createElement("option");
@@ -85,6 +140,30 @@ async function refreshStatus() {
     els.status.className = "status down";
     els.statusText.textContent = "offline";
   }
+}
+
+/** Warn when the running model can't call tools.
+ *
+ *  This failure is invisible without help: the app looks healthy, the model
+ *  answers fluently, and the connectors just never fire. The user concludes
+ *  REFUGIO is broken — which, for what they installed it to do, it is. Say it
+ *  where they are, in the chat, not only in a terminal they closed.
+ *
+ *  Only on an explicit false. A model we haven't rated is unknown, and warning
+ *  about it would train people to ignore this bar. */
+function showModelWarning(s) {
+  const bad = s.modelTools === false && s.model;
+  let bar = document.getElementById("model-warn");
+  if (!bad) { bar?.remove(); return; }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "model-warn";
+    bar.className = "model-warn";
+    els.scroll.parentElement.insertBefore(bar, els.scroll);
+  }
+  bar.textContent =
+    `${s.model} can't use connectors — it will answer from memory and never ` +
+    `read your data. Run: ollama pull qwen2.5:3b`;
 }
 
 async function loadConversations() {
@@ -143,8 +222,10 @@ async function send() {
   let acc = "";
 
   try {
+    state.abort = new AbortController();
     const res = await fetch("/api/chat/ask", {
       method: "POST",
+      signal: state.abort.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: text,
@@ -178,6 +259,8 @@ async function send() {
         let data; try { data = JSON.parse(raw); } catch { continue; }
 
         if (ev === "start") state.conversationId = data.conversation_id;
+        else if (ev === "tool") showTool(bubble, data.name, "running");
+        else if (ev === "tool_result") showTool(bubble, data.name, data.ok ? "ok" : "failed");
         else if (ev === "token") { acc += data.t; bubble.innerHTML = renderContent(acc); scrollToEnd(); }
         else if (ev === "error") throw new Error(data.error);
         else if (ev === "done") { state.conversationId = data.conversation_id; loadConversations(); }
@@ -185,17 +268,65 @@ async function send() {
     }
     if (!acc) showError("The model returned an empty response.");
   } catch (err) {
-    showError(err.message || String(err));
+    // Aborting is a deliberate user action, not an error worth shouting about.
+    if (err.name !== "AbortError") showError(err.message || String(err));
   } finally {
+    state.abort = null;
     bubble.classList.remove("cursor");
     setStreaming(false);
     els.input.focus();
   }
 }
 
+// Show which tools a turn used, inline above the answer. Local models are
+// slow enough that silence during a tool call reads as a hang.
+function showTool(bubble, name, state) {
+  const content = bubble.parentElement;          // .content column
+  let strip = content.querySelector(".tools");
+  if (!strip) {
+    strip = document.createElement("div");
+    strip.className = "tools";
+    content.insertBefore(strip, bubble);
+  }
+  const id = "t-" + name.replace(/[^a-z0-9]/gi, "-");
+  let chip = strip.querySelector("#" + id);
+  if (!chip) {
+    chip = document.createElement("span");
+    chip.className = "tool-chip"; chip.id = id;
+    strip.appendChild(chip);
+  }
+  chip.dataset.state = state;
+  const label = name.replace("__", " \u00b7 ");
+
+  clearInterval(chip._timer);
+  if (state !== "running") {
+    chip.textContent = (state === "ok" ? "\u2713 " : "\u2717 ") + label;
+    scrollToEnd();
+    return;
+  }
+
+  // Count up while the tool runs. Reading a WhatsApp history takes real time,
+  // and a chip that sits unchanged is indistinguishable from a hang \u2014 which
+  // is what anyone concludes after ten silent seconds of nothing moving.
+  const t0 = Date.now();
+  const tick = () => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    chip.textContent = "\u2699 " + label + (s ? ` ${s}s` : "");
+  };
+  tick();
+  chip._timer = setInterval(tick, 1000);
+  scrollToEnd();
+}
+
 function setStreaming(on) {
   state.streaming = on;
-  els.send.disabled = on || !els.input.value.trim();
+  // The send button doubles as Stop. With a slow local model, being unable to
+  // interrupt a wrong answer is the single most frustrating thing a chat UI
+  // can do — so this is never disabled while streaming.
+  els.send.textContent = on ? "\u25A0" : "\u2191";
+  els.send.title = on ? "Stop" : "Send";
+  els.send.classList.toggle("stopping", on);
+  els.send.disabled = on ? false : !els.input.value.trim();
 }
 
 // ── Wiring ──────────────────────────────────────────────────
@@ -208,7 +339,20 @@ els.input.addEventListener("input", () => {
 els.input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
-els.send.addEventListener("click", send);
+els.send.addEventListener("click", () => {
+  if (state.streaming) { state.abort?.abort(); return; }
+  send();
+});
+
+// Copy buttons on code blocks (delegated — blocks are re-rendered every token).
+els.thread.addEventListener("click", (e) => {
+  const btn = e.target.closest(".copy");
+  if (!btn) return;
+  const code = btn.parentElement.querySelector("code");
+  navigator.clipboard?.writeText(code.textContent).then(() => {
+    btn.textContent = "copied"; setTimeout(() => (btn.textContent = "copy"), 1200);
+  });
+});
 els.newChat.addEventListener("click", newChat);
 els.model.addEventListener("change", () => { state.model = els.model.value; });
 

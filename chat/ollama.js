@@ -39,11 +39,16 @@ export async function isUp() {
  * tokens slowly enough that a request/response UI feels broken. This is the
  * main thing worth building that Open WebUI already had.
  */
-export async function chatStream({ model, messages, signal }, onToken) {
+export async function chatStream({ model, messages, tools, signal }, onToken) {
   const res = await fetch(`${BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, stream: true }),
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      ...(tools?.length ? { tools } : {}),
+    }),
     signal,
   });
 
@@ -56,6 +61,7 @@ export async function chatStream({ model, messages, signal }, onToken) {
   const decoder = new TextDecoder();
   let buffer = "";
   let full = "";
+  const toolCalls = [];
 
   while (true) {
     const { done, value } = await reader.read();
@@ -73,11 +79,31 @@ export async function chatStream({ model, messages, signal }, onToken) {
       let evt;
       try { evt = JSON.parse(trimmed); } catch { continue; }
       if (evt.error) throw new Error(evt.error);
+
+      // Tool calls arrive inside the stream, usually on the final message.
+      // Collect them rather than emitting as text.
+      for (const tc of evt.message?.tool_calls ?? []) {
+        if (tc?.function?.name) {
+          toolCalls.push({
+            name: tc.function.name,
+            // The API documents `arguments` as an object, but some model
+            // templates emit a JSON string — accept both.
+            args: typeof tc.function.arguments === "string"
+              ? safeParse(tc.function.arguments)
+              : (tc.function.arguments || {}),
+          });
+        }
+      }
+
       const piece = evt.message?.content;
       if (piece) { full += piece; onToken(piece); }
     }
   }
-  return full;
+  return { text: full, toolCalls };
+}
+
+function safeParse(s) {
+  try { return JSON.parse(s); } catch { return {}; }
 }
 
 /** One-shot, non-streaming completion — used for conversation titles. */

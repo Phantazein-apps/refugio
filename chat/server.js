@@ -15,9 +15,11 @@ import { existsSync } from "fs";
 import { join, dirname, extname, normalize } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
+import { createRequire } from "module";
 import { homedir } from "os";
 
 import * as store from "./store.js";
+import { McpPool } from "./mcp.js";
 import { listModels, isUp, chatStream, complete, OLLAMA_BASE } from "./ollama.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -37,7 +39,57 @@ const SYSTEM_PROMPT =
   "You are REFUGIO, a helpful assistant running entirely on the user's own computer. " +
   "Be concise and direct. If you don't know something, say so.";
 
+/** Tell the model, in prose, that it has tools.
+ *
+ *  Handing a model a `tools` array is not the same as telling it to use them.
+ *  Asked to "summarize my WhatsApp messages", a small model will happily reply
+ *  "please paste your messages" — it pattern-matches the request as needing
+ *  information it lacks rather than as a tool call. Naming the connectors and
+ *  forbidding the ask-the-user escape hatch is what closes that gap; larger
+ *  models don't need it, and it costs them nothing. */
+function toolPreamble(tools) {
+  if (!tools.length) return "";
+  const servers = [...new Set(tools.map((t) => t.function.name.split("__")[0]))];
+  return "\n\nYou have tools that read the user's own data on this machine" +
+    ` (${servers.join(", ")}). When a question is about that data, call the` +
+    " relevant tool instead of answering from memory. Never ask the user to" +
+    " paste in data you can fetch yourself — call the tool and use the result.";
+}
+
 const log = (m) => console.log(`[chat] ${m}`);
+
+// Tool capability comes from the same ladder the installer and supervisor use,
+// so the UI can't disagree with them about what the running model can do.
+// Loaded lazily and tolerantly: the chat UI must still start if scripts/ is
+// missing (a bare checkout, a future split of this directory).
+let _memFit;
+function modelSupportsTools(tag) {
+  if (!tag) return null;
+  if (_memFit === undefined) {
+    try {
+      _memFit = createRequire(import.meta.url)(join(dirname(__dirname), "scripts", "mem-fit.cjs"));
+    } catch { _memFit = null; }
+  }
+  // Bare tag ("qwen2.5:3b") vs. an Ollama name that may carry a digest suffix.
+  return _memFit ? _memFit.supportsTools(tag.split("@")[0]) : null;
+}
+
+// Tool limits. A large tool surface degrades model accuracy — they pick wrong
+// or loop — so the count is capped and the agentic loop is bounded. Both are
+// overridable.
+//
+// 24 was too low to be safe. A stock install is Hermeneia (18) + reminders (7)
+// + Things (10) = 35, and capping there cut half of WhatsApp — including
+// list_chats, which "summarise my chats" needs. Losing the tool the user is
+// asking for is worse than offering a few too many, and the cap now falls
+// evenly across servers rather than truncating whichever connected last.
+const TOOL_LIMIT = parseInt(process.env.REFUGIO_TOOL_LIMIT || "40", 10);
+const MAX_TOOL_ROUNDS = parseInt(process.env.REFUGIO_MAX_TOOL_ROUNDS || "5", 10);
+const MCP_CONFIG = process.env.REFUGIO_MCPO_CONFIG ||
+  join(dirname(__dirname), "mcpo-config.json");
+
+/** @type {McpPool|null} */
+let mcp = null;
 
 // Model selection: explicit override, else whatever Ollama has (first entry).
 let cachedModel = process.env.REFUGIO_CHAT_MODEL || null;
@@ -147,8 +199,10 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 
   send("start", { conversation_id: conversationId });
 
+  const tools = mcp ? mcp.toolDefs(TOOL_LIMIT) : [];
+
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: SYSTEM_PROMPT + toolPreamble(tools) },
     ...store.historyFor(conversationId),
   ];
 
@@ -162,12 +216,40 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
   // the answer is lost entirely and the conversation is left with a user turn
   // and no reply, which then poisons the history sent on the next turn.
   let acc = "";
+  const toolsUsed = [];
 
   try {
-    await chatStream(
-      { model, messages, signal: ac.signal },
-      (piece) => { acc += piece; send("token", { t: piece }); }
-    );
+    // Agentic loop: the model may call tools, read the results, and call more
+    // before answering. Bounded so a model that loops on a failing tool can't
+    // spin forever.
+    for (let round = 0; ; round++) {
+      const { text, toolCalls } = await chatStream(
+        { model, messages, tools, signal: ac.signal },
+        (piece) => { acc += piece; send("token", { t: piece }); }
+      );
+
+      if (!toolCalls.length) break;
+
+      if (round >= MAX_TOOL_ROUNDS) {
+        const note = `\n\n_(stopped after ${MAX_TOOL_ROUNDS} tool rounds)_`;
+        acc += note; send("token", { t: note });
+        break;
+      }
+
+      // Ollama needs the assistant turn that requested the calls in history,
+      // then one `tool` message per result.
+      messages.push({ role: "assistant", content: text, tool_calls: toolCalls.map((c) => ({
+        function: { name: c.name, arguments: c.args },
+      })) });
+
+      for (const call of toolCalls) {
+        send("tool", { name: call.name, args: call.args });
+        const result = await mcp.call(call.name, call.args);
+        toolsUsed.push(call.name);
+        send("tool_result", { name: call.name, ok: !result.startsWith("Error"), preview: result.slice(0, 160) });
+        messages.push({ role: "tool", content: result, tool_name: call.name });
+      }
+    }
 
     store.addMessage(conversationId, "assistant", acc, model);
     if (!res.writableEnded) {
@@ -200,6 +282,10 @@ async function route(req, res, url) {
       model,
       models: models.map((m) => m.name),
       ollama: OLLAMA_BASE,
+      tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],
+      // true / false / null-when-unrated. The UI warns only on an explicit
+      // false — a model we've never rated is unknown, not incapable.
+      modelTools: modelSupportsTools(model),
     });
   }
 
@@ -293,6 +379,12 @@ server.listen(PORT, "127.0.0.1", async () => {
   log(`store: ${DB_PATH}`);
   const model = await resolveModel();
   log(model ? `model: ${model}` : `no model yet (Ollama at ${OLLAMA_BASE})`);
+
+  // Tools connect after the server is listening so a slow or broken connector
+  // delays tool availability, never the UI itself.
+  if (process.env.REFUGIO_TOOLS !== "0") {
+    mcp = await new McpPool().connectAll(MCP_CONFIG);
+  }
 });
 
 for (const sig of ["SIGINT", "SIGTERM"]) {
@@ -300,6 +392,7 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
     log("shutting down");
     server.close();
     store.closeStore();
+    mcp?.close();
     process.exit(0);
   });
 }

@@ -12,6 +12,7 @@ let package = Package(
             path: "Sources/RefugioBar",
             linkerSettings: [
                 .linkedFramework("AppKit"),
+                .linkedFramework("WebKit"),
                 .linkedFramework("ServiceManagement")
             ]
         )
