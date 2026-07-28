@@ -58,7 +58,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(loginItem)
 
-        let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+        // Two distinct exits. Freeing RAM is the common reason people reach for
+        // the menu bar (the stack can hold GBs), and a plain "Quit" that leaves
+        // the supervisor running is the opposite of what they wanted — so the
+        // memory-freeing action is spelled out and listed first.
+        let stopQuit = NSMenuItem(title: "Stop REFUGIO & Quit",
+                                  action: #selector(stopAndQuit), keyEquivalent: "q")
+        stopQuit.target = self
+        menu.addItem(stopQuit)
+
+        let quit = NSMenuItem(title: "Quit menu bar only (keeps running)",
+                              action: #selector(quitApp), keyEquivalent: "")
         quit.target = self
         menu.addItem(quit)
 
@@ -97,7 +107,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = LoginItem.isEnabled ? .on : .off
     }
 
-    @objc private func quitApp() { NSApp.terminate(nil) }
+    /// Quit the menu-bar app only. REFUGIO keeps running and keeps its memory —
+    /// warn first when it's actually up, so this can't be mistaken for the
+    /// memory-freeing action.
+    @objc private func quitApp() {
+        if running {
+            let a = NSAlert()
+            a.messageText = "Leave REFUGIO running?"
+            a.informativeText = "The menu bar will close but REFUGIO keeps running in the background and keeps using memory.\n\nTo free that memory, use “Stop REFUGIO & Quit”."
+            a.addButton(withTitle: "Leave It Running")
+            a.addButton(withTitle: "Stop REFUGIO & Quit")
+            a.addButton(withTitle: "Cancel")
+            switch a.runModal() {
+            case .alertSecondButtonReturn: stopAndQuit(); return
+            case .alertThirdButtonReturn: return
+            default: break
+            }
+        }
+        NSApp.terminate(nil)
+    }
+
+    /// Stop the whole stack, then quit — the "give me my RAM back" path.
+    /// Gives the supervisor a moment to SIGTERM its children before exiting,
+    /// so we don't orphan Ollama or Open WebUI.
+    @objc private func stopAndQuit() {
+        stopStack()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
+    }
 
     // ── Start / stop the supervisor ─────────────────────────
     private func nodePath() -> String? {
@@ -182,6 +218,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // ── Status polling ──────────────────────────────────────
+    /// Resident memory (MB) of the REFUGIO stack: the supervisor and its
+    /// children, plus Ollama and Open WebUI, which are separate process trees.
+    /// One `ps` call, summed. Returns 0 if anything goes wrong — the header
+    /// then just omits the figure rather than showing a wrong one.
+    private func stackMemoryMB() -> Int {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c",
+            "ps -Ao rss,comm,args | grep -E 'start-refugio|open-webui|ollama|mcpo' " +
+            "| grep -v grep | awk '{s+=$1} END {print int(s/1024)}'"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return 0 }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return Int(String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    }
+
     private func refreshStatus() {
         var req = URLRequest(url: healthURL)
         req.timeoutInterval = 1.5
@@ -197,7 +253,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         running = up
         if up {
             startedAt = nil
-            headerItem.title = "REFUGIO — running"
+            // Surface RAM in the header — the stack (Ollama + model + Open
+            // WebUI) can hold GBs, and "is this what's eating my machine?" is
+            // the question that sends people to this menu.
+            let mb = stackMemoryMB()
+            headerItem.title = mb > 0
+                ? String(format: "REFUGIO — running · %.1f GB RAM", Double(mb) / 1024.0)
+                : "REFUGIO — running"
             toggleItem.title = "Stop REFUGIO"
         } else if starting {
             headerItem.title = "REFUGIO — starting…"
