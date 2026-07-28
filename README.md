@@ -47,6 +47,24 @@ curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/instal
 irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio.ps1 | iex
 ```
 
+This installs the current stable release (**v1.0.3**), which uses Open WebUI as its interface.
+
+### v2 beta — REFUGIO's own chat window
+
+```bash
+REFUGIO_VERSION=v2.0.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
+```
+
+v2 replaces Open WebUI with a chat UI REFUGIO serves itself, and talks to your connectors over MCP directly instead of proxying them through MCPO:
+
+- **No Python.** Open WebUI needs `uv`, a virtual environment, and loads PyTorch (~1–1.5 GB) just to boot. The built-in UI is Node and holds ~50 MB. That reclaimed memory is what lets an 8 GB machine run a model big enough to call tools.
+- **A real window.** On macOS the menu-bar app opens REFUGIO in its own window — no browser, no address bar. Linux and Windows get tray icons.
+- **Fewer moving parts.** MCPO exists only because Open WebUI can't speak MCP. The chat UI can, so it isn't started.
+
+Open WebUI is still available (`--owui`, or `REFUGIO_OWUI=1`), and `REFUGIO_CHAT=0` gives it the connectors back.
+
+**Beta caveats:** the Windows tray script has not yet been run on Windows, and the macOS window is verified by building it locally rather than in CI. Stay on stable if you'd rather not hit those.
+
 ### What happens
 
 1. Installs **Node.js**, **Git**, and **[uv](https://docs.astral.sh/uv/)** (a fast Python manager that brings its own Python) if missing
