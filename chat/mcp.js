@@ -110,9 +110,43 @@ export class McpPool {
   /** Tool definitions for Ollama, optionally capped.
    *
    *  Small local models degrade badly when handed dozens of tools — they pick
-   *  wrong or loop. Callers can cap; 0 means "no tools". */
+   *  wrong or loop. Callers can cap; 0 means "no tools".
+   *
+   *  The cap is spread round-robin across servers rather than sliced off the
+   *  flat list. A flat slice hands every slot to whichever servers connected
+   *  first, so a second connector can vanish entirely — and the symptom is a
+   *  model calmly explaining it has no WhatsApp tools while the UI reports 24,
+   *  which reads as a bug anywhere but here. */
   toolDefs(limit = 0) {
-    return limit > 0 ? this.tools.slice(0, limit) : this.tools;
+    if (limit <= 0) return this.tools;
+    if (this.tools.length <= limit) return this.tools;
+
+    const queues = new Map();
+    for (const t of this.tools) {
+      const server = t.function.name.split(SEP)[0];
+      if (!queues.has(server)) queues.set(server, []);
+      queues.get(server).push(t);
+    }
+
+    const out = [];
+    while (out.length < limit) {
+      let took = false;
+      for (const q of queues.values()) {
+        if (!q.length) continue;
+        out.push(q.shift());
+        took = true;
+        if (out.length === limit) break;
+      }
+      if (!took) break;
+    }
+
+    // Once, not on every status poll.
+    if (!this._cappedWarned) {
+      this._cappedWarned = true;
+      log(`capped at ${limit} of ${this.tools.length} tools across ` +
+          `${queues.size} server(s) — raise REFUGIO_TOOL_LIMIT to offer more`);
+    }
+    return out;
   }
 
   has(qualifiedName) {
