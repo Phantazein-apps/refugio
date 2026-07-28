@@ -2,8 +2,11 @@ import AppKit
 
 /// REFUGIO menu-bar controller: start / stop the local AI stack, open it, toggle
 /// launch-at-login, quit. Very light — just an NSStatusItem that shells out to the
-/// existing supervisor (~/refugio/start-refugio.cjs). Quitting this app does NOT stop
-/// REFUGIO; use "Stop REFUGIO" for that.
+/// existing supervisor (~/refugio/start-refugio.cjs).
+///
+/// The icon and the stack are separate lifetimes: "Stop REFUGIO" frees the
+/// memory and keeps the icon (so restarting is one click), "Quit REFUGIO"
+/// removes the icon and asks what to do about the stack.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var headerItem: NSMenuItem!
@@ -47,6 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openItem.target = self
         menu.addItem(openItem)
 
+        // Freeing RAM is the common reason people reach for this menu (the stack
+        // can hold GBs) — and it should NOT cost them the menu bar, or there is
+        // nothing left to restart from. So the memory-freeing action is this
+        // toggle, which leaves the icon in place and flips to "Start REFUGIO".
         toggleItem = NSMenuItem(title: "Start REFUGIO", action: #selector(toggleRun), keyEquivalent: "")
         toggleItem.target = self
         menu.addItem(toggleItem)
@@ -58,17 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(loginItem)
 
-        // Two distinct exits. Freeing RAM is the common reason people reach for
-        // the menu bar (the stack can hold GBs), and a plain "Quit" that leaves
-        // the supervisor running is the opposite of what they wanted — so the
-        // memory-freeing action is spelled out and listed first.
-        let stopQuit = NSMenuItem(title: "Stop REFUGIO & Quit",
-                                  action: #selector(stopAndQuit), keyEquivalent: "q")
-        stopQuit.target = self
-        menu.addItem(stopQuit)
-
-        let quit = NSMenuItem(title: "Quit menu bar only (keeps running)",
-                              action: #selector(quitApp), keyEquivalent: "")
+        // One exit, and ⌘Q maps to it. It used to map to "Stop REFUGIO & Quit",
+        // which meant the reflexive keystroke removed the only way back — quit
+        // now asks instead, and the stop-and-quit path lives in that prompt.
+        let quit = NSMenuItem(title: "Quit REFUGIO", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
 
@@ -115,21 +115,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = LoginItem.isEnabled ? .on : .off
     }
 
-    /// Quit the menu-bar app only. REFUGIO keeps running and keeps its memory —
-    /// warn first when it's actually up, so this can't be mistaken for the
-    /// memory-freeing action.
+    /// Quit the menu-bar app. Quitting the icon is not the same as stopping the
+    /// stack, and either answer can be the one the user meant — so when REFUGIO
+    /// is actually up, ask rather than guess. Cancel is the default button: this
+    /// is reached by reflex (⌘Q), and both other outcomes are worse to get wrong.
     @objc private func quitApp() {
         if running {
             let a = NSAlert()
-            a.messageText = "Leave REFUGIO running?"
-            a.informativeText = "The menu bar will close but REFUGIO keeps running in the background and keeps using memory.\n\nTo free that memory, use “Stop REFUGIO & Quit”."
-            a.addButton(withTitle: "Leave It Running")
-            a.addButton(withTitle: "Stop REFUGIO & Quit")
+            a.messageText = "Quit the REFUGIO menu bar?"
+            a.informativeText = "REFUGIO is running and using memory.\n\nTo free that memory but keep the menu bar — so you can start it again in one click — use “Stop REFUGIO” instead."
             a.addButton(withTitle: "Cancel")
+            a.addButton(withTitle: "Stop REFUGIO & Quit")
+            a.addButton(withTitle: "Quit, Leave It Running")
             switch a.runModal() {
             case .alertSecondButtonReturn: stopAndQuit(); return
-            case .alertThirdButtonReturn: return
-            default: break
+            case .alertThirdButtonReturn: break
+            default: return
             }
         }
         NSApp.terminate(nil)
@@ -219,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try task.run()
             startedAt = Date()
             headerItem.title = "REFUGIO — starting…"
-            toggleItem.title = "Stop REFUGIO"
+            toggleItem.title = "Stop REFUGIO (frees memory)"
             setIcon(running: true)
         } catch {
             headerItem.title = "Start failed: \(error.localizedDescription)"
@@ -295,10 +296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             headerItem.title = mb > 0
                 ? String(format: "REFUGIO — running · %.1f GB RAM", Double(mb) / 1024.0)
                 : "REFUGIO — running"
-            toggleItem.title = "Stop REFUGIO"
+            toggleItem.title = "Stop REFUGIO (frees memory)"
         } else if starting {
             headerItem.title = "REFUGIO — starting…"
-            toggleItem.title = "Stop REFUGIO"
+            toggleItem.title = "Stop REFUGIO (frees memory)"
         } else {
             headerItem.title = "REFUGIO — stopped"
             toggleItem.title = "Start REFUGIO"
