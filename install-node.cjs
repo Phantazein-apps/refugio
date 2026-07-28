@@ -255,6 +255,71 @@ function installMenuBarApp(targetDir) {
   }
 }
 
+// ── Windows tray ─────────────────────────────────────────────
+// WinForms NotifyIcon ships with Windows, so the tray needs no dependency and
+// no build step. Writes a launcher .vbs (runs PowerShell with no console
+// window) plus a Startup shortcut, mirroring the macOS menu-bar app.
+function installWindowsTray(targetDir) {
+  const ps1 = path.join(targetDir, "tray", "refugio-tray.ps1")
+  if (!fs.existsSync(ps1)) return
+
+  // .vbs wrapper: launching powershell.exe directly flashes a console window.
+  const vbs =
+    `Set s = CreateObject("Wscript.Shell")\r\n` +
+    `s.Run "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File ""${ps1}"" ` +
+    `-RefugioDir ""${targetDir}""", 0, False\r\n`
+  const vbsPath = path.join(targetDir, "REFUGIO Tray.vbs")
+  try { fs.writeFileSync(vbsPath, vbs) } catch { return }
+
+  // Start with Windows so the tray is there when the user needs it.
+  try {
+    const startup = path.join(home, "AppData", "Roaming", "Microsoft",
+      "Windows", "Start Menu", "Programs", "Startup")
+    if (fs.existsSync(startup)) {
+      fs.copyFileSync(vbsPath, path.join(startup, "REFUGIO Tray.vbs"))
+    }
+  } catch {}
+
+  try { execSync(`wscript "${vbsPath}"`, { stdio: "ignore" }) } catch {}
+  ok("Tray icon installed — look for REFUGIO near the clock")
+  console.log(`    ${C.dim}Use "Stop REFUGIO & Quit" there to free the memory it uses.${C.reset}`)
+}
+
+// ── Linux tray ───────────────────────────────────────────────
+// Linux has no universal tray API — GNOME needs the AppIndicator extension,
+// most other desktops work out of the box — so this drives `yad`, packaged
+// everywhere. Without yad the script prints install guidance and exits; the
+// `refugio` CLI is unaffected either way.
+function installLinuxTray(targetDir, appsDir) {
+  const sh = path.join(targetDir, "tray", "refugio-tray.sh")
+  if (!fs.existsSync(sh)) return
+  try { fs.chmodSync(sh, 0o755) } catch {}
+
+  const entry =
+    `[Desktop Entry]\nType=Application\nName=REFUGIO Tray\n` +
+    `Comment=Start, stop and open REFUGIO from the system tray\n` +
+    `Exec="${sh}"\nIcon=${path.join(targetDir, "branding", "favicon.png")}\n` +
+    `Terminal=false\nCategories=Utility;\nX-GNOME-Autostart-enabled=true\n`
+  try { fs.writeFileSync(path.join(appsDir, "refugio-tray.desktop"), entry) } catch {}
+
+  const autostart = path.join(home, ".config", "autostart")
+  try {
+    fs.mkdirSync(autostart, { recursive: true })
+    fs.writeFileSync(path.join(autostart, "refugio-tray.desktop"), entry)
+  } catch {}
+
+  if (has("yad")) {
+    try { execSync(`setsid "${sh}" >/dev/null 2>&1 &`, { stdio: "ignore", shell: "/bin/bash" }) } catch {}
+    ok("Tray icon installed — look for REFUGIO in your system tray")
+    console.log(`    ${C.dim}Use "Stop REFUGIO & Quit" there to free the memory it uses.${C.reset}`)
+  } else {
+    console.log(`  ${C.dim}Tray icon set up, but it needs 'yad' to show:`)
+    console.log(`    Debian/Ubuntu: sudo apt install yad   ·   Fedora: sudo dnf install yad`)
+    console.log(`    (GNOME also needs the AppIndicator extension.)`)
+    console.log(`    REFUGIO works without it: 'refugio' to start, 'refugio stop' to free RAM.${C.reset}`)
+  }
+}
+
 // ── Personal connector: WhatsApp via Hermeneia ───────────────
 // Hermeneia (github.com/Phantazein-apps/hermeneia) is a local WhatsApp MCP
 // server and REFUGIO's flagship personal connector. Its bridge is pure Go
@@ -1759,6 +1824,7 @@ esac
       try { fs.mkdirSync(appsDir, { recursive: true }) } catch {}
       const desktop = `[Desktop Entry]\nType=Application\nName=REFUGIO\nComment=Start your local AI\nExec="${nodePath}" "${targetDir}/start-refugio.cjs"\nTerminal=true\nCategories=Utility;\n`
       try { fs.writeFileSync(path.join(appsDir, "refugio.desktop"), desktop) } catch {}
+      installLinuxTray(targetDir, appsDir)
     }
   } else {
     // Windows: clickable start + stop .bat (no `refugio` shell CLI on Windows).
@@ -1773,6 +1839,7 @@ esac
       "taskkill /PID !PID! /T /F >nul 2>&1 && echo REFUGIO stopped (RAM freed) || echo REFUGIO is not running",
     ].join("\r\n") + "\r\n"
     try { fs.writeFileSync(path.join(targetDir, "Stop-REFUGIO.bat"), stop) } catch {}
+    installWindowsTray(targetDir)
   }
 
   ok("Low-RAM mode: REFUGIO will NOT auto-start on login (keeps your RAM free)")
