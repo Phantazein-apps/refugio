@@ -339,7 +339,7 @@ const HERMENEIA_REPO = "https://github.com/Phantazein-apps/hermeneia.git"
 // bridge and silently lost WhatsApp. Pinning the checkout AND pulling the
 // bridge from that same release keeps the two halves in lockstep.
 // Override for testing: HERMENEIA_VERSION=master.
-const HERMENEIA_VERSION = process.env.HERMENEIA_VERSION || "v0.4.11"
+const HERMENEIA_VERSION = process.env.HERMENEIA_VERSION || "v0.4.12"
 const HERMENEIA_RELEASE_BASE =
   `https://github.com/Phantazein-apps/hermeneia/releases/download/${HERMENEIA_VERSION}`
 const HERMENEIA_QR_PORT = 3456
