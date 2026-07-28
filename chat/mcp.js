@@ -53,7 +53,7 @@ function toOllamaTool(server, tool) {
 function firstCause(stderr) {
   const lines = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
   const named = lines.find((l) =>
-    /cannot find|no such file|enoent|eacces|permission denied|not found|refused|unauthorized|^[A-Za-z]*Error[:,]| error: /i.test(l));
+    /cannot find|no such file|enoent|eacces|permission denied|not found|refused|unauthorized|already running|exiting cleanly|^[A-Za-z]*Error[:,]| error: /i.test(l));
   return (named || lines[0] || "").slice(0, 300);
 }
 
