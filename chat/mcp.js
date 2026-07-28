@@ -44,6 +44,19 @@ function toOllamaTool(server, tool) {
   };
 }
 
+/** Pull the one line of a child's stderr worth showing.
+ *
+ *  The tail is the wrong choice: a Node crash ends with "requireStack: []",
+ *  "}", "Node.js v22.x" — three lines that say nothing — while the line that
+ *  names the missing module sits above the stack trace. Prefer the first line
+ *  that states a cause, and fall back to the first non-blank line. */
+function firstCause(stderr) {
+  const lines = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
+  const named = lines.find((l) =>
+    /cannot find|no such file|enoent|eacces|permission denied|not found|refused|unauthorized|^[A-Za-z]*Error[:,]| error: /i.test(l));
+  return (named || lines[0] || "").slice(0, 300);
+}
+
 export class McpPool {
   constructor() {
     this.clients = new Map();   // server name -> Client
@@ -86,17 +99,40 @@ export class McpPool {
   async #connectOne(name, spec, timeoutMs) {
     if (!spec?.command) throw new Error("not a stdio server");
 
+    // Keep the child's stderr. Discarding it ("ignore") makes a failing
+    // connector undebuggable: the pool reports "0 tools" and the model then
+    // truthfully says it has no WhatsApp tools, with nothing anywhere naming
+    // the missing file or the crash that caused it. The child's own error
+    // message is almost always the whole answer, so hold the tail of it.
     const transport = new StdioClientTransport({
       command: spec.command,
       args: spec.args || [],
       env: { ...process.env, ...(spec.env || {}) },
-      stderr: "ignore",
+      stderr: "pipe",
     });
     const client = new Client({ name: "refugio-chat", version: "1.0.0" }, { capabilities: {} });
 
-    // A connector that hangs on startup would otherwise stall the whole chat.
-    await withTimeout(client.connect(transport), timeoutMs, `${name} connect`);
-    const { tools = [] } = await withTimeout(client.listTools(), timeoutMs, `${name} listTools`);
+    let errTail = "";
+    const keepStderr = (chunk) => {
+      errTail = (errTail + chunk.toString()).slice(-2000);
+    };
+
+    try {
+      // A connector that hangs on startup would otherwise stall the whole chat.
+      await withTimeout(client.connect(transport), timeoutMs, `${name} connect`);
+      transport.stderr?.on("data", keepStderr);
+      const { tools = [] } = await withTimeout(client.listTools(), timeoutMs, `${name} listTools`);
+      return this.#register(name, client, tools);
+    } catch (e) {
+      // connect() spawns the child, so stderr only exists from that point on —
+      // attach late and drain whatever the child managed to say before dying.
+      transport.stderr?.on("data", keepStderr);
+      await new Promise((r) => setTimeout(r, 150));
+      throw new Error(errTail ? `${e.message} — ${firstCause(errTail)}` : e.message);
+    }
+  }
+
+  #register(name, client, tools) {
 
     this.clients.set(name, client);
     for (const t of tools) {
