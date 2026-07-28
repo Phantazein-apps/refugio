@@ -110,10 +110,17 @@ install_node
 
 echo ""
 
-# Download and run the Node installer
-# Pinned to stable tag — future development happens on dev branch
+# Download and run the Node installer.
+#
+# Pinned to the stable release by default — `main` is the integration branch
+# and may carry half-finished work, so installing from it is now opt-in. This
+# ref is used by BOTH this bootstrap and the repo clone in install-node.cjs,
+# so a pinned install is pinned end to end.
+#   stable (default):   curl … | bash
+#   bleeding edge:      REFUGIO_VERSION=main curl … | bash
+#   specific release:   REFUGIO_VERSION=v1.0.1 curl … | bash
 # Use </dev/tty so interactive prompts read from the terminal, not the pipe
-export REFUGIO_VERSION="${REFUGIO_VERSION:-main}"
+export REFUGIO_VERSION="${REFUGIO_VERSION:-v1.0.1}"
 TMPFILE=$(mktemp /tmp/refugio-install.XXXXXX)
 trap 'rm -f "$TMPFILE"' EXIT INT TERM
 curl -fsSL "https://raw.githubusercontent.com/Phantazein-apps/refugio/${REFUGIO_VERSION}/install-node.cjs" > "$TMPFILE"

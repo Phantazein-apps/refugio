@@ -229,8 +229,35 @@ async function promptGithubFields(env, existing) {
 // its local status API reports when the phone has linked.
 
 const HERMENEIA_REPO = "https://github.com/Phantazein-apps/hermeneia.git"
-const HERMENEIA_RELEASE_BASE = "https://github.com/Phantazein-apps/hermeneia/releases/latest/download"
+// Pin Hermeneia to a RELEASE TAG, not its default branch.
+//
+// This previously cloned Hermeneia unpinned, which caused a live outage: its
+// master stopped committing the prebuilt Go bridge binary (it moved to release
+// assets), so every new REFUGIO install cloned a master with no runnable
+// bridge and silently lost WhatsApp. Pinning the checkout AND pulling the
+// bridge from that same release keeps the two halves in lockstep.
+// Override for testing: HERMENEIA_VERSION=master.
+const HERMENEIA_VERSION = process.env.HERMENEIA_VERSION || "v0.4.11"
+const HERMENEIA_RELEASE_BASE =
+  `https://github.com/Phantazein-apps/hermeneia/releases/download/${HERMENEIA_VERSION}`
 const HERMENEIA_QR_PORT = 3456
+
+// Move an existing Hermeneia checkout onto the pinned ref. Fetches the tag
+// first (a --depth 1 clone won't have it), then checks it out detached.
+// Best-effort: a checkout that can't be moved is left as-is rather than
+// failing the install — ensureHermeneiaBridge() still validates what's there.
+function checkoutHermeneiaVersion(dir) {
+  try {
+    const cur = execSync("git rev-parse --abbrev-ref HEAD", { cwd: dir, encoding: "utf-8" }).trim()
+    execSync(`git fetch --depth 1 origin tag ${HERMENEIA_VERSION}`, { cwd: dir, stdio: "ignore" })
+    execSync(`git checkout --quiet ${HERMENEIA_VERSION}`, { cwd: dir, stdio: "ignore" })
+    if (cur !== HERMENEIA_VERSION) {
+      console.log(`    ${C.dim}Hermeneia pinned to ${HERMENEIA_VERSION}${C.reset}`)
+    }
+  } catch {
+    warn(`Could not move Hermeneia to ${HERMENEIA_VERSION} — using the existing checkout.`)
+  }
+}
 
 // Map this machine to the bridge binary Hermeneia publishes, using the SAME
 // naming its dist/bridge.ts resolver expects (win32→windows, x64→amd64).
@@ -399,7 +426,7 @@ async function setupHermeneia(env, existing) {
     const everPaired = hermeneiaEverPaired()
     console.log(`  ${C.bold}WhatsApp (Hermeneia)${C.reset} ${C.green}(configured)${C.reset}`)
     console.log(`    ${C.dim}HERMENEIA_DIR=${existing.HERMENEIA_DIR}${everPaired ? " · previously paired (not verified)" : " · not linked yet"}${C.reset}`)
-    try { execSync("git pull --ff-only", { cwd: env.HERMENEIA_DIR, stdio: "ignore" }) } catch {}
+    checkoutHermeneiaVersion(env.HERMENEIA_DIR)
     ensureHermeneiaBridge(env.HERMENEIA_DIR)
     const prompt = everPaired
       ? "  Verify / re-link your WhatsApp now (QR scan if the link is dead)?"
@@ -418,9 +445,12 @@ async function setupHermeneia(env, existing) {
   const dir = existing.HERMENEIA_DIR || path.join(home, "hermeneia")
   try {
     if (fs.existsSync(path.join(dir, ".git"))) {
-      try { execSync("git pull --ff-only", { cwd: dir, stdio: "ignore" }) } catch {}
+      // Move an existing checkout ONTO the pinned ref rather than pulling it
+      // to the tip of its default branch — a plain `git pull` here is exactly
+      // what dragged users onto a master with no bridge binary.
+      checkoutHermeneiaVersion(dir)
     } else {
-      run(`git clone --depth 1 ${HERMENEIA_REPO} "${dir}"`)
+      run(`git clone --depth 1 --branch ${HERMENEIA_VERSION} ${HERMENEIA_REPO} "${dir}"`)
     }
   } catch (e) {
     warn(`Could not download Hermeneia (${e.message}) — skipping WhatsApp`)
