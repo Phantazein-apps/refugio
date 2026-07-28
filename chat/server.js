@@ -38,6 +38,23 @@ const SYSTEM_PROMPT =
   "You are REFUGIO, a helpful assistant running entirely on the user's own computer. " +
   "Be concise and direct. If you don't know something, say so.";
 
+/** Tell the model, in prose, that it has tools.
+ *
+ *  Handing a model a `tools` array is not the same as telling it to use them.
+ *  Asked to "summarize my WhatsApp messages", a small model will happily reply
+ *  "please paste your messages" — it pattern-matches the request as needing
+ *  information it lacks rather than as a tool call. Naming the connectors and
+ *  forbidding the ask-the-user escape hatch is what closes that gap; larger
+ *  models don't need it, and it costs them nothing. */
+function toolPreamble(tools) {
+  if (!tools.length) return "";
+  const servers = [...new Set(tools.map((t) => t.function.name.split("__")[0]))];
+  return "\n\nYou have tools that read the user's own data on this machine" +
+    ` (${servers.join(", ")}). When a question is about that data, call the` +
+    " relevant tool instead of answering from memory. Never ask the user to" +
+    " paste in data you can fetch yourself — call the tool and use the result.";
+}
+
 const log = (m) => console.log(`[chat] ${m}`);
 
 // Tool limits. Small local models degrade badly with a large tool surface —
@@ -159,8 +176,10 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 
   send("start", { conversation_id: conversationId });
 
+  const tools = mcp ? mcp.toolDefs(TOOL_LIMIT) : [];
+
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: SYSTEM_PROMPT + toolPreamble(tools) },
     ...store.historyFor(conversationId),
   ];
 
@@ -177,8 +196,6 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
   const toolsUsed = [];
 
   try {
-    const tools = mcp ? mcp.toolDefs(TOOL_LIMIT) : [];
-
     // Agentic loop: the model may call tools, read the results, and call more
     // before answering. Bounded so a model that loops on a failing tool can't
     // spin forever.

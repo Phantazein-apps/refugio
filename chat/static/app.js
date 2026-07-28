@@ -114,7 +114,16 @@ async function refreshStatus() {
   try {
     const s = await (await fetch("/api/chat/status")).json();
     els.status.className = `status ${s.available ? "ok" : "down"}`;
-    els.statusText.textContent = s.available ? "ready" : "no model";
+    // Show the connector count, not just "ready". Without it there is no way to
+    // tell a model that ignored its tools from a model that was never given
+    // any — the two look identical in the thread, and only one is fixable here.
+    const n = s.tools?.length ?? 0;
+    els.statusText.textContent = !s.available ? "no model"
+      : n ? `ready · ${n} tool${n === 1 ? "" : "s"}`
+      : "ready · no tools";
+    els.status.title = n
+      ? s.tools.join("\n")
+      : "No MCP connectors loaded — check the chat server log for [chat:mcp].";
     els.model.innerHTML = "";
     for (const m of s.models || []) {
       const o = document.createElement("option");
