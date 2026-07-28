@@ -296,8 +296,25 @@ function showTool(bubble, name, state) {
     strip.appendChild(chip);
   }
   chip.dataset.state = state;
-  chip.textContent = (state === "running" ? "\u2699 " : state === "ok" ? "\u2713 " : "\u2717 ") +
-    name.replace("__", " · ");
+  const label = name.replace("__", " \u00b7 ");
+
+  clearInterval(chip._timer);
+  if (state !== "running") {
+    chip.textContent = (state === "ok" ? "\u2713 " : "\u2717 ") + label;
+    scrollToEnd();
+    return;
+  }
+
+  // Count up while the tool runs. Reading a WhatsApp history takes real time,
+  // and a chip that sits unchanged is indistinguishable from a hang \u2014 which
+  // is what anyone concludes after ten silent seconds of nothing moving.
+  const t0 = Date.now();
+  const tick = () => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    chip.textContent = "\u2699 " + label + (s ? ` ${s}s` : "");
+  };
+  tick();
+  chip._timer = setInterval(tick, 1000);
   scrollToEnd();
 }
 

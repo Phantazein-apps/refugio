@@ -18,6 +18,19 @@ const log = (m) => console.log(`[chat:mcp] ${m}`);
 // Namespace on the way out and strip it on the way back in. `-` and `.` are
 // avoided because some models mangle them in generated tool names.
 const SEP = "__";
+
+// How much of a tool's output the model is shown.
+//
+// This is a latency setting, not a memory one. Everything here is prompt the
+// model must read before emitting its first word, and on a local 3B model that
+// processing dominates the wait: 24k characters is ~6k tokens, which is tens of
+// seconds on an 8 GB laptop before anything appears on screen. `list_messages`
+// returns 50 messages by default and fills that easily.
+//
+// 6k characters is ~1.5k tokens — still dozens of messages, enough to summarise
+// a day, and it gets the first token out several times sooner. Raise it for a
+// bigger model, where the tradeoff reverses.
+const RESULT_CHARS = parseInt(process.env.REFUGIO_TOOL_RESULT_CHARS || "6000", 10);
 const qualify = (server, tool) => `${server}${SEP}${tool}`;
 const unqualify = (name) => {
   const i = name.indexOf(SEP);
@@ -234,8 +247,9 @@ function flattenContent(result) {
   });
   const text = parts.join("\n").trim();
   if (!text) return "(the tool returned no output)";
-  // Cap: a chatty tool can otherwise evict the conversation from context.
-  return text.length > 24000 ? text.slice(0, 24000) + "\n…(truncated)" : text;
+  return text.length > RESULT_CHARS
+    ? text.slice(0, RESULT_CHARS) + "\n…(truncated — ask for a narrower range for more detail)"
+    : text;
 }
 
 function withTimeout(promise, ms, label) {
