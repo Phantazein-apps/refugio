@@ -12,7 +12,7 @@ const els = {
   model: $("model-pick"), status: $("status"), statusText: $("status-text"),
 };
 
-const state = { conversationId: null, streaming: false, model: null };
+const state = { conversationId: null, streaming: false, model: null, abort: null };
 
 // ── Rendering ───────────────────────────────────────────────
 
@@ -26,10 +26,53 @@ function renderContent(text) {
   return parts.map((part, i) => {
     if (i % 2 === 1) {
       const body = part.replace(/^[a-zA-Z0-9_-]*\n/, "");
-      return `<pre><code>${esc(body)}</code></pre>`;
+      return `<pre><button class="copy" title="Copy">copy</button><code>${esc(body)}</code></pre>`;
     }
-    return `<p>${esc(part).replace(/`([^`\n]+)`/g, "<code>$1</code>")}</p>`;
+    return md(esc(part));
   }).join("");
+}
+
+/** Small markdown subset, applied to ALREADY-escaped text so nothing the model
+ *  emits can become live markup. Deliberately not a full parser — headings,
+ *  emphasis, lists, links and rules cover what a chat answer actually uses. */
+function md(t) {
+  const lines = t.split("\n");
+  const out = [];
+  let list = null;               // 'ul' | 'ol' | null
+
+  const inline = (s) => s
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    // Links: only http(s) — never javascript: or data:.
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
+             '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    let m;
+    if (/^\s*$/.test(line)) { closeList(); continue; }
+    if ((m = /^(#{1,4})\s+(.*)$/.exec(line))) {
+      closeList();
+      const lvl = Math.min(m[1].length + 2, 6);
+      out.push(`<h${lvl}>${inline(m[2])}</h${lvl}>`); continue;
+    }
+    if (/^(-{3,}|\*{3,})$/.test(line)) { closeList(); out.push("<hr>"); continue; }
+    if ((m = /^\s*[-*+]\s+(.*)$/.exec(line))) {
+      if (list !== "ul") { closeList(); out.push("<ul>"); list = "ul"; }
+      out.push(`<li>${inline(m[1])}</li>`); continue;
+    }
+    if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) {
+      if (list !== "ol") { closeList(); out.push("<ol>"); list = "ol"; }
+      out.push(`<li>${inline(m[1])}</li>`); continue;
+    }
+    closeList();
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  closeList();
+  return out.join("");
 }
 
 function addMessage(role, text) {
@@ -145,8 +188,10 @@ async function send() {
   let acc = "";
 
   try {
+    state.abort = new AbortController();
     const res = await fetch("/api/chat/ask", {
       method: "POST",
+      signal: state.abort.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: text,
@@ -189,8 +234,10 @@ async function send() {
     }
     if (!acc) showError("The model returned an empty response.");
   } catch (err) {
-    showError(err.message || String(err));
+    // Aborting is a deliberate user action, not an error worth shouting about.
+    if (err.name !== "AbortError") showError(err.message || String(err));
   } finally {
+    state.abort = null;
     bubble.classList.remove("cursor");
     setStreaming(false);
     els.input.focus();
@@ -222,7 +269,13 @@ function showTool(bubble, name, state) {
 
 function setStreaming(on) {
   state.streaming = on;
-  els.send.disabled = on || !els.input.value.trim();
+  // The send button doubles as Stop. With a slow local model, being unable to
+  // interrupt a wrong answer is the single most frustrating thing a chat UI
+  // can do — so this is never disabled while streaming.
+  els.send.textContent = on ? "\u25A0" : "\u2191";
+  els.send.title = on ? "Stop" : "Send";
+  els.send.classList.toggle("stopping", on);
+  els.send.disabled = on ? false : !els.input.value.trim();
 }
 
 // ── Wiring ──────────────────────────────────────────────────
@@ -235,7 +288,20 @@ els.input.addEventListener("input", () => {
 els.input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
-els.send.addEventListener("click", send);
+els.send.addEventListener("click", () => {
+  if (state.streaming) { state.abort?.abort(); return; }
+  send();
+});
+
+// Copy buttons on code blocks (delegated — blocks are re-rendered every token).
+els.thread.addEventListener("click", (e) => {
+  const btn = e.target.closest(".copy");
+  if (!btn) return;
+  const code = btn.parentElement.querySelector("code");
+  navigator.clipboard?.writeText(code.textContent).then(() => {
+    btn.textContent = "copied"; setTimeout(() => (btn.textContent = "copy"), 1200);
+  });
+});
 els.newChat.addEventListener("click", newChat);
 els.model.addEventListener("change", () => { state.model = els.model.value; });
 
