@@ -218,6 +218,43 @@ async function promptGithubFields(env, existing) {
   return true
 }
 
+// ── macOS menu-bar app ───────────────────────────────────────
+// REFUGIO's stack (Ollama + model + Open WebUI) can hold GBs of RAM, and
+// without this the only way to stop it is a terminal — so the menu bar is how
+// a non-technical user reclaims their memory. The app already exists in
+// menubar/; it was just never installed for them.
+//
+// Needs the Swift toolchain. If it's absent we skip with a one-line hint
+// rather than failing the install or dragging the user through an Xcode
+// download mid-setup.
+function installMenuBarApp(targetDir) {
+  const menubarDir = path.join(targetDir, "menubar")
+  const script = path.join(menubarDir, "install.sh")
+  if (!fs.existsSync(script)) return
+
+  if (fs.existsSync("/Applications/REFUGIO.app")) {
+    ok("Menu-bar app already installed (/Applications/REFUGIO.app)")
+    return
+  }
+  if (!has("swift")) {
+    console.log(`  ${C.dim}Menu-bar app skipped — needs the Swift toolchain.`)
+    console.log(`    Install it with: xcode-select --install`)
+    console.log(`    Then run: cd "${menubarDir}" && ./install.sh${C.reset}`)
+    return
+  }
+
+  console.log(`  ${C.bold}Menu-bar app${C.reset} ${C.dim}— start/stop/quit REFUGIO without a terminal${C.reset}`)
+  try {
+    // The build is quiet unless it fails; it takes a few seconds.
+    execSync(`"${script}"`, { cwd: menubarDir, stdio: "ignore" })
+    ok("Menu-bar app installed — look for the mountain icon in your menu bar")
+    console.log(`    ${C.dim}Use “Stop REFUGIO & Quit” there to free the memory it uses.${C.reset}`)
+  } catch (e) {
+    warn(`Menu-bar app build failed — REFUGIO still works from the terminal.`)
+    console.log(`    ${C.dim}Retry with: cd "${menubarDir}" && ./install.sh${C.reset}`)
+  }
+}
+
 // ── Personal connector: WhatsApp via Hermeneia ───────────────
 // Hermeneia (github.com/Phantazein-apps/hermeneia) is a local WhatsApp MCP
 // server and REFUGIO's flagship personal connector. Its bridge is pure Go
@@ -1716,6 +1753,7 @@ esac
       const cmd = `#!/bin/sh\nexec "${nodePath}" "${targetDir}/start-refugio.cjs"\n`
       const cmdPath = path.join(targetDir, "Start REFUGIO.command")
       try { fs.writeFileSync(cmdPath, cmd); fs.chmodSync(cmdPath, 0o755) } catch {}
+      installMenuBarApp(targetDir)
     } else {
       const appsDir = path.join(home, ".local", "share", "applications")
       try { fs.mkdirSync(appsDir, { recursive: true }) } catch {}
