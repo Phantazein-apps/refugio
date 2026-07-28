@@ -36,9 +36,11 @@ function addMessage(role, text) {
   els.empty?.remove();
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
+  // avatar + a column for [tool chips, text] — the strip must stack ABOVE the
+  // answer, and .msg itself is a flex row.
   wrap.innerHTML =
     `<div class="avatar">${role === "user" ? "You" : "R"}</div>` +
-    `<div class="bubble"></div>`;
+    `<div class="content"><div class="bubble"></div></div>`;
   const bubble = wrap.querySelector(".bubble");
   bubble.innerHTML = renderContent(text);
   els.thread.appendChild(wrap);
@@ -178,6 +180,8 @@ async function send() {
         let data; try { data = JSON.parse(raw); } catch { continue; }
 
         if (ev === "start") state.conversationId = data.conversation_id;
+        else if (ev === "tool") showTool(bubble, data.name, "running");
+        else if (ev === "tool_result") showTool(bubble, data.name, data.ok ? "ok" : "failed");
         else if (ev === "token") { acc += data.t; bubble.innerHTML = renderContent(acc); scrollToEnd(); }
         else if (ev === "error") throw new Error(data.error);
         else if (ev === "done") { state.conversationId = data.conversation_id; loadConversations(); }
@@ -191,6 +195,29 @@ async function send() {
     setStreaming(false);
     els.input.focus();
   }
+}
+
+// Show which tools a turn used, inline above the answer. Local models are
+// slow enough that silence during a tool call reads as a hang.
+function showTool(bubble, name, state) {
+  const content = bubble.parentElement;          // .content column
+  let strip = content.querySelector(".tools");
+  if (!strip) {
+    strip = document.createElement("div");
+    strip.className = "tools";
+    content.insertBefore(strip, bubble);
+  }
+  const id = "t-" + name.replace(/[^a-z0-9]/gi, "-");
+  let chip = strip.querySelector("#" + id);
+  if (!chip) {
+    chip = document.createElement("span");
+    chip.className = "tool-chip"; chip.id = id;
+    strip.appendChild(chip);
+  }
+  chip.dataset.state = state;
+  chip.textContent = (state === "running" ? "\u2699 " : state === "ok" ? "\u2713 " : "\u2717 ") +
+    name.replace("__", " · ");
+  scrollToEnd();
 }
 
 function setStreaming(on) {

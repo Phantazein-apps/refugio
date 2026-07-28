@@ -118,7 +118,8 @@ body {
   background: var(--bg-surface-3); color: var(--ink-muted);
 }
 .msg.user .avatar { background: var(--accent); color: #fff; }
-.bubble { min-width: 0; flex: 1; }
+.content { min-width: 0; flex: 1; }
+.bubble { min-width: 0; }
 .bubble p { margin: 0 0 var(--s3); white-space: pre-wrap; word-wrap: break-word; }
 .bubble p:last-child { margin-bottom: 0; }
 .bubble pre {
@@ -168,3 +169,15 @@ textarea {
   .rail { display: none; }
   .thread, .composer-inner, .hint { max-width: none; }
 }
+
+/* Tool activity — which connectors a turn actually used. */
+.tools { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s2); }
+.tool-chip {
+  font: 500 .6875rem/1rem var(--font-mono);
+  padding: 3px var(--s2); border-radius: var(--radius-pill);
+  background: var(--bg-surface-3); color: var(--ink-muted);
+  border: 1px solid var(--border-subtle);
+}
+.tool-chip[data-state="running"] { border-color: var(--accent); color: var(--ink); }
+.tool-chip[data-state="ok"]      { border-color: #0dbd8b; }
+.tool-chip[data-state="failed"]  { border-color: var(--accent); color: var(--accent); }

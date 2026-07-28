@@ -18,6 +18,7 @@ import { randomUUID } from "crypto";
 import { homedir } from "os";
 
 import * as store from "./store.js";
+import { McpPool } from "./mcp.js";
 import { listModels, isUp, chatStream, complete, OLLAMA_BASE } from "./ollama.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,17 @@ const SYSTEM_PROMPT =
   "Be concise and direct. If you don't know something, say so.";
 
 const log = (m) => console.log(`[chat] ${m}`);
+
+// Tool limits. Small local models degrade badly with a large tool surface —
+// they pick wrong or loop — so the count is capped and the agentic loop is
+// bounded. Both are overridable for capable models.
+const TOOL_LIMIT = parseInt(process.env.REFUGIO_TOOL_LIMIT || "24", 10);
+const MAX_TOOL_ROUNDS = parseInt(process.env.REFUGIO_MAX_TOOL_ROUNDS || "5", 10);
+const MCP_CONFIG = process.env.REFUGIO_MCPO_CONFIG ||
+  join(dirname(__dirname), "mcpo-config.json");
+
+/** @type {McpPool|null} */
+let mcp = null;
 
 // Model selection: explicit override, else whatever Ollama has (first entry).
 let cachedModel = process.env.REFUGIO_CHAT_MODEL || null;
@@ -162,12 +174,42 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
   // the answer is lost entirely and the conversation is left with a user turn
   // and no reply, which then poisons the history sent on the next turn.
   let acc = "";
+  const toolsUsed = [];
 
   try {
-    await chatStream(
-      { model, messages, signal: ac.signal },
-      (piece) => { acc += piece; send("token", { t: piece }); }
-    );
+    const tools = mcp ? mcp.toolDefs(TOOL_LIMIT) : [];
+
+    // Agentic loop: the model may call tools, read the results, and call more
+    // before answering. Bounded so a model that loops on a failing tool can't
+    // spin forever.
+    for (let round = 0; ; round++) {
+      const { text, toolCalls } = await chatStream(
+        { model, messages, tools, signal: ac.signal },
+        (piece) => { acc += piece; send("token", { t: piece }); }
+      );
+
+      if (!toolCalls.length) break;
+
+      if (round >= MAX_TOOL_ROUNDS) {
+        const note = `\n\n_(stopped after ${MAX_TOOL_ROUNDS} tool rounds)_`;
+        acc += note; send("token", { t: note });
+        break;
+      }
+
+      // Ollama needs the assistant turn that requested the calls in history,
+      // then one `tool` message per result.
+      messages.push({ role: "assistant", content: text, tool_calls: toolCalls.map((c) => ({
+        function: { name: c.name, arguments: c.args },
+      })) });
+
+      for (const call of toolCalls) {
+        send("tool", { name: call.name, args: call.args });
+        const result = await mcp.call(call.name, call.args);
+        toolsUsed.push(call.name);
+        send("tool_result", { name: call.name, ok: !result.startsWith("Error"), preview: result.slice(0, 160) });
+        messages.push({ role: "tool", content: result, tool_name: call.name });
+      }
+    }
 
     store.addMessage(conversationId, "assistant", acc, model);
     if (!res.writableEnded) {
@@ -200,6 +242,7 @@ async function route(req, res, url) {
       model,
       models: models.map((m) => m.name),
       ollama: OLLAMA_BASE,
+      tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],
     });
   }
 
@@ -293,6 +336,12 @@ server.listen(PORT, "127.0.0.1", async () => {
   log(`store: ${DB_PATH}`);
   const model = await resolveModel();
   log(model ? `model: ${model}` : `no model yet (Ollama at ${OLLAMA_BASE})`);
+
+  // Tools connect after the server is listening so a slow or broken connector
+  // delays tool availability, never the UI itself.
+  if (process.env.REFUGIO_TOOLS !== "0") {
+    mcp = await new McpPool().connectAll(MCP_CONFIG);
+  }
 });
 
 for (const sig of ["SIGINT", "SIGTERM"]) {
@@ -300,6 +349,7 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
     log("shutting down");
     server.close();
     store.closeStore();
+    mcp?.close();
     process.exit(0);
   });
 }
