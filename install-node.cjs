@@ -274,7 +274,7 @@ const HERMENEIA_REPO = "https://github.com/Phantazein-apps/hermeneia.git"
 // bridge and silently lost WhatsApp. Pinning the checkout AND pulling the
 // bridge from that same release keeps the two halves in lockstep.
 // Override for testing: HERMENEIA_VERSION=master.
-const HERMENEIA_VERSION = process.env.HERMENEIA_VERSION || "v0.4.11"
+const HERMENEIA_VERSION = process.env.HERMENEIA_VERSION || "v0.4.12"
 const HERMENEIA_RELEASE_BASE =
   `https://github.com/Phantazein-apps/hermeneia/releases/download/${HERMENEIA_VERSION}`
 const HERMENEIA_QR_PORT = 3456
@@ -604,17 +604,80 @@ async function setupThings(env, existing) {
 const OLLAMA_URL = "http://localhost:11434"
 const LMSTUDIO_URL = "http://localhost:1234/v1"
 
-// Pick an Ollama model sized to the machine's RAM. All are tool-calling capable.
+// Pick an Ollama model sized to the machine's RAM.
+//
+// Every tier here can call tools. That is the entry requirement, not a feature
+// of the larger ones: REFUGIO's connectors are the product, and a model that
+// can't call them leaves the wrench icon full of tools that never fire. The
+// previous ladder gave 8 GB machines llama3.2:1b — which can't — beneath a
+// comment asserting that they all could.
+//
+// The 3B floor is tighter on 8 GB than the 1b was. That is the intended trade:
+// a model that works slowly beats one that cannot do the job at all, and the
+// supervisor already tells the user to close apps when memory is short.
 function pickModelForRam() {
   const gb = os.totalmem() / (1024 ** 3)
-  // Sized to fit alongside macOS (~2.5 GB wired) + the user's apps, not just in
-  // total RAM. An 8 GB Mac can't hold a 3b (~2.8 GB) without swapping once other
-  // apps are open, so it gets the 1b.
-  if (gb <= 8) return "llama3.2:1b"     // ~0.8 GB — 8 GB and under
-  if (gb <= 16) return "llama3.2:3b"    // ~2 GB   — 16 GB
+  if (gb <= 10) return "qwen2.5:3b"     // ~2.6 GB — the tool-calling floor
+  if (gb <= 16) return "llama3.2:3b"    // ~3 GB   — 16 GB
   if (gb <= 32) return "llama3.1:8b"    // ~4.7 GB — 32 GB
   if (gb <= 48) return "qwen2.5:14b"    // ~9 GB
   return "gpt-oss:20b"                   // ~13 GB  — 48 GB+
+}
+
+/**
+ * Refuse to install on a machine that can't run a tool-calling model.
+ *
+ * REFUGIO is connectors. Installed on hardware that can only hold a 1B model it
+ * becomes a chat window whose wrench icon lists tools that never fire — the
+ * user asks it to summarise their messages and it asks them to paste the
+ * messages in. That is not a degraded REFUGIO, it is a broken one, and shipping
+ * it costs a multi-GB download to discover.
+ *
+ * Two answers, because only one of them the user can act on:
+ *   - not enough RAM installed  → say it plainly, stop, don't imply a fix
+ *   - enough RAM, none free now → closing apps genuinely fixes it; say how much
+ *
+ * Sized against Open WebUI's ~0.7 GB (embeddings offloaded on small machines),
+ * since OWUI is the interface on this release line.
+ *
+ * Runs after clone — scripts/mem-fit.cjs is the single source of truth for the
+ * floor — but before Open WebUI and the model download, the expensive parts.
+ * Returns true to continue.
+ */
+function checkMachineSupported(targetDir, flags) {
+  let memFit
+  try { memFit = require(path.join(targetDir, "scripts", "mem-fit.cjs")) } catch { return true }
+
+  const s = memFit.machineSupport({ uiGb: 0.7 })
+  if (s.supported) return true
+
+  console.log("")
+  if (s.transient) {
+    warn(`Only ${s.freeGb} GB of RAM is free right now; REFUGIO needs about ${s.needGb} GB.`)
+    warn(`Your ${s.totalGb} GB machine is big enough — close some apps before starting REFUGIO.`)
+    console.log("")
+    return true
+  }
+
+  fail(`This machine can't run REFUGIO: ${s.totalGb} GB of RAM, and it needs about ${s.needGb} GB free.`)
+  console.log("")
+  console.log(`  REFUGIO connects a local AI to your own data — your messages, calendar,`)
+  console.log(`  notes. That requires a model that can call tools, and the smallest one`)
+  console.log(`  that reliably can is ${s.floor} (~${memFit.modelRamGb(s.floor)} GB).`)
+  console.log("")
+  console.log(`  Smaller models do fit, and they can hold a conversation, but they can't`)
+  console.log(`  reach your data — which is the entire point. Plenty of good local-AI`)
+  console.log(`  apps run happily on this hardware; REFUGIO isn't one of them.`)
+  console.log("")
+  console.log(`  ${C.dim}Install anyway (chat only, connectors won't work): --force-unsupported${C.reset}`)
+  console.log("")
+
+  if (flags.has("--force-unsupported")) {
+    warn("Continuing anyway — connectors will not work.")
+    console.log("")
+    return true
+  }
+  return false
 }
 
 // On low-RAM machines REFUGIO doesn't auto-start on login (Open WebUI would sit
@@ -1834,6 +1897,8 @@ async function main() {
   await preflight(targetDir)
 
   await cloneAndInstall(targetDir)
+
+  if (!checkMachineSupported(targetDir, flags)) return
 
   let env
   if (flags.has("--non-interactive")) {

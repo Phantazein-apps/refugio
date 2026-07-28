@@ -466,6 +466,13 @@ ${C.bold}============================================================
       const pick = memFit.pickInstalledModel({ availableGb, owuiOverheadGb: owuiOverhead, installedTags: installed })
       if (pick.tag) {
         runtimeModel = pick.tag
+        // A model that can't call tools is the one failure worth interrupting
+        // the launch banner for: everything looks healthy, the chat answers
+        // fluently, and every connector behind the wrench icon does nothing.
+        if (pick.tools === false) {
+          warn(`${pick.tag} cannot call tools — connectors (WhatsApp, calendar, notes) will NOT work.`)
+          warn(`REFUGIO needs at least ${memFit.TOOL_FLOOR.tag}: ollama pull ${memFit.TOOL_FLOOR.tag}`)
+        }
         if (!pick.fits) {
           warn(`Low memory: ~${availableGb.toFixed(1)} GB free — running the lightest installed model (${pick.tag}). Close some apps for better results.`)
         } else if (pick.heavier) {

@@ -1,6 +1,6 @@
 {
   "name": "refugio",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "REFUGIO — a self-hosted refuge for your AI. One command installs a local LLM (Ollama or LM Studio) + Open WebUI, with optional personal connectors (WhatsApp via Hermeneia, email via Epistole, Notion, memory) and business connectors (Slack, Jira, ServiceNow, Salesforce) via MCP.",
   "type": "module",
   "main": "server.js",
@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node start-refugio.cjs",
-    "start:server": "node server.js"
+    "start:server": "node server.js",
+    "test": "node --test \"test/*.test.js\""
   },
   "keywords": [
     "mcp",
