@@ -738,11 +738,31 @@ ${C.bold}============================================================
   const chatEntry = path.join(REFUGIO_DIR, "chat", "server.js")
   let chatUrl = null
   if (env.REFUGIO_CHAT !== "0" && fs.existsSync(chatEntry)) {
-    supervisor.start("chat", nodeBin, ["--no-warnings", chatEntry, "--port", String(CHAT_PORT)], {
-      env: { ...mergedEnv, REFUGIO_DATA_DIR: path.join(REFUGIO_DIR, "data") }
-    })
-    chatUrl = `http://127.0.0.1:${CHAT_PORT}`
-    ok(`REFUGIO chat → ${chatUrl}`)
+    // Something already on the port is almost always a chat server the user
+    // started by hand. Starting a second one can only fail with EADDRINUSE,
+    // and the supervisor would then restart it ten times in a row — a loud,
+    // baffling loop whose actual cause is that REFUGIO is already working.
+    // Adopt it instead.
+    const portBusy = await probeHttp(`http://127.0.0.1:${CHAT_PORT}/api/chat/status`, 1500)
+    if (portBusy) {
+      chatUrl = `http://127.0.0.1:${CHAT_PORT}`
+      ok(`REFUGIO chat already running → ${chatUrl} (not started again)`)
+      warn(`Port ${CHAT_PORT} was already serving. If that's an old copy, stop it and relaunch.`)
+    } else {
+      // Keep the child's output. Discarding it (the supervisor's default) makes
+      // a crash-looping chat server undebuggable — the exit code is all you get.
+      let chatStdio = "ignore"
+      try {
+        const chatLog = fs.openSync(path.join(home, ".refugio-logs", "chat.log"), "a")
+        chatStdio = ["ignore", chatLog, chatLog]
+      } catch {}
+      supervisor.start("chat", nodeBin, ["--no-warnings", chatEntry, "--port", String(CHAT_PORT)], {
+        env: { ...mergedEnv, REFUGIO_DATA_DIR: path.join(REFUGIO_DIR, "data") },
+        stdio: chatStdio
+      })
+      chatUrl = `http://127.0.0.1:${CHAT_PORT}`
+      ok(`REFUGIO chat → ${chatUrl}`)
+    }
   }
 
   // ── Start Open WebUI ────────────────────────────────────────
