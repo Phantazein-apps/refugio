@@ -319,10 +319,6 @@ async function showConnectors() {
   }
 }
 
-/** Run a connector fix and redraw the panel with the result.
- *
- *  Redraws from the server's response rather than optimistically: the point of
- *  this panel is that it says what is actually true. */
 /** Persist one connector option. Reverts the box if the server refuses, so the
  *  UI can never show a scope that isn't actually in force. */
 async function setConnectorOption(box, server, key, value) {
@@ -341,6 +337,10 @@ async function setConnectorOption(box, server, key, value) {
   }
 }
 
+/** Run a connector fix and redraw the panel with the result.
+ *
+ *  Redraws from the server's response rather than optimistically: the point of
+ *  this panel is that it says what is actually true. */
 async function runFix(btn, id, action) {
   const label = btn.textContent;
   btn.disabled = true;
