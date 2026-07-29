@@ -11,6 +11,7 @@ const els = {
   input: $("input"), send: $("send"), newChat: $("new-chat"),
   model: $("model-pick"), status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
+  rail: $("rail"), railToggle: $("rail-toggle"),
 };
 
 const state = {
@@ -19,6 +20,7 @@ const state = {
   // connectors panel; `webArmed` is this one message. The second is never
   // inferred from the first — that is the whole guarantee.
   web: { enabled: false }, webArmed: false,
+  railCollapsed: false,
 };
 
 // Outcome of the last connector fix, rendered once on the next panel draw.
@@ -70,6 +72,31 @@ function showError(msg) {
   d.textContent = msg;
   els.thread.appendChild(d);
   scrollToEnd();
+}
+
+// ── Waiting states ──────────────────────────────────────────
+//
+// A local model is slow in a way a hosted one is not: several seconds can pass
+// between pressing send and the first token, and a blank space for those
+// seconds is indistinguishable from a hang. Both waits get something that
+// moves — one for loading a conversation, one for the model composing.
+
+/** Placeholder rows while a conversation's messages are fetched. */
+function showThreadLoading() {
+  els.thread.innerHTML =
+    `<div class="skel" aria-busy="true" aria-label="Loading conversation">` +
+    `<div class="skel-row w70"></div><div class="skel-row w40"></div>` +
+    `<div class="skel-row w85"></div><div class="skel-row w55"></div></div>`;
+}
+
+/** The pause before the first token. Replaced by the answer itself, so it can
+ *  never be left behind on a turn that did produce text. */
+function setThinking(bubble, on) {
+  bubble.classList.toggle("thinking", on);
+  // Symmetric, so clearing it always removes the dots. Leaving that to the
+  // caller meant a turn that produced no text at all kept animating under an
+  // error message saying the response was empty.
+  bubble.innerHTML = on ? `<span class="dots"><i></i><i></i><i></i></span>` : "";
 }
 
 // Only auto-scroll when the user is already near the bottom, so reading back
@@ -541,31 +568,208 @@ function describeOutcome(row, action) {
   return { tone: "bad", text: "Still not working." };
 }
 
-async function loadConversations() {
-  const list = await (await fetch("/api/chat/conversations")).json();
-  els.convos.innerHTML = "";
+// ── History rail ────────────────────────────────────────────
+//
+// Grouping, pinning and the collapsed glyph rail are SHERPA's, ported here.
+// A flat list ordered by recency stops being navigable at about thirty
+// conversations: everything looks equally important and the one being looked
+// for is somewhere in the middle. Date buckets give the list a shape that
+// matches how people remember ("that was last week"), and pinning is the
+// escape hatch for the handful that must not drift down it.
+
+const RAIL_KEY = "refugio.rail.collapsed";
+const DAY = 86_400_000;
+const GROUPS = [
+  ["today", "Today"], ["yesterday", "Yesterday"],
+  ["past7", "Past 7 days"], ["past30", "Past 30 days"], ["older", "Older"],
+];
+
+/** Bucket by age, measured from the start of today rather than from now — so
+ *  a message sent five minutes ago and one sent this morning are both "Today",
+ *  which is what a person means by the word. */
+function groupConversations(list) {
+  const b = { today: [], yesterday: [], past7: [], past30: [], older: [] };
+  const n = new Date();
+  const startOfToday = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
   for (const c of list) {
-    const row = document.createElement("div");
-    row.className = "convo" + (c.id === state.conversationId ? " active" : "");
-    row.innerHTML = `<span class="convo-title"></span><button class="convo-del" title="Delete">×</button>`;
-    row.querySelector(".convo-title").textContent = c.title || "Untitled";
-    row.onclick = (e) => {
-      if (e.target.classList.contains("convo-del")) return;
-      openConversation(c.id);
-    };
-    row.querySelector(".convo-del").onclick = async (e) => {
-      e.stopPropagation();
-      await fetch(`/api/chat/conversations/${c.id}`, { method: "DELETE" });
-      if (state.conversationId === c.id) newChat();
-      loadConversations();
-    };
-    els.convos.appendChild(row);
+    const t = new Date(c.updated_at || c.created_at).getTime();
+    if (Number.isNaN(t)) { b.older.push(c); continue; }
+    const ageDays = (startOfToday - t) / DAY;
+    if (t >= startOfToday) b.today.push(c);
+    else if (ageDays < 1) b.yesterday.push(c);
+    else if (ageDays < 7) b.past7.push(c);
+    else if (ageDays < 30) b.past30.push(c);
+    else b.older.push(c);
+  }
+  return GROUPS.filter(([k]) => b[k].length).map(([key, label]) => ({ key, label, items: b[key] }));
+}
+
+// One character for the collapsed rail. Skipping the words that start most
+// questions is the whole trick — otherwise half the rail reads "W" for "What…"
+// and the glyphs distinguish nothing.
+const STOPWORDS = new Set((
+  "a an the this that these those " +
+  "what who why how when where which " +
+  "is are was were be been am do does did can could should would will " +
+  "for of in to on at by with from about and or but not " +
+  "i me my we our you your it its"
+).split(" "));
+function convGlyph(title) {
+  const t = (title || "").trim();
+  if (!t) return "·";
+  let tokens = t.split(/[\s\-_:/]+/).filter((w) => w && !STOPWORDS.has(w.toLowerCase()));
+  if (!tokens.length) tokens = t.split(/\s+/);
+  return (tokens[0] || "").charAt(0).toUpperCase() || "·";
+}
+
+/** Time for today, date for anything older — a bare clock time on a chat from
+ *  March is worse than useless. */
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const n = new Date();
+  const startOfToday = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+  return d.getTime() >= startOfToday
+    ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+const PIN_PATH = "M12 2.5 17.5 8l-3.2 1-2 6-3.6-3.6L3 18l5.7-5.6L5 8.7l6.3-2L12 2.5Z";
+const PIN_FILLED =
+  `<svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
+const PIN_OUTLINE =
+  `<svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" ` +
+  `stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
+
+function convoRow(c) {
+  const title = c.title || "Untitled";
+  const row = document.createElement("div");
+  row.className = "convo" + (c.id === state.conversationId ? " active" : "") +
+    (c.pinned ? " pinned" : "");
+  row.dataset.cid = c.id;
+  // Collapsed, the tooltip is the only label there is.
+  row.title = title;
+  row.onclick = () => openConversation(c.id);
+
+  const glyph = document.createElement("span");
+  glyph.className = "convo-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.textContent = convGlyph(title);
+
+  const text = document.createElement("span");
+  text.className = "convo-text";
+  const t = document.createElement("span");
+  t.className = "convo-title";
+  t.textContent = title;
+  const when = document.createElement("span");
+  when.className = "convo-when";
+  when.textContent = fmtWhen(c.updated_at || c.created_at);
+  text.append(t, when);
+
+  const pin = document.createElement("button");
+  pin.className = "convo-pin";
+  pin.type = "button";
+  pin.title = c.pinned ? "Unpin" : "Pin to top";
+  pin.setAttribute("aria-label", pin.title);
+  pin.innerHTML = c.pinned ? PIN_FILLED : PIN_OUTLINE;   // our own static markup
+  pin.onclick = (e) => { e.stopPropagation(); togglePin(c.id, !c.pinned); };
+
+  const del = document.createElement("button");
+  del.className = "convo-del";
+  del.type = "button";
+  del.title = "Delete";
+  del.textContent = "×";
+  del.onclick = async (e) => {
+    e.stopPropagation();
+    await fetch(`/api/chat/conversations/${c.id}`, { method: "DELETE" });
+    if (state.conversationId === c.id) newChat();
+    else loadConversations();
+  };
+
+  row.append(glyph, text, pin, del);
+  return row;
+}
+
+async function togglePin(id, pinned) {
+  try {
+    await fetch(`/api/chat/conversations/${encodeURIComponent(id)}/pin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    });
+  } catch { /* the reload below will show the unchanged state */ }
+  loadConversations();
+}
+
+async function loadConversations() {
+  let list;
+  try { list = await (await fetch("/api/chat/conversations")).json(); }
+  catch { return; }
+
+  els.convos.innerHTML = "";
+  if (!list.length) {
+    const e = document.createElement("div");
+    e.className = "convos-empty";
+    e.textContent = "No conversations yet.";
+    els.convos.appendChild(e);
+    return;
+  }
+
+  // Pinned conversations render once, at the top, and are removed from their
+  // date group — appearing in both would double every pinned row and make the
+  // counts lie.
+  const pinned = list.filter((c) => c.pinned);
+  const sections = [
+    ...(pinned.length ? [{ key: "pinned", label: "Pinned", items: pinned }] : []),
+    ...groupConversations(list.filter((c) => !c.pinned)),
+  ];
+
+  for (const g of sections) {
+    const head = document.createElement("div");
+    head.className = "convo-group";
+    head.dataset.group = g.key;
+    const label = document.createElement("span");
+    label.className = "cg-label";
+    label.textContent = g.label;
+    const count = document.createElement("span");
+    count.className = "cg-count";
+    count.textContent = String(g.items.length);
+    head.append(label, count);
+    els.convos.appendChild(head);
+    for (const c of g.items) els.convos.appendChild(convoRow(c));
   }
 }
 
+/** Move the highlight without rebuilding the list.
+ *
+ *  The active row has to move the instant a conversation is opened, not when
+ *  the reload happens to come back — otherwise the rail spends the load still
+ *  pointing at the chat the user just left. */
+function highlightActive() {
+  for (const r of els.convos.querySelectorAll(".convo.active")) r.classList.remove("active");
+  if (!state.conversationId) return;
+  for (const r of els.convos.querySelectorAll(".convo")) {
+    if (r.dataset.cid === state.conversationId) r.classList.add("active");
+  }
+}
+
+function setRailCollapsed(on) {
+  state.railCollapsed = !!on;
+  els.rail.classList.toggle("collapsed", state.railCollapsed);
+  els.railToggle.textContent = state.railCollapsed ? "»" : "«";
+  const label = state.railCollapsed ? "Expand history" : "Collapse history";
+  els.railToggle.title = label;
+  els.railToggle.setAttribute("aria-label", label);
+  try { localStorage.setItem(RAIL_KEY, state.railCollapsed ? "1" : "0"); } catch {}
+}
+
 async function openConversation(id) {
-  const convo = await (await fetch(`/api/chat/conversations/${id}`)).json();
   state.conversationId = id;
+  highlightActive();                       // before the fetch, not after
+  showThreadLoading();
+  let convo;
+  try { convo = await (await fetch(`/api/chat/conversations/${id}`)).json(); }
+  catch { showError("Couldn’t load that conversation."); return; }
   els.thread.innerHTML = "";
   for (const m of convo.messages) addMessage(m.role, m.content);
   stick = true; scrollToEnd();
@@ -602,6 +806,7 @@ async function send() {
 
   const bubble = addMessage("assistant", "");
   bubble.classList.add("cursor");
+  setThinking(bubble, true);
   let acc = "";
 
   try {
@@ -642,10 +847,13 @@ async function send() {
         if (!ev || !raw) continue;
         let data; try { data = JSON.parse(raw); } catch { continue; }
 
-        if (ev === "start") state.conversationId = data.conversation_id;
+        if (ev === "start") { state.conversationId = data.conversation_id; highlightActive(); }
         else if (ev === "tool") showTool(bubble, data.name, "running");
         else if (ev === "tool_result") showTool(bubble, data.name, data.ok ? "ok" : "failed");
-        else if (ev === "token") { acc += data.t; bubble.innerHTML = renderContent(acc); scrollToEnd(); }
+        else if (ev === "token") {
+          if (!acc) setThinking(bubble, false);
+          acc += data.t; bubble.innerHTML = renderContent(acc); scrollToEnd();
+        }
         else if (ev === "error") throw new Error(data.error);
         else if (ev === "done") { state.conversationId = data.conversation_id; loadConversations(); }
       }
@@ -656,6 +864,7 @@ async function send() {
     if (err.name !== "AbortError") showError(err.message || String(err));
   } finally {
     state.abort = null;
+    if (!acc) setThinking(bubble, false);
     bubble.classList.remove("cursor");
     setStreaming(false);
     els.input.focus();
@@ -741,6 +950,12 @@ els.webArm.addEventListener("click", () => setWebArmed(!state.webArmed));
 els.status.addEventListener("click", showConnectors);
 els.newChat.addEventListener("click", newChat);
 els.model.addEventListener("change", () => { state.model = els.model.value; });
+
+els.railToggle.addEventListener("click", () => setRailCollapsed(!state.railCollapsed));
+
+// Restore the rail before the first paint of the list, so it doesn't render
+// wide and then snap narrow.
+try { setRailCollapsed(localStorage.getItem(RAIL_KEY) === "1"); } catch { setRailCollapsed(false); }
 
 refreshStatus();
 loadConversations();

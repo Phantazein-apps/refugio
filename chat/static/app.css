@@ -67,6 +67,12 @@ body {
 }
 .brand { font-weight: 600; letter-spacing: .04em; font-size: .8125rem; }
 .brand .dot { color: var(--accent); }
+.rail-toggle {
+  margin-left: auto; border: 0; background: none; color: var(--ink-faint);
+  cursor: pointer; font-size: .875rem; line-height: 1; padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.rail-toggle:hover { color: var(--ink); background: var(--bg-surface-3); }
 .new-chat {
   margin: var(--s3) var(--s4); padding: var(--s2) var(--s3);
   background: var(--accent); color: #fff; border: 0;
@@ -74,22 +80,74 @@ body {
   cursor: pointer; text-align: left;
 }
 .new-chat:hover { filter: brightness(1.08); }
+.new-chat .nc-mini { display: none; }
 .convos { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s4); }
+.convos-empty { padding: var(--s3) var(--s3); font-size: .75rem; color: var(--ink-faint); }
+
+/* Date buckets. A flat recency list stops being navigable somewhere around
+   thirty conversations — everything reads as equally important. */
+.convo-group {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s3) var(--s3) var(--s1);
+  font: 500 .6875rem var(--font-sans); color: var(--ink-faint);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.convo-group .cg-count { margin-left: auto; letter-spacing: 0; opacity: .7; }
+.convo-group[data-group="pinned"] { color: var(--accent); }
+
 .convo {
   display: flex; align-items: center; gap: var(--s2);
   padding: var(--s2) var(--s3); margin: 2px 0;
   border-radius: var(--radius-md); cursor: pointer; color: var(--ink-muted);
-  font-size: .8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: .8125rem; white-space: nowrap; overflow: hidden;
 }
 .convo:hover { background: var(--bg-surface-3); color: var(--ink); }
 .convo.active { background: var(--accent-soft); color: var(--ink); }
-.convo-title { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.convo-del {
-  opacity: 0; border: 0; background: none; color: var(--ink-faint);
-  cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px;
+.convo-glyph {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: var(--radius-sm);
+  display: grid; place-items: center; background: var(--bg-surface-3);
+  font: 600 .6875rem var(--font-sans); color: var(--ink-faint);
 }
-.convo:hover .convo-del { opacity: 1; }
+.convo.active .convo-glyph { background: var(--accent); color: #fff; }
+.convo-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.convo-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.convo-when { font-size: .625rem; line-height: .875rem; color: var(--ink-faint); }
+.convo-pin, .convo-del {
+  opacity: 0; border: 0; background: none; color: var(--ink-faint);
+  cursor: pointer; line-height: 1; padding: 0 2px; flex: 0 0 auto;
+}
+.convo-del { font-size: 1rem; }
+.convo-pin { display: grid; place-items: center; }
+.convo:hover .convo-pin, .convo:hover .convo-del { opacity: 1; }
+/* A pinned chat stays marked when the pointer is elsewhere — that is the
+   whole point of pinning it. */
+.convo.pinned .convo-pin { opacity: 1; color: var(--accent); }
+.convo-pin:hover { color: var(--accent); }
 .convo-del:hover { color: var(--accent); }
+
+/* Collapsed rail: glyphs only, tooltips for names. Kept as a real column
+   rather than hidden entirely, so switching chats never needs two clicks. */
+.rail.collapsed { --rail-w: 56px; }
+.rail.collapsed .brand,
+.rail.collapsed .convo-text,
+.rail.collapsed .convo-pin,
+.rail.collapsed .convo-del,
+.rail.collapsed .convos-empty,
+.rail.collapsed .new-chat .nc-full { display: none; }
+.rail.collapsed .rail-toggle { margin: 0 auto; }
+.rail.collapsed .rail-head { padding: var(--s4) var(--s2); }
+.rail.collapsed .new-chat { margin: var(--s3) var(--s2); text-align: center; }
+.rail.collapsed .new-chat .nc-mini { display: inline; }
+.rail.collapsed .convo { justify-content: center; padding: var(--s2) 0; }
+/* The group label has nowhere to go at 56px, so the grouping survives as the
+   rule between buckets — the shape of the list is the part worth keeping. */
+.rail.collapsed .convo-group {
+  height: 1px; padding: 0; margin: var(--s3) var(--s3);
+  background: var(--border-subtle); overflow: hidden;
+}
+/* The label and count have to go, not just be clipped — at 1px tall they
+   showed through as a row of dashes that read like a broken divider. */
+.rail.collapsed .cg-label, .rail.collapsed .cg-count { display: none; }
 
 /* ── Main ──────────────────────────────────────────────── */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -140,6 +198,35 @@ body {
 .empty { text-align: center; color: var(--ink-faint); padding-top: 18vh; }
 .empty h1 { font: 600 1.75rem/2.125rem var(--font-sans); color: var(--ink); margin: 0 0 var(--s2); }
 .empty .sub { font-size: .875rem; }
+/* ── Waiting ───────────────────────────────────────────────
+   A local model can take seconds before the first token. Blank space for
+   those seconds reads as a hang, so both waits move. */
+.skel { padding: var(--s6) 0; }
+.skel-row {
+  height: 12px; border-radius: var(--radius-sm); margin-bottom: var(--s3);
+  background: linear-gradient(90deg,
+    var(--bg-surface-3) 25%, var(--bg-surface-2) 50%, var(--bg-surface-3) 75%);
+  background-size: 300% 100%; animation: skel 1.4s ease-in-out infinite;
+}
+.skel-row.w70 { width: 70%; } .skel-row.w40 { width: 40%; }
+.skel-row.w85 { width: 85%; } .skel-row.w55 { width: 55%; }
+@keyframes skel { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+.bubble.thinking { min-height: 20px; }
+.dots { display: inline-flex; gap: 4px; align-items: center; height: 20px; }
+.dots i {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint);
+  animation: dot 1.2s ease-in-out infinite;
+}
+.dots i:nth-child(2) { animation-delay: .15s; }
+.dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .skel-row, .dots i { animation: none; }
+  .dots i { opacity: .5; }
+}
+
 .err {
   border: 1px solid var(--accent); background: var(--accent-soft);
   color: var(--ink); padding: var(--s3); border-radius: var(--radius-md);
@@ -222,6 +309,24 @@ textarea {
 .bubble a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .bubble hr { border: 0; border-top: 1px solid var(--border); margin: var(--s4) 0; }
 .bubble strong { font-weight: 600; }
+.bubble em { font-style: italic; }
+
+/* Tables. md.js emits these whenever a model formats one, and a table with no
+   borders reads as three stray columns of words — which is what "summarise my
+   reminders" produced before this existed. The wrapper scrolls on its own so a
+   wide table never makes the whole page scroll sideways. */
+.bubble .table-wrap {
+  overflow-x: auto; margin: 0 0 var(--s3);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+}
+.bubble table { border-collapse: collapse; width: 100%; font-size: .8125rem; }
+.bubble th, .bubble td {
+  text-align: left; padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--border-subtle); vertical-align: top;
+}
+.bubble th { font-weight: 600; background: var(--bg-surface-2); white-space: nowrap; }
+.bubble tbody tr:last-child td { border-bottom: 0; }
+.bubble tbody tr:hover td { background: var(--bg-surface-2); }
 
 /* Code block copy button */
 .bubble pre { position: relative; }

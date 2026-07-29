@@ -10,9 +10,13 @@
 </head>
 <body>
 <div class="app">
-  <aside class="rail">
-    <div class="rail-head"><span class="brand">REFUGIO<span class="dot">.</span></span></div>
-    <button class="new-chat" id="new-chat">+ New chat</button>
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <span class="brand">REFUGIO<span class="dot">.</span></span>
+      <button class="rail-toggle" id="rail-toggle" type="button"
+              title="Collapse history" aria-label="Collapse history">«</button>
+    </div>
+    <button class="new-chat" id="new-chat"><span class="nc-full">+ New chat</span><span class="nc-mini">+</span></button>
     <div class="convos" id="convos"></div>
   </aside>
 
