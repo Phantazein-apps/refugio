@@ -217,6 +217,58 @@ textarea {
   font-size: .75rem; line-height: 1.15rem;
 }
 
+/* ── Connectors panel ────────────────────────
+   What REFUGIO is plugged into. The status pill opens it. */
+.status { cursor: pointer; }
+.status:hover { color: var(--ink); }
+.status.warn .led { background: #e8a33d; }
+
+.sheet {
+  position: fixed; inset: 0; z-index: 50;
+  background: color-mix(in srgb, #000 42%, transparent);
+  display: grid; place-items: start center; padding: 10vh var(--s4) var(--s4);
+}
+.sheet-card {
+  width: min(30rem, 100%); max-height: 74vh; display: flex; flex-direction: column;
+  background: var(--bg-surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: 0 18px 48px rgba(0,0,0,.28);
+}
+.sheet-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border-subtle);
+}
+.sheet-x {
+  border: 0; background: none; color: var(--ink-faint);
+  font-size: 1.25rem; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.sheet-x:hover { color: var(--accent); }
+.sheet-body { overflow-y: auto; padding: var(--s2) var(--s4) var(--s4); }
+
+.conn { padding: var(--s3) 0; border-bottom: 1px solid var(--border-subtle); }
+.conn:last-child { border-bottom: 0; }
+.conn-head { display: flex; align-items: center; gap: var(--s2); }
+.conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #0dbd8b; flex: 0 0 auto; }
+.conn.failed .conn-dot { background: var(--accent); }
+.conn-name { font-weight: 500; }
+.conn-meta { margin-left: auto; font-size: .6875rem; color: var(--ink-faint); }
+
+/* Accounts are why a connector can be plural — two numbers, two things. */
+.conn-acct {
+  margin: var(--s1) 0 0 15px; font: 400 .75rem/1.1rem var(--font-mono);
+  color: var(--ink-muted);
+}
+.conn-acct.off { color: var(--accent); }
+
+.conn-err {
+  margin: var(--s2) 0 0 15px; padding: var(--s2);
+  background: var(--bg-surface-3); border-radius: var(--radius-sm);
+  font: 400 .6875rem/1rem var(--font-mono); color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.conn-empty { padding: var(--s4) 0; text-align: center; color: var(--ink-muted); }
+.conn-empty .conn-sub { font-size: .75rem; color: var(--ink-faint); }
+
 /* Send button becomes Stop while streaming */
 .send.stopping { background: var(--bg-surface-3); color: var(--ink); }
 .send.stopping:hover { background: var(--accent); color: #fff; }
