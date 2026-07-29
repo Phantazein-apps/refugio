@@ -669,7 +669,35 @@ ${C.bold}============================================================
     }
 
     const mcpoConfigPath = path.join(REFUGIO_DIR, "mcpo-config.json")
-    fs.writeFileSync(mcpoConfigPath, JSON.stringify(mcpoConfig, null, 2) + "\n")
+
+    // Never replace a working declaration with an empty one.
+    //
+    // Each connector is gated on files existing right now — Hermeneia needs its
+    // Go bridge binary present, for instance. A rebuild that clears dist/, an
+    // unmounted volume, a half-finished upgrade: any of these can flip a
+    // connector off for one launch. Overwriting the config then loses the
+    // declaration permanently, and the user sees "No connectors configured"
+    // with no idea that a file they still have was simply not visible once.
+    //
+    // Writing nothing is strictly safer: the old config still points at the
+    // same commands, and a connector that really is gone fails loudly at
+    // connect time with a reason, which is the outcome we want anyway.
+    const nextCount = Object.keys(mcpoConfig.mcpServers).length
+    const prevCount = (() => {
+      try {
+        return Object.keys(JSON.parse(fs.readFileSync(mcpoConfigPath, "utf-8")).mcpServers || {}).length
+      } catch { return 0 }
+    })()
+
+    if (nextCount === 0 && prevCount > 0) {
+      warn(`No connectors detected this launch, but ${mcpoConfigPath} lists ${prevCount} — keeping it.`)
+      warn(`Check ~/.refugio.env and that each connector's files are still present.`)
+    } else {
+      if (nextCount < prevCount) {
+        warn(`Connector count dropped ${prevCount} → ${nextCount}; rewriting ${path.basename(mcpoConfigPath)}.`)
+      }
+      fs.writeFileSync(mcpoConfigPath, JSON.stringify(mcpoConfig, null, 2) + "\n")
+    }
 
     const allServers = []
     if (useHermeneia) allServers.push("whatsapp")
