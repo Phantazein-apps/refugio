@@ -427,6 +427,20 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// A bind failure is the one startup error worth explaining. Unhandled, it
+// prints a stack trace and exits 1 — and under the supervisor, which restarts
+// on exit 1, that becomes ten identical failures whose cause is one line of
+// text nobody sees. Say what is wrong and stop.
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    log(`port ${PORT} is already in use — REFUGIO chat is probably already running.`);
+    log(`Open http://127.0.0.1:${PORT}, or stop the other copy and start again.`);
+  } else {
+    log(`could not start: ${e.message}`);
+  }
+  process.exit(1);
+});
+
 // Bind to loopback only. This serves the user's private conversations with no
 // authentication — it must never be reachable from the network.
 server.listen(PORT, "127.0.0.1", async () => {
