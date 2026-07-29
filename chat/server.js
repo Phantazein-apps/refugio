@@ -18,7 +18,9 @@ import { randomUUID } from "crypto";
 import { createRequire } from "module";
 import { homedir } from "os";
 
+import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import * as store from "./store.js";
+import { CONNECTOR_OPTIONS, defaultSettings, optionsFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
 import { listModels, isUp, chatStream, complete, OLLAMA_BASE } from "./ollama.js";
 
@@ -63,15 +65,40 @@ const log = (m) => console.log(`[chat] ${m}`);
 // Loaded lazily and tolerantly: the chat UI must still start if scripts/ is
 // missing (a bare checkout, a future split of this directory).
 let _memFit;
-function modelSupportsTools(tag) {
-  if (!tag) return null;
+function memFit() {
   if (_memFit === undefined) {
     try {
       _memFit = createRequire(import.meta.url)(join(dirname(__dirname), "scripts", "mem-fit.cjs"));
     } catch { _memFit = null; }
   }
+  return _memFit;
+}
+function modelSupportsTools(tag) {
+  if (!tag) return null;
   // Bare tag ("qwen2.5:3b") vs. an Ollama name that may carry a digest suffix.
-  return _memFit ? _memFit.supportsTools(tag.split("@")[0]) : null;
+  return memFit() ? memFit().supportsTools(tag.split("@")[0]) : null;
+}
+
+/** Describe each installed model against the RAM free right now.
+ *
+ *  Switching model is the main lever a user has over speed, and picking one
+ *  blind means discovering it doesn't fit by watching the machine swap. Open
+ *  WebUI labelled models this way and it was genuinely useful; the built-in UI
+ *  should not be a downgrade. `needGb` is what the model wants; `fits` answers
+ *  the actual question — can I run this without closing anything first. */
+function describeModels(names) {
+  const mf = memFit();
+  const freeGb = mf ? mf.availableMemGb() : null;
+  const budget = freeGb == null ? null : freeGb - 0.05 - 1.0;  // chat UI + headroom
+  return names.map((name) => {
+    const needGb = mf ? mf.modelRamGb(name.split("@")[0]) : 0;
+    return {
+      name,
+      needGb: needGb || null,                    // null = not on the ladder, unknown
+      fits: needGb && budget != null ? needGb <= budget : null,
+      tools: modelSupportsTools(name),
+    };
+  });
 }
 
 // Tool limits. A large tool surface degrades model accuracy — they pick wrong
@@ -95,6 +122,37 @@ let mcp = null;
 // someone to re-run the installer and telling them to wait five seconds.
 let connectorsSettled = false;
 
+// Connector scope settings, saved beside the chat database. A JSON file rather
+// than a table: it is a handful of booleans a user may reasonably want to read
+// or edit by hand, and it must survive the database being deleted.
+const SETTINGS_PATH = join(DATA_DIR, "connector-settings.json");
+
+function loadSettings() {
+  const defaults = defaultSettings();
+  try {
+    const saved = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
+    // Merge over defaults so an option added in a later version starts off,
+    // and an option removed from the code doesn't linger as a live setting.
+    for (const [server, opts] of Object.entries(defaults)) {
+      for (const key of Object.keys(opts)) {
+        if (typeof saved?.[server]?.[key] === "boolean") opts[key] = saved[server][key];
+      }
+    }
+  } catch { /* first run, or unreadable — defaults are the safe answer */ }
+  return defaults;
+}
+
+function saveSettings(settings) {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n");
+  } catch (e) {
+    log(`could not save connector settings: ${e.message}`);
+  }
+}
+
+let connectorSettings = loadSettings();
+
 // Human-facing names for the server ids in mcpo-config.json. Anything not
 // listed falls back to its id capitalised, so a new connector reads correctly
 // without a code change here.
@@ -112,7 +170,14 @@ const CONNECTOR_TTL = 30_000;
 async function connectorRows({ force = false } = {}) {
   if (!mcp) return [];
   if (!force && Date.now() - connectorCache.at < CONNECTOR_TTL) return connectorCache.rows;
-  const rows = (await mcp.describe()).map((r) => ({ ...r, label: labelFor(r.id) }));
+  const rows = (await mcp.describe()).map((r) => ({
+    ...r,
+    label: labelFor(r.id),
+    options: optionsFor(r.id).map((o) => ({
+      key: o.key, label: o.label, hint: o.hint || null,
+      value: !!connectorSettings[r.id]?.[o.key],
+    })),
+  }));
   // Don't let an incomplete answer harden into a 30s lie. A connector still
   // booting can't list its accounts yet, which undercounts — cache that only
   // briefly so the number corrects itself instead of sitting wrong.
@@ -339,6 +404,23 @@ async function route(req, res, url) {
     });
   }
 
+  if (p === "/api/chat/connectors/settings" && req.method === "POST") {
+    const body = await readBody(req);
+    const { server, key, value } = body || {};
+    // Only keys this build actually declares; nothing arbitrary lands in the file.
+    if (!CONNECTOR_OPTIONS[server] || !optionsFor(server).some((o) => o.key === key)) {
+      return sendJson(res, 400, { error: "unknown connector option" });
+    }
+    connectorSettings[server] = { ...connectorSettings[server], [key]: !!value };
+    saveSettings(connectorSettings);
+    mcp?.setSettings(connectorSettings);
+    connectorCache = { at: 0, rows: [] };
+    const rows = await connectorRows({ force: true });
+    return sendJson(res, 200, {
+      connectors: rows, starting: !connectorsSettled, ...countConnectors(rows),
+    });
+  }
+
   if (p === "/api/chat/connectors") {
     const rows = await connectorRows({ force: true });
     return sendJson(res, 200, {
@@ -355,7 +437,8 @@ async function route(req, res, url) {
       connectors: countConnectors(rows),
       available: up && !!model,
       model,
-      models: models.map((m) => m.name),
+      models: describeModels(models.map((m) => m.name)),
+      freeGb: memFit() ? Math.round(memFit().availableMemGb() * 10) / 10 : null,
       ollama: OLLAMA_BASE,
       tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],
       // true / false / null-when-unrated. The UI warns only on an explicit
@@ -480,6 +563,7 @@ server.listen(PORT, "127.0.0.1", async () => {
   // "connecting" instead.
   if (process.env.REFUGIO_TOOLS !== "0") {
     const pool = new McpPool();
+    pool.setSettings(connectorSettings);
     mcp = pool;
     await pool.connectAll(MCP_CONFIG);
   }
