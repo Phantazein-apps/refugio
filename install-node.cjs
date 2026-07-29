@@ -232,9 +232,24 @@ function installMenuBarApp(targetDir) {
   const script = path.join(menubarDir, "install.sh")
   if (!fs.existsSync(script)) return
 
-  if (fs.existsSync("/Applications/REFUGIO.app")) {
-    ok("Menu-bar app already installed (/Applications/REFUGIO.app)")
-    return
+  // "Already installed" used to end it, so the app never picked up a newer
+  // build — someone who installed once kept a months-old menu bar forever, and
+  // a broken app stayed broken because the installer congratulated itself and
+  // moved on. Rebuild whenever the sources are newer than what is installed.
+  const installed = "/Applications/REFUGIO.app"
+  if (fs.existsSync(installed)) {
+    let stale = true
+    try {
+      const appTime = fs.statSync(path.join(installed, "Contents", "MacOS", "RefugioBar")).mtimeMs
+      const srcTime = Math.max(...fs.readdirSync(path.join(menubarDir, "Sources", "RefugioBar"))
+        .map((f) => fs.statSync(path.join(menubarDir, "Sources", "RefugioBar", f)).mtimeMs))
+      stale = srcTime > appTime
+    } catch { /* can't tell — rebuilding is the safe answer */ }
+    if (!stale) {
+      ok("Menu-bar app is up to date (/Applications/REFUGIO.app)")
+      return
+    }
+    console.log(`  ${C.dim}Menu-bar app is out of date — rebuilding.${C.reset}`)
   }
   if (!has("swift")) {
     console.log(`  ${C.dim}Menu-bar app skipped — needs the Swift toolchain.`)
@@ -245,12 +260,17 @@ function installMenuBarApp(targetDir) {
 
   console.log(`  ${C.bold}Menu-bar app${C.reset} ${C.dim}— start/stop/quit REFUGIO without a terminal${C.reset}`)
   try {
-    // The build is quiet unless it fails; it takes a few seconds.
-    execSync(`"${script}"`, { cwd: menubarDir, stdio: "ignore" })
+    // Capture rather than discard: a build that fails silently leaves someone
+    // with no menu bar and no idea why, which is exactly the state this app
+    // exists to avoid being in.
+    execSync(`"${script}"`, { cwd: menubarDir, stdio: "pipe" })
     ok("Menu-bar app installed — look for the mountain icon in your menu bar")
-    console.log(`    ${C.dim}Use “Stop REFUGIO & Quit” there to free the memory it uses.${C.reset}`)
+    console.log(`    ${C.dim}Use “Stop REFUGIO” there to free the memory it uses.${C.reset}`)
   } catch (e) {
     warn(`Menu-bar app build failed — REFUGIO still works from the terminal.`)
+    const why = String(e.stderr || e.stdout || e.message || "")
+      .split("\n").filter(Boolean).slice(-4).join("\n      ")
+    if (why) console.log(`      ${C.dim}${why}${C.reset}`)
     console.log(`    ${C.dim}Retry with: cd "${menubarDir}" && ./install.sh${C.reset}`)
   }
 }
@@ -1866,7 +1886,9 @@ case "$1" in
   stop)
     if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "REFUGIO stopped (RAM freed)"; else echo "REFUGIO is not running"; fi ;;
   status)
-    if curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080"; else echo "stopped"; fi ;;
+    if curl -s --max-time 2 http://127.0.0.1:8090/api/chat/status >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8090"
+    elif curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080 (Open WebUI)"
+    else echo "stopped"; fi ;;
   *)
     echo "Starting REFUGIO... (Ctrl+C or 'refugio stop' to stop and free RAM)"
     exec "$NODE" "$DIR/start-refugio.cjs" ;;
