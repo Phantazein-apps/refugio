@@ -63,6 +63,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// fresh each time it opens, so it always reads true.
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? { makeMenu(live: false) }
 
+    /// Clicking the Dock icon opens REFUGIO.
+    ///
+    /// Without this, a left-click on an app with no windows does nothing at
+    /// all — the icon looks broken, and the menu is only reachable by knowing
+    /// to right-click it. The obvious gesture should do the obvious thing.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { openApp() }
+        return true
+    }
+
     // ── Making sure the icon is actually there ──────────────
 
     /// Append a line to ~/.refugio-logs/menubar.log.
@@ -183,6 +193,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appEntry.submenu = menu
         main.addItem(appEntry)
         NSApp.mainMenu = main
+
+        // Explain once. Every launch would be nagging about a thing the user
+        // has already decided to live with — and this app starts at login.
+        let shownKey = "dockFallbackNoticeShown"
+        if UserDefaults.standard.bool(forKey: shownKey) { return }
+        UserDefaults.standard.set(true, forKey: shownKey)
 
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
