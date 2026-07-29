@@ -303,6 +303,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here, which is how an app that had already failed went on looking
         // healthy; the placement watch is what notices instead.
         guard let btn = statusItem?.button else { return }
+
+        // A word instead of the symbol, on request:
+        //   defaults write com.phantazein.refugio.menubar showTextLabel -bool true
+        //
+        // "No icon" has two shapes that look identical from outside — the item
+        // was never placed, or it was placed and the symbol renders blank. A
+        // template image that fails to draw leaves a button of the right size
+        // showing nothing, which is indistinguishable from an absent item. Text
+        // cannot fail that way, so if the word appears the placement is fine
+        // and the icon is the bug.
+        if UserDefaults.standard.bool(forKey: "showTextLabel") {
+            statusItem?.length = NSStatusItem.variableLength   // text needs the room
+            btn.image = nil
+            btn.title = running ? "REFUGIO●" : "REFUGIO"
+            return
+        }
+
         let name = running ? "mountain.2.fill" : "mountain.2"
         if let img = NSImage(systemSymbolName: name, accessibilityDescription: "REFUGIO") {
             img.isTemplate = true
