@@ -245,9 +245,12 @@ async function showConnectors() {
     // things the user thinks about, and an unpaired one is worth surfacing.
     for (const a of c.accounts || []) {
       const acc = document.createElement("div");
-      acc.className = "conn-acct" + (a.connected ? "" : " off");
-      acc.textContent = (a.phone ? `+${a.phone}` : a.id || "account") +
-        (a.connected ? "" : " \u2014 not linked");
+      // Paired-but-offline is not the same as never-paired, and calling both
+      // "not linked" sends someone to re-scan a QR code they don't need.
+      const paired = !!a.phone;
+      const state = a.connected ? "" : paired ? " \u2014 offline" : " \u2014 not linked yet";
+      acc.className = "conn-acct" + (a.connected ? "" : paired ? " idle" : " off");
+      acc.textContent = (paired ? `+${a.phone}` : a.id || "account") + state;
       row.appendChild(acc);
     }
 
@@ -303,16 +306,24 @@ async function showConnectors() {
       box.checked = !!opt.value;
       box.onchange = () => setConnectorOption(box, c.id, opt.key, box.checked);
 
+      // Checkbox, then a COLUMN holding the label and its hint. Letting the
+      // hint be a sibling of the label made it compete for the same row, which
+      // crushed the label into a narrow stack of single words.
       const text = document.createElement("span");
-      text.textContent = opt.label;
+      text.className = "conn-opt-text";
 
-      label.append(box, text);
+      const name = document.createElement("span");
+      name.textContent = opt.label;
+      text.appendChild(name);
+
       if (opt.hint) {
         const hint = document.createElement("span");
         hint.className = "conn-opt-hint";
         hint.textContent = opt.hint;
-        label.appendChild(hint);
+        text.appendChild(hint);
       }
+
+      label.append(box, text);
       row.appendChild(label);
     }
     body.appendChild(row);

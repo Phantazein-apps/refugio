@@ -260,6 +260,8 @@ textarea {
   color: var(--ink-muted);
 }
 .conn-acct.off { color: var(--accent); }
+/* Paired but not connected right now — a warning, not an error. */
+.conn-acct.idle { color: var(--ink-faint); }
 
 .conn-err {
   margin: var(--s2) 0 0 15px; padding: var(--s2);
@@ -267,15 +269,20 @@ textarea {
   font: 400 .6875rem/1rem var(--font-mono); color: var(--ink-muted);
   overflow-wrap: anywhere;
 }
-/* Scope options — all off by default, off always means narrower. */
+/* Scope options — all off by default, off always means narrower.
+   Checkbox on the left, then a COLUMN of label + hint. The hint was previously
+   a sibling of the label, so it competed for the same row and squeezed the
+   label into a stack of single words. */
 .conn-opt {
-  display: flex; align-items: baseline; gap: var(--s2);
+  display: flex; align-items: flex-start; gap: var(--s2);
   margin: var(--s2) 0 0 15px; font-size: .8125rem; cursor: pointer;
 }
-.conn-opt input { accent-color: var(--accent); cursor: pointer; margin: 0; }
-.conn-opt-hint {
-  flex: 1 0 100%; margin-left: 22px; font-size: .6875rem; color: var(--ink-faint);
+.conn-opt input {
+  accent-color: var(--accent); cursor: pointer;
+  margin: 0; flex: 0 0 auto; margin-top: 3px;   /* aligns with the first line */
 }
+.conn-opt-text { display: flex; flex-direction: column; min-width: 0; }
+.conn-opt-hint { font-size: .6875rem; line-height: 1rem; color: var(--ink-faint); }
 
 /* Fixing a connector, without a terminal. */
 .conn-blocked {
