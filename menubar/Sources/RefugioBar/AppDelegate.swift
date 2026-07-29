@@ -15,6 +15,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var loginItem: NSMenuItem!
     private var pollTimer: Timer?
 
+    // Menu-bar placement. Watched continuously in both directions: a slot can
+    // appear or disappear long after launch, so this is never decided once.
+    private var placementTimer: Timer?
+    private var placementStarted = Date()
+    private var lastDockProbe = Date.distantPast
+    private var inDockMode = false
+    private var announcedPlacement = false
+
     private var running = false
     private var startedAt: Date?          // for a transient "starting…" state
 
@@ -26,35 +34,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let healthURL = URL(string: "http://127.0.0.1:8080/api/config")!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        // An installed, running agent showing no icon has two silent causes,
-        // and neither announces itself — the process is up, the code ran, and
-        // nothing anywhere says otherwise:
-        //
-        //  1. The item was hidden once and stayed hidden. ⌘-dragging a status
-        //     item off the menu bar sets isVisible = false, and macOS PERSISTS
-        //     that against the item's autosave name, so every later launch
-        //     restores "hidden". Naming the item and forcing it visible at
-        //     launch is what undoes it.
-        //  2. The menu bar has no room. On a notched Mac the usable strip stops
-        //     at the notch, and items that don't fit are simply not drawn.
-        //     AppKit signals this by never giving the button a window — which
-        //     verifyPlacement() checks for.
-        statusItem.autosaveName = "com.phantazein.refugio.menubar.status"
-        statusItem.isVisible = true
-
-        setIcon(running: false)
-        statusItem.menu = makeMenu(live: true)
+        createStatusItem()
         refreshStatus()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.refreshStatus()
         }
+        startPlacementWatch()
+    }
 
-        // Let AppKit lay the menu bar out before asking whether we're on it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.verifyPlacement()
-        }
+    /// Create (or re-create) the status item.
+    private func createStatusItem() {
+        // squareLength, not variableLength. A variable-length item sizes itself
+        // to its content plus padding — ours measured 42 points, where a square
+        // item is one menu-bar thickness, around 24. Asking for less room is
+        // the only lever an ordinary app has on whether it fits; nothing in
+        // AppKit lets one app displace another's item.
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
+        // ⌘-dragging a status item off the menu bar sets isVisible = false, and
+        // macOS persists that against the item's autosave name — every later
+        // launch then faithfully restores "hidden". Naming the item and forcing
+        // it visible at launch is what undoes that.
+        item.autosaveName = "com.phantazein.refugio.menubar.status"
+        item.isVisible = true
+        statusItem = item
+
+        setIcon(running: running)
+        item.menu = makeMenu(live: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -93,85 +99,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Did we get a slot in the menu bar? If not, become a Dock app instead.
+    /// Is the item actually ON the menu bar?
     ///
-    /// The alternative is what shipped: the app runs perfectly, shows nothing,
-    /// and there is no way to stop or restart REFUGIO — the one job it has.
-    private func verifyPlacement(attempt: Int = 1) {
-        guard let item = statusItem else { return }
-        let btn = item.button
-        let win = btn?.window
-        let width = win?.frame.width ?? 0
+    /// None of the obvious properties can answer this. An item macOS declines
+    /// to lay out keeps AppKit's default frame — measured here as
+    /// (0, -22, 42, 22), off the bottom of the screen — while reporting a
+    /// button, a resolved image, isVisible = true and a non-zero width.
+    /// Everything reads healthy and nothing is drawn. Only the position knows.
+    private func isPlaced() -> Bool {
+        guard let item = statusItem, item.isVisible,
+              let f = item.button?.window?.frame, f.width > 0 else { return false }
 
-        // macOS records where a status item sits, under the item's autosave
-        // name, once it has actually been placed. On a machine where the icon
-        // has never appeared this key is absent — the whole defaults domain is
-        // absent — which is the clearest available statement that no slot was
-        // ever granted. Logged rather than acted on: it is evidence, and the
-        // geometry below is the decision.
-        let posKey = "NSStatusItem Preferred Position \(item.autosaveName ?? "")"
-        let everPlaced = UserDefaults.standard.object(forKey: posKey) != nil
-
-        // Having a window is not the same as being where anyone can see it. On
-        // a notched Mac the menu bar continues UNDER the notch, and an item
-        // that lands there is placed, visible, non-zero width — and invisible.
-        // Geometry is the only thing that can tell those apart, so measure it
-        // against the two regions macOS exposes either side of the notch.
-        // Is the item ON the menu bar? This is THE question, and none of the
-        // properties above can answer it. An item macOS declines to lay out —
-        // because the bar is full — keeps AppKit's default frame of
-        // (0, -22, 42, 22): off the bottom of the screen, while reporting a
-        // button, an image, isVisible = true and a non-zero width. Everything
-        // reads healthy and nothing is drawn. Only the position says so.
-        var onMenuBar = false
-        var notched = false
-        if let f = win?.frame {
-            onMenuBar = NSScreen.screens.contains { s in
-                NSRect(x: s.frame.minX, y: s.frame.maxY - 44,
-                       width: s.frame.width, height: 44).intersects(f)
-            }
-            // And on a notched Mac the bar continues under the notch, where an
-            // item is positioned but still invisible.
-            if let screen = NSScreen.main,
-               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-                let notch = NSRect(x: left.maxX, y: min(left.minY, right.minY),
-                                   width: max(0, right.minX - left.maxX),
-                                   height: max(left.height, right.height))
-                notched = notch.intersects(f)
-                log("geometry: item=\(f) notch=\(notch) screen=\(screen.frame) onMenuBar=\(onMenuBar)")
-            } else {
-                log("geometry: item=\(f) (no notch) onMenuBar=\(onMenuBar)")
-            }
+        let onMenuBar = NSScreen.screens.contains { s in
+            NSRect(x: s.frame.minX, y: s.frame.maxY - 44,
+                   width: s.frame.width, height: 44).intersects(f)
         }
+        // On a notched Mac the bar continues under the notch, where an item is
+        // positioned and still invisible.
+        var notched = false
+        if let screen = NSScreen.main,
+           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            notched = NSRect(x: left.maxX, y: min(left.minY, right.minY),
+                             width: max(0, right.minX - left.maxX),
+                             height: max(left.height, right.height)).intersects(f)
+        }
+        return onMenuBar && !notched
+    }
 
-        let placed = btn != nil && win != nil && item.isVisible && width > 0
-            && onMenuBar && !notched
-        log("placement check \(attempt): button=\(btn != nil) window=\(win != nil) " +
-            "visible=\(item.isVisible) width=\(width) image=\(btn?.image != nil) " +
-            "underNotch=\(notched) everPlaced=\(everPlaced) " +
-            "screens=\(NSScreen.screens.count) placed=\(placed)")
+    /// Keep trying for a slot, and keep the one we get.
+    ///
+    /// The first version of this gave up after six seconds and turned into a
+    /// Dock icon. That is not what other menu-bar apps do, and it isn't what
+    /// this should do either: a slot can appear at any time — the user quits
+    /// something, a display is connected, the login-time crowd settles — and an
+    /// app that decided once at launch will sit in the Dock forever afterwards.
+    ///
+    /// So: keep watching in both directions. A minute of failure before the
+    /// Dock fallback, rather than six seconds, and once there, keep testing so
+    /// the icon comes back on its own the moment there is room for it.
+    private func startPlacementWatch() {
+        placementStarted = Date()
+        placementTimer?.invalidate()
+        placementTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            self?.evaluatePlacement()
+        }
+        evaluatePlacement()
+    }
 
-        if placed { return }
-
-        // Retry before giving up rather than deciding on one reading. A zero
-        // width is the real signature of "no room" on a notched Mac — the item
-        // exists, it just isn't drawn — but it is also what a check that ran
-        // too early would see, and turning a working icon into a Dock icon
-        // would be worse than the bug. Three readings over six seconds tells
-        // the two apart; an earlier version refused to act on width at all and
-        // would have sat there logging while the user still had no icon.
-        if attempt < 3 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.verifyPlacement(attempt: attempt + 1)
+    private func evaluatePlacement() {
+        if inDockMode {
+            // Periodically re-offer ourselves to the menu bar. Cheap, and it is
+            // the difference between "you must relaunch it" and the icon simply
+            // reappearing when you close something.
+            guard Date().timeIntervalSince(lastDockProbe) > 20 else { return }
+            lastDockProbe = Date()
+            createStatusItem()
+            if isPlaced() {
+                log("a menu bar slot opened up — leaving Dock mode")
+                leaveDockMode()
+            } else if let item = statusItem {          // no room still; don't leave a ghost
+                NSStatusBar.system.removeStatusItem(item)
+                statusItem = nil
             }
             return
         }
-        fallBackToDock()
+
+        if isPlaced() {
+            if !announcedPlacement {
+                announcedPlacement = true
+                log("placed on the menu bar at \(statusItem?.button?.window?.frame ?? .zero)")
+            }
+            return
+        }
+
+        let waited = Date().timeIntervalSince(placementStarted)
+        if waited < 60 {
+            if Int(waited) % 15 == 0 {
+                log("not placed after \(Int(waited))s: " +
+                    "frame=\(statusItem?.button?.window?.frame ?? .zero) " +
+                    "screens=\(NSScreen.screens.count)")
+            }
+            return
+        }
+        enterDockMode()
     }
 
-    /// No menu-bar slot: appear in the Dock so the controls still exist.
-    private func fallBackToDock() {
-        log("no room in the menu bar — falling back to a Dock icon")
+    /// No menu-bar slot after a minute: appear in the Dock, so the controls
+    /// exist at all. Reversible — see evaluatePlacement().
+    private func enterDockMode() {
+        guard !inDockMode else { return }
+        inDockMode = true
+        lastDockProbe = Date()
+        log("no room in the menu bar after 60s — falling back to a Dock icon")
         statusItem?.menu = nil
         if let item = statusItem { NSStatusBar.system.removeStatusItem(item) }
         statusItem = nil                       // so setIcon() stops trying
@@ -207,9 +226,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "Your menu bar is full. On a Mac with a notch there is less room than it looks, " +
             "and anything that doesn’t fit is simply not drawn.\n\n" +
             "REFUGIO is in the Dock instead — right-click its icon to start, stop or open it.\n\n" +
-            "To get the menu bar icon back, quit a few other menu-bar apps and reopen REFUGIO."
+            "Quit a couple of other menu-bar apps and the icon will come back on its own; " +
+            "REFUGIO keeps checking and moves back the moment there is room."
         a.addButton(withTitle: "OK")
         _ = a.runModal()
+    }
+
+    /// Room appeared: go back to the menu bar and drop the Dock icon.
+    private func leaveDockMode() {
+        inDockMode = false
+        NSApp.mainMenu = nil
+        NSApp.setActivationPolicy(.accessory)
+        announcedPlacement = false
     }
 
     // ── Menu ────────────────────────────────────────────────
@@ -273,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setIcon(running: Bool) {
         // No button means no slot in the menu bar. It used to return silently
         // here, which is how an app that had already failed went on looking
-        // healthy; verifyPlacement() turns it into a Dock icon instead.
+        // healthy; the placement watch is what notices instead.
         guard let btn = statusItem?.button else { return }
         let name = running ? "mountain.2.fill" : "mountain.2"
         if let img = NSImage(systemSymbolName: name, accessibilityDescription: "REFUGIO") {

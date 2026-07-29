@@ -59,6 +59,8 @@ else
   echo "  (no log yet)"
 fi
 echo
-echo "  No icon? Your menu bar may be full — REFUGIO falls back to a Dock icon and"
-echo "  says so. Either way 'refugio restart' and 'refugio stop' work from a"
-echo "  terminal, and 'refugio menubar' relaunches this app and prints that log."
+echo "  No icon yet? REFUGIO keeps asking for a slot for a minute before falling"
+echo "  back to a Dock icon — and keeps checking after that, so the icon returns"
+echo "  by itself once you close another menu-bar app. 'refugio restart' and"
+echo "  'refugio stop' work from a terminal either way, and 'refugio menubar'"
+echo "  relaunches this app and prints that log."
