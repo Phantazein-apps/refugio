@@ -314,10 +314,11 @@ async function showConnectors() {
       }
     }
 
-    // Scope options. All off by default, and off always means narrower — the
-    // defaults are what people actually ask about, and every extra row a tool
-    // returns is prompt the local model must read before it can answer.
-    for (const opt of c.options || []) {
+    // Scope options only on a connector that works. Offering "include archived
+    // chats" under a connector that cannot reach WhatsApp asks someone to tune
+    // something that is not running — and buries the one control that matters
+    // (the fix button) under settings that currently change nothing.
+    for (const opt of (c.state === "ok" ? c.options || [] : [])) {
       const label = document.createElement("label");
       label.className = "conn-opt";
 
