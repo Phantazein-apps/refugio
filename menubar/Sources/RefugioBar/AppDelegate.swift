@@ -107,19 +107,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // that lands there is placed, visible, non-zero width — and invisible.
         // Geometry is the only thing that can tell those apart, so measure it
         // against the two regions macOS exposes either side of the notch.
+        // Is the item ON the menu bar? This is THE question, and none of the
+        // properties above can answer it. An item macOS declines to lay out —
+        // because the bar is full — keeps AppKit's default frame of
+        // (0, -22, 42, 22): off the bottom of the screen, while reporting a
+        // button, an image, isVisible = true and a non-zero width. Everything
+        // reads healthy and nothing is drawn. Only the position says so.
+        var onMenuBar = false
         var notched = false
-        if let f = win?.frame, let screen = NSScreen.main,
-           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            let notch = NSRect(x: left.maxX, y: min(left.minY, right.minY),
-                               width: max(0, right.minX - left.maxX),
-                               height: max(left.height, right.height))
-            notched = notch.intersects(f)
-            log("geometry: item=\(f) notch=\(notch) screen=\(screen.frame)")
-        } else if let f = win?.frame {
-            log("geometry: item=\(f) (no notch on this screen)")
+        if let f = win?.frame {
+            onMenuBar = NSScreen.screens.contains { s in
+                NSRect(x: s.frame.minX, y: s.frame.maxY - 44,
+                       width: s.frame.width, height: 44).intersects(f)
+            }
+            // And on a notched Mac the bar continues under the notch, where an
+            // item is positioned but still invisible.
+            if let screen = NSScreen.main,
+               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+                let notch = NSRect(x: left.maxX, y: min(left.minY, right.minY),
+                                   width: max(0, right.minX - left.maxX),
+                                   height: max(left.height, right.height))
+                notched = notch.intersects(f)
+                log("geometry: item=\(f) notch=\(notch) screen=\(screen.frame) onMenuBar=\(onMenuBar)")
+            } else {
+                log("geometry: item=\(f) (no notch) onMenuBar=\(onMenuBar)")
+            }
         }
 
-        let placed = btn != nil && win != nil && item.isVisible && width > 0 && !notched
+        let placed = btn != nil && win != nil && item.isVisible && width > 0
+            && onMenuBar && !notched
         log("placement check \(attempt): button=\(btn != nil) window=\(win != nil) " +
             "visible=\(item.isVisible) width=\(width) image=\(btn?.image != nil) " +
             "underNotch=\(notched) everPlaced=\(everPlaced) " +
