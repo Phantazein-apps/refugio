@@ -91,6 +91,47 @@ const MCP_CONFIG = process.env.REFUGIO_MCPO_CONFIG ||
 /** @type {McpPool|null} */
 let mcp = null;
 
+// Human-facing names for the server ids in mcpo-config.json. Anything not
+// listed falls back to its id capitalised, so a new connector reads correctly
+// without a code change here.
+const CONNECTOR_LABELS = {
+  whatsapp: "WhatsApp", email: "Email", reminders: "Apple Reminders",
+  things: "Things 3", notion: "Notion", memory: "Memory",
+};
+const labelFor = (id) => CONNECTOR_LABELS[id] || id.charAt(0).toUpperCase() + id.slice(1);
+
+// describe() calls list_accounts on every connector, far too heavy for a 15s
+// status poll. Cached briefly; opening the panel forces a refresh.
+let connectorCache = { at: 0, rows: [] };
+const CONNECTOR_TTL = 30_000;
+
+async function connectorRows({ force = false } = {}) {
+  if (!mcp) return [];
+  if (!force && Date.now() - connectorCache.at < CONNECTOR_TTL) return connectorCache.rows;
+  const rows = (await mcp.describe()).map((r) => ({ ...r, label: labelFor(r.id) }));
+  // Don't let an incomplete answer harden into a 30s lie. A connector still
+  // booting can't list its accounts yet, which undercounts — cache that only
+  // briefly so the number corrects itself instead of sitting wrong.
+  const settled = !rows.some((r) => r.accountsUnknown);
+  connectorCache = { at: settled ? Date.now() : Date.now() - (CONNECTOR_TTL - 3000), rows };
+  return rows;
+}
+
+/** How many connectors a person would say they have.
+ *
+ *  Multi-account connectors count once per account — two WhatsApp numbers are
+ *  two things to think about, not one. Failures are counted separately rather
+ *  than folded in: a healthy-looking total while WhatsApp was silently down is
+ *  the exact reassuring-but-wrong signal that hid a real outage. */
+function countConnectors(rows) {
+  let ready = 0, failed = 0;
+  for (const r of rows) {
+    if (!r.ok) { failed++; continue; }
+    ready += Math.max(1, r.accounts.length);
+  }
+  return { ready, failed };
+}
+
 // Model selection: explicit override, else whatever Ollama has (first entry).
 let cachedModel = process.env.REFUGIO_CHAT_MODEL || null;
 async function resolveModel() {
@@ -273,11 +314,18 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 async function route(req, res, url) {
   const p = url.pathname;
 
+  if (p === "/api/chat/connectors") {
+    const rows = await connectorRows({ force: true });
+    return sendJson(res, 200, { connectors: rows, ...countConnectors(rows) });
+  }
+
   if (p === "/api/chat/status") {
     const up = await isUp();
     const models = up ? await listModels() : [];
     const model = await resolveModel();
+    const rows = await connectorRows();
     return sendJson(res, 200, {
+      connectors: countConnectors(rows),
       available: up && !!model,
       model,
       models: models.map((m) => m.name),

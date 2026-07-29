@@ -114,16 +114,17 @@ async function refreshStatus() {
   try {
     const s = await (await fetch("/api/chat/status")).json();
     els.status.className = `status ${s.available ? "ok" : "down"}`;
-    // Show the connector count, not just "ready". Without it there is no way to
-    // tell a model that ignored its tools from a model that was never given
-    // any — the two look identical in the thread, and only one is fixable here.
-    const n = s.tools?.length ?? 0;
+    // Connectors, not tools. "35 tools" is an implementation detail; what a
+    // person has is WhatsApp, Reminders and Things. A failure gets its own
+    // clause rather than being folded into the total — a healthy-looking count
+    // while WhatsApp was silently down is exactly what hid a real outage.
+    const c = s.connectors || { ready: 0, failed: 0 };
     els.statusText.textContent = !s.available ? "no model"
-      : n ? `ready · ${n} tool${n === 1 ? "" : "s"}`
-      : "ready · no tools";
-    els.status.title = n
-      ? s.tools.join("\n")
-      : "No MCP connectors loaded — check the chat server log for [chat:mcp].";
+      : c.failed ? `${c.ready} connected \u00b7 ${c.failed} failed`
+      : c.ready ? `ready \u00b7 ${c.ready} connector${c.ready === 1 ? "" : "s"}`
+      : "ready \u00b7 no connectors";
+    if (s.available && c.failed) els.status.classList.add("warn");
+    els.status.title = "Click for connector details";
     showModelWarning(s);
     els.model.innerHTML = "";
     for (const m of s.models || []) {
@@ -164,6 +165,83 @@ function showModelWarning(s) {
   bar.textContent =
     `${s.model} can't use connectors — it will answer from memory and never ` +
     `read your data. Run: ollama pull qwen2.5:3b`;
+}
+
+/** The connectors panel: what REFUGIO is actually plugged into.
+ *
+ *  Built because the answer to "is WhatsApp working?" used to live only in a
+ *  terminal the user had closed. Each connector states its own condition, and
+ *  a failed one shows its reason verbatim instead of just going missing. */
+async function showConnectors() {
+  let panel = document.getElementById("connectors");
+  if (panel) { panel.remove(); return; }          // click again to close
+
+  panel = document.createElement("div");
+  panel.id = "connectors";
+  panel.className = "sheet";
+  panel.innerHTML = `<div class="sheet-card"><div class="sheet-head">
+      <strong>Connectors</strong><button class="sheet-x" title="Close">&times;</button>
+    </div><div class="sheet-body">Checking\u2026</div></div>`;
+  document.body.appendChild(panel);
+
+  const close = () => panel.remove();
+  panel.querySelector(".sheet-x").onclick = close;
+  panel.onclick = (e) => { if (e.target === panel) close(); };   // backdrop
+  document.addEventListener("keydown", function esc(e) {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); }
+  });
+
+  const body = panel.querySelector(".sheet-body");
+  let data;
+  try {
+    data = await (await fetch("/api/chat/connectors")).json();
+  } catch {
+    body.textContent = "Couldn\u2019t reach REFUGIO.";
+    return;
+  }
+
+  if (!data.connectors?.length) {
+    body.innerHTML = `<div class="conn-empty">No connectors configured.<br>
+      <span class="conn-sub">Re-run the REFUGIO installer to add WhatsApp, reminders or notes.</span></div>`;
+    return;
+  }
+
+  body.innerHTML = "";
+  for (const c of data.connectors) {
+    const row = document.createElement("div");
+    row.className = "conn" + (c.ok ? "" : " failed");
+
+    const head = document.createElement("div");
+    head.className = "conn-head";
+    const dot = document.createElement("span");
+    dot.className = "conn-dot";
+    const name = document.createElement("span");
+    name.className = "conn-name";
+    name.textContent = c.label || c.id;
+    const meta = document.createElement("span");
+    meta.className = "conn-meta";
+    meta.textContent = c.ok ? `${c.tools} tool${c.tools === 1 ? "" : "s"}` : "not working";
+    head.append(dot, name, meta);
+    row.appendChild(head);
+
+    // Accounts are what makes a connector plural: two WhatsApp numbers are two
+    // things the user thinks about, and an unpaired one is worth surfacing.
+    for (const a of c.accounts || []) {
+      const acc = document.createElement("div");
+      acc.className = "conn-acct" + (a.connected ? "" : " off");
+      acc.textContent = (a.phone ? `+${a.phone}` : a.id || "account") +
+        (a.connected ? "" : " \u2014 not linked");
+      row.appendChild(acc);
+    }
+
+    if (!c.ok && c.error) {
+      const err = document.createElement("div");
+      err.className = "conn-err";
+      err.textContent = c.error;   // textContent: this is a child process's stderr
+      row.appendChild(err);
+    }
+    body.appendChild(row);
+  }
 }
 
 async function loadConversations() {
@@ -353,6 +431,7 @@ els.thread.addEventListener("click", (e) => {
     btn.textContent = "copied"; setTimeout(() => (btn.textContent = "copy"), 1200);
   });
 });
+els.status.addEventListener("click", showConnectors);
 els.newChat.addEventListener("click", newChat);
 els.model.addEventListener("change", () => { state.model = els.model.value; });
 

@@ -70,11 +70,20 @@ function firstCause(stderr) {
   return (named || lines[0] || "").slice(0, 300);
 }
 
+// A server saying "I don't have that tool" is a definite answer. Anything else
+// (timeout, closed connection) means we don't know yet and must not be cached.
+const UNSUPPORTED_TOOL =
+  /unknown tool|no such tool|tool not found|not found|method not found|-3260[12]/i;
+
 export class McpPool {
   constructor() {
     this.clients = new Map();   // server name -> Client
     this.tools = [];            // Ollama-shaped tool defs
     this.byName = new Map();    // qualified name -> { server, tool }
+    // Every configured server, connected or not. A connector that FAILED is
+    // the thing a user most needs to see, so it must survive here with its
+    // reason rather than simply be absent.
+    this.servers = new Map();   // server name -> { name, tools, ok, error }
   }
 
   /**
@@ -100,9 +109,15 @@ export class McpPool {
     const servers = Object.entries(config.mcpServers || {})
       .filter(([name]) => !only || only.includes(name));
 
+    for (const [name] of servers) {
+      this.servers.set(name, { name, tools: 0, ok: false, error: null });
+    }
+
     await Promise.all(servers.map(([name, spec]) =>
-      this.#connectOne(name, spec, timeoutMs).catch((e) =>
-        log(`"${name}" unavailable: ${e.message}`))
+      this.#connectOne(name, spec, timeoutMs).catch((e) => {
+        this.servers.get(name).error = e.message;
+        log(`"${name}" unavailable: ${e.message}`);
+      })
     ));
 
     log(`${this.tools.length} tools from ${this.clients.size}/${servers.length} server(s)`);
@@ -146,6 +161,8 @@ export class McpPool {
   }
 
   #register(name, client, tools) {
+    const entry = this.servers.get(name);
+    if (entry) { entry.ok = true; entry.tools = tools.length; entry.error = null; }
 
     this.clients.set(name, client);
     for (const t of tools) {
@@ -166,6 +183,59 @@ export class McpPool {
    *  first, so a second connector can vanish entirely — and the symptom is a
    *  model calmly explaining it has no WhatsApp tools while the UI reports 24,
    *  which reads as a bug anywhere but here. */
+  /**
+   * Describe the connectors for a human, not for the model.
+   *
+   * "35 tools" is an implementation detail; "WhatsApp, Reminders, Things" is
+   * what someone actually installed. A connector that FAILED matters most —
+   * during the outage that motivated this, the only signal anywhere was a tool
+   * count that looked perfectly plausible.
+   *
+   * Per-account rows come from a `list_accounts` tool, treated as a convention
+   * any connector may implement. Note it is called even when the connector
+   * hides it from the model (Hermeneia's `minimal` profile does): a profile
+   * filters what the MODEL is offered, not what the host may ask for. That is
+   * what lets WhatsApp count as one connector per account without spending a
+   * slot in the model's tool list.
+   */
+  async describe({ timeoutMs = 5000 } = {}) {
+    return Promise.all([...this.servers.values()].map(async (s) => {
+      const row = { id: s.name, tools: s.tools, ok: s.ok, error: s.error,
+                    accounts: [], accountsUnknown: false };
+      if (!s.ok) return row;
+      let raw;
+      try {
+        raw = await withTimeout(
+          this.clients.get(s.name).callTool({ name: "list_accounts", arguments: {} }),
+          timeoutMs, `${s.name} list_accounts`);
+      } catch (e) {
+        // Distinguish "this connector has no such tool" — a definite answer,
+        // meaning single-account — from every other failure, which means we
+        // simply don't know yet. Timeouts (still booting) and dropped
+        // connections both land here, and reporting either as "no accounts"
+        // UNDERCOUNTS, which the caller would then cache as though settled.
+        row.accountsUnknown = !UNSUPPORTED_TOOL.test(e.message || "");
+        return row;
+      }
+
+      // The call answered. If the payload isn't an account array the connector
+      // simply doesn't implement this convention (some servers reply to any
+      // tool name) — a definite single-account answer, not an unknown one.
+      try {
+        const text = raw?.content?.find((b) => b.type === "text")?.text;
+        const parsed = text ? JSON.parse(text) : null;
+        if (Array.isArray(parsed)) {
+          row.accounts = parsed.map((a) => ({
+            id: a.id ?? null,
+            phone: a.phone ?? null,
+            connected: !!(a.connected ?? a.authenticated),
+          }));
+        }
+      } catch { /* not JSON — not an accounts connector */ }
+      return row;
+    }));
+  }
+
   toolDefs(limit = 0) {
     if (limit <= 0) return this.tools;
     if (this.tools.length <= limit) return this.tools;
