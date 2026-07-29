@@ -41,4 +41,20 @@ echo "▸ Launching…"
 open "$DEST"
 echo "✓ Installed to /Applications and launched — look for the mountain in your menu bar."
 echo "  Menu: Open / Start / Stop REFUGIO · Launch at Login · Quit."
+echo
+
+# The failure this app is prone to is invisible: it runs, and nothing appears.
+# Print what it decided, rather than leaving "look for the mountain" as the only
+# feedback when there is no mountain to look for.
+sleep 3
+echo "▸ Menu bar placement:"
+if [ -f "$HOME/.refugio-logs/menubar.log" ]; then
+  tail -n 2 "$HOME/.refugio-logs/menubar.log" | sed 's/^/  /'
+else
+  echo "  (no log yet)"
+fi
+echo
+echo "  No icon? Your menu bar may be full — REFUGIO falls back to a Dock icon and"
+echo "  says so. Either way 'refugio restart' and 'refugio stop' work from a"
+echo "  terminal, and 'refugio menubar' relaunches this app and prints that log."
 echo "  Re-run ./install.sh to update."

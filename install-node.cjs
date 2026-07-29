@@ -1874,23 +1874,61 @@ function setupOnDemand(targetDir, nodePath, startScript) {
   }
 
   if (!isWin) {
-    // `refugio` CLI on PATH (~/.local/bin is on PATH via uv): start | stop | status
+    // `refugio` CLI on PATH (~/.local/bin is on PATH via uv):
+    //   start | bg | stop | restart | status | menubar
+    //
+    // `bg`, `restart` and `menubar` exist because the menu-bar icon is not
+    // guaranteed — it can fail to get a slot on a full menu bar. When that
+    // happens the only way to stop and restart was a foreground process
+    // holding a terminal open, which is not where a fallback belongs.
     const binDir = path.join(home, ".local", "bin")
     try { fs.mkdirSync(binDir, { recursive: true }) } catch {}
     const cli = `#!/bin/sh
 # REFUGIO on-demand launcher
 NODE="${nodePath}"
 DIR="${targetDir}"
-PIDF="$HOME/.refugio-logs/supervisor.pid"
+LOGS="$HOME/.refugio-logs"
+PIDF="$LOGS/supervisor.pid"
+
+refugio_stop() {
+  if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "REFUGIO stopped (RAM freed)"
+  else echo "REFUGIO is not running"; fi
+}
+refugio_bg() {
+  mkdir -p "$LOGS"
+  nohup "$NODE" "$DIR/start-refugio.cjs" --no-browser >>"$LOGS/refugio.log" 2>&1 &
+}
+
 case "$1" in
-  stop)
-    if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "REFUGIO stopped (RAM freed)"; else echo "REFUGIO is not running"; fi ;;
+  stop) refugio_stop ;;
+  bg)
+    refugio_bg
+    echo "REFUGIO starting in the background — 'refugio status' to check, 'refugio stop' to stop." ;;
+  restart)
+    refugio_stop
+    sleep 2
+    refugio_bg
+    echo "REFUGIO restarting in the background — 'refugio status' to check." ;;
   status)
     if curl -s --max-time 2 http://127.0.0.1:8090/api/chat/status >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8090"
     elif curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080 (Open WebUI)"
     else echo "stopped"; fi ;;
+  menubar)
+    # Relaunch the menu-bar app and show what it decided. It writes one line per
+    # launch saying whether it got a slot in the menu bar.
+    if [ -d /Applications/REFUGIO.app ]; then
+      pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar" 2>/dev/null
+      sleep 1
+      open /Applications/REFUGIO.app
+      sleep 3
+      echo "--- $LOGS/menubar.log ---"
+      tail -n 5 "$LOGS/menubar.log" 2>/dev/null || echo "(no log yet — this build predates it)"
+    else
+      echo "Menu-bar app is not installed. Build it with: cd $DIR/menubar && ./install.sh"
+    fi ;;
   *)
     echo "Starting REFUGIO... (Ctrl+C or 'refugio stop' to stop and free RAM)"
+    echo "Tip: 'refugio bg' starts it without holding this terminal."
     exec "$NODE" "$DIR/start-refugio.cjs" ;;
 esac
 `
