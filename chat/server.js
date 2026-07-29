@@ -193,13 +193,16 @@ async function connectorRows({ force = false } = {}) {
  *  than folded in: a healthy-looking total while WhatsApp was silently down is
  *  the exact reassuring-but-wrong signal that hid a real outage. */
 function countConnectors(rows) {
-  let ready = 0, failed = 0, connecting = 0;
+  let ready = 0, failed = 0, connecting = 0, degraded = 0;
   for (const r of rows) {
     if (r.state === "connecting") { connecting++; continue; }
     if (!r.ok) { failed++; continue; }
+    // Running but unreachable is its own category. Counting it as ready is how
+    // a user ends up asking about WhatsApp messages that can't be fetched.
+    if (r.state === "degraded") { degraded++; continue; }
     ready += Math.max(1, r.accounts.length);
   }
-  return { ready, failed, connecting };
+  return { ready, failed, connecting, degraded };
 }
 
 // Model selection: explicit override, else whatever Ollama has (first entry).

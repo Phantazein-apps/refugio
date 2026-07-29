@@ -341,6 +341,18 @@ export class McpPool {
           }));
         }
       } catch { /* not JSON — not an accounts connector */ }
+
+      // "The connector is running" and "the account it fronts is reachable"
+      // are different facts, and showing the first as healthy while the second
+      // is false reads as a contradiction — a green dot above the word
+      // "offline". A WhatsApp connector whose account is offline still lists
+      // its tools, and every one of them will come back empty or stale.
+      //
+      // Only demoted when the connector reports accounts at all: a connector
+      // with no account concept (Reminders, Things) is simply fine.
+      if (row.accounts.length && !row.accounts.some((a) => a.connected)) {
+        row.state = "degraded";
+      }
       return row;
     }));
   }

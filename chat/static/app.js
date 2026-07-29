@@ -118,14 +118,15 @@ async function refreshStatus() {
     // person has is WhatsApp, Reminders and Things. A failure gets its own
     // clause rather than being folded into the total — a healthy-looking count
     // while WhatsApp was silently down is exactly what hid a real outage.
-    const c = s.connectors || { ready: 0, failed: 0, connecting: 0 };
+    const c = s.connectors || { ready: 0, failed: 0, connecting: 0, degraded: 0 };
     els.statusText.textContent = !s.available ? "no model"
       : c.failed ? `${c.ready} connected \u00b7 ${c.failed} failed`
+      : c.degraded ? `${c.ready} connected \u00b7 ${c.degraded} offline`
       : c.connecting && !c.ready ? "connecting\u2026"
       : c.connecting ? `${c.ready} connector${c.ready === 1 ? "" : "s"} \u00b7 ${c.connecting} connecting`
       : c.ready ? `ready \u00b7 ${c.ready} connector${c.ready === 1 ? "" : "s"}`
       : "ready \u00b7 no connectors";
-    if (s.available && c.failed) els.status.classList.add("warn");
+    if (s.available && (c.failed || c.degraded)) els.status.classList.add("warn");
     els.status.title = "Click for connector details";
     showModelWarning(s);
     // Label each model with what it needs against the RAM free right now.
@@ -225,7 +226,7 @@ async function showConnectors() {
   body.innerHTML = "";
   for (const c of data.connectors) {
     const row = document.createElement("div");
-    row.className = "conn" + (c.ok ? "" : c.state === "connecting" ? " starting" : " failed");
+    row.className = "conn " + (c.state || (c.ok ? "ok" : "failed"));
 
     const head = document.createElement("div");
     head.className = "conn-head";
@@ -236,8 +237,10 @@ async function showConnectors() {
     name.textContent = c.label || c.id;
     const meta = document.createElement("span");
     meta.className = "conn-meta";
+    const toolCount = `${c.tools} tool${c.tools === 1 ? "" : "s"}`;
     meta.textContent = c.state === "connecting" ? "connecting\u2026"
-      : c.ok ? `${c.tools} tool${c.tools === 1 ? "" : "s"}` : "not working";
+      : c.state === "degraded" ? `${toolCount} \u00b7 not reachable`
+      : c.ok ? toolCount : "not working";
     head.append(dot, name, meta);
     row.appendChild(head);
 
