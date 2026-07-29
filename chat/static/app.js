@@ -14,6 +14,11 @@ const els = {
 
 const state = { conversationId: null, streaming: false, model: null, abort: null };
 
+// Outcome of the last connector fix, rendered once on the next panel draw.
+// Held outside the panel because the panel is destroyed and rebuilt to show
+// fresh data, which is precisely what would otherwise swallow the message.
+let pendingNotice = null;
+
 // ── Rendering ───────────────────────────────────────────────
 
 /** Escape everything, then re-introduce only fenced/inline code. Keeps model
@@ -314,6 +319,13 @@ async function showConnectors() {
       }
     }
 
+    if (pendingNotice && pendingNotice.id === c.id) {
+      const note = document.createElement("div");
+      note.className = `conn-note ${pendingNotice.tone}`;
+      note.textContent = pendingNotice.text;
+      row.appendChild(note);
+    }
+
     // Scope options only on a connector that works. Offering "include archived
     // chats" under a connector that cannot reach WhatsApp asks someone to tune
     // something that is not running — and buries the one control that matters
@@ -349,6 +361,7 @@ async function showConnectors() {
     }
     body.appendChild(row);
   }
+  pendingNotice = null;
 }
 
 /** Persist one connector option. Reverts the box if the server refuses, so the
@@ -382,15 +395,37 @@ async function runFix(btn, id, action) {
       { method: "POST" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `failed (${res.status})`);
-    document.getElementById("connectors")?.remove();
-    await showConnectors();
-    refreshStatus();
+
+    // Say what happened. The panel redraws from fresh data, so a connector that
+    // is still broken renders identically to before — the button appears to
+    // simply revert, and the action looks like it did nothing. It ran; it just
+    // did not help, and that is a different thing the user needs told.
+    const row = (data.connectors || []).find((c) => c.id === id);
+    pendingNotice = { id, ...describeOutcome(row, action) };
   } catch (e) {
-    btn.disabled = false;
-    btn.textContent = label;
-    const err = btn.closest(".conn")?.querySelector(".conn-err");
-    if (err) err.textContent = String(e.message || e);
+    pendingNotice = { id, tone: "bad", text: String(e.message || e) };
   }
+  document.getElementById("connectors")?.remove();
+  await showConnectors();
+  refreshStatus();
+}
+
+/** Turn the post-fix state into a sentence.
+ *
+ *  A failed fix is not a failed action — "reconnected, still offline" points at
+ *  re-linking, while "could not reach it at all" points somewhere else. */
+function describeOutcome(row, action) {
+  if (!row) return { tone: "bad", text: "That connector is no longer listed." };
+  if (row.state === "ok") {
+    return { tone: "good", text: action === "resolve" ? "Stopped it — connector is working." : "Working now." };
+  }
+  if (row.state === "connecting") return { tone: "info", text: "Restarted — still starting up." };
+  if (row.state === "degraded") {
+    return { tone: "warn", text: row.setup
+      ? "Restarted, but the account is still unreachable. WhatsApp has probably unlinked this device — re-link below."
+      : "Restarted, but the account is still unreachable." };
+  }
+  return { tone: "bad", text: "Still not working." };
 }
 
 async function loadConversations() {
