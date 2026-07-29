@@ -126,6 +126,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return onMenuBar && !notched
     }
 
+    /// The menu-bar manager running right now, if any.
+    ///
+    /// Matched on bundle identifier where they are stable, and on name as a
+    /// catch-all, since this list will always be out of date.
+    private func menuBarManager() -> String? {
+        let known = [
+            "com.surteesstudios.Bartender": "Bartender",
+            "com.jordanbaird.Ice": "Ice",
+            "com.dwarvesv.minimalbar": "Hidden Bar",
+            "com.matthewpalmer.Vanilla": "Vanilla",
+        ]
+        for app in NSWorkspace.shared.runningApplications {
+            if let id = app.bundleIdentifier, let name = known[id] { return name }
+            if let n = app.localizedName,
+               ["Bartender", "Ice", "Hidden Bar", "Vanilla", "Dozer"].contains(n) { return n }
+        }
+        return nil
+    }
+
     /// Keep trying for a slot, and keep the one we get.
     ///
     /// The first version of this gave up after six seconds and turned into a
@@ -168,6 +187,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !announcedPlacement {
                 announcedPlacement = true
                 log("placed on the menu bar at \(statusItem?.button?.window?.frame ?? .zero)")
+            }
+            return
+        }
+
+        // A menu-bar manager makes "not placed" mean something else entirely.
+        // Bartender, Ice and the rest work by taking items out of the visible
+        // bar — an item they have collected reports exactly what an unplaced
+        // one does, and from in here the two are indistinguishable. But it is
+        // not missing: it is in that app's shelf, one click away, and turning
+        // into a Dock icon would be REFUGIO overriding a choice the user made
+        // deliberately when they installed the manager.
+        if let manager = menuBarManager() {
+            if !announcedPlacement {
+                announcedPlacement = true
+                log("not on the visible bar, but \(manager) is running — " +
+                    "assuming it is managing the item, not falling back")
             }
             return
         }
