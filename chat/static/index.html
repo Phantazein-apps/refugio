@@ -32,7 +32,12 @@
     </div>
 
     <div class="composer">
+      <!-- Shown only while web search is armed, and only for the next message. -->
+      <div class="web-warn" id="web-warn" hidden></div>
       <div class="composer-inner">
+        <button class="web-arm" id="web-arm" type="button" hidden aria-pressed="false">
+          <span aria-hidden="true">🌐</span> Web
+        </button>
         <textarea id="input" rows="1" placeholder="Message REFUGIO…" autofocus></textarea>
         <button class="send" id="send" title="Send" disabled>↑</button>
       </div>

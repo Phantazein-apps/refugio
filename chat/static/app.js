@@ -10,9 +10,16 @@ const els = {
   convos: $("convos"), thread: $("thread"), scroll: $("scroll"), empty: $("empty"),
   input: $("input"), send: $("send"), newChat: $("new-chat"),
   model: $("model-pick"), status: $("status"), statusText: $("status-text"),
+  webArm: $("web-arm"), webWarn: $("web-warn"),
 };
 
-const state = { conversationId: null, streaming: false, model: null, abort: null };
+const state = {
+  conversationId: null, streaming: false, model: null, abort: null,
+  // Two separate facts, deliberately. `web` is the standing permission from the
+  // connectors panel; `webArmed` is this one message. The second is never
+  // inferred from the first — that is the whole guarantee.
+  web: { enabled: false }, webArmed: false,
+};
 
 // Outcome of the last connector fix, rendered once on the next panel draw.
 // Held outside the panel because the panel is destroyed and rebuilt to show
@@ -40,6 +47,20 @@ function addMessage(role, text) {
   els.thread.appendChild(wrap);
   scrollToEnd();
   return bubble;
+}
+
+/** Mark, in the thread, that this turn was allowed to search the web.
+ *
+ *  The composer warning disappears the moment the message is sent, so without
+ *  this there is nothing in the scrollback saying which answer was the one
+ *  that reached outside the machine. Not persisted — reopening the
+ *  conversation won't show it, since the marker isn't part of the stored
+ *  transcript. The tool chip on the answer itself is the durable record. */
+function markWebTurn() {
+  const d = document.createElement("div");
+  d.className = "web-turn";
+  d.textContent = "🌐 Web search allowed for this message";
+  els.thread.appendChild(d);
 }
 
 function showError(msg) {
@@ -104,6 +125,7 @@ async function refreshStatus() {
       ? `${s.freeGb} GB RAM free right now`
       : "";
     state.model = s.model;
+    applyWebSetting(s.web);
   } catch {
     els.status.className = "status down";
     els.statusText.textContent = "offline";
@@ -132,6 +154,111 @@ function showModelWarning(s) {
   bar.textContent =
     `${s.model} can't use connectors — it will answer from memory and never ` +
     `read your data. Run: ollama pull qwen2.5:3b`;
+}
+
+// ── Web search ──────────────────────────────────────────────
+//
+// The only thing REFUGIO does that leaves the machine, so it is built as an
+// exception rather than a feature: switched off until enabled in the panel,
+// and then armed one message at a time. Two switches, not one — otherwise
+// "enabled" quietly becomes "always searching", which is the promise this app
+// is built on.
+
+/** Reflect the standing permission. Off means the control isn't there at all —
+ *  a visible toggle that does nothing is worse than no toggle. */
+function applyWebSetting(web) {
+  state.web = web || { enabled: false };
+  els.webArm.hidden = !state.web.enabled;
+  els.webArm.title = state.web.enabled
+    ? `Search the web for the next message only. ${state.web.warning || ""}`.trim()
+    : "";
+  // Turning the permission off must also drop anything already armed, or the
+  // next send would still reach the internet after the user said no.
+  if (!state.web.enabled) setWebArmed(false);
+}
+
+function setWebArmed(on) {
+  state.webArmed = !!on && !!state.web.enabled;
+  els.webArm.classList.toggle("armed", state.webArmed);
+  els.webArm.setAttribute("aria-pressed", String(state.webArmed));
+  els.webWarn.hidden = !state.webArmed;
+  // The warning is the point of the arming step. Say what is sent and what
+  // isn't, every time, rather than assuming it was read once in the panel.
+  els.webWarn.textContent = state.webArmed
+    ? `Web search is on for this message. ${state.web.warning || ""}`.trim()
+    : "";
+}
+
+/** Persist the standing permission from the connectors panel. */
+async function setWebEnabled(box, enabled) {
+  box.disabled = true;
+  try {
+    const res = await fetch("/api/chat/web", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error("failed");
+    const data = await res.json();
+    applyWebSetting(data.web);
+    // Redraw the row from the server's answer. Leaving it alone left the
+    // header reading "off" beside a ticked box — the same row saying two
+    // different things, which is exactly what this panel exists not to do.
+    document.querySelector("#connectors .conn.web")?.replaceWith(webSection(data.web));
+  } catch {
+    box.checked = !enabled;
+  } finally {
+    box.disabled = false;
+  }
+}
+
+/** The web-search section of the connectors panel.
+ *
+ *  Rendered apart from the connector list, and last. Everything above it reads
+ *  the user's own data on this machine; this one doesn't, and putting it in the
+ *  same list would quietly file it as one more local connector. */
+function webSection(web) {
+  const row = document.createElement("div");
+  row.className = "conn web" + (web.enabled ? " on" : "");
+
+  const head = document.createElement("div");
+  head.className = "conn-head";
+  const dot = document.createElement("span");
+  dot.className = "conn-dot";
+  const name = document.createElement("span");
+  name.className = "conn-name";
+  name.textContent = "Web search";
+  const meta = document.createElement("span");
+  meta.className = "conn-meta";
+  meta.textContent = web.enabled ? `via ${web.engine || "a search engine"}` : "off";
+  head.append(dot, name, meta);
+  row.appendChild(head);
+
+  const why = document.createElement("div");
+  why.className = "conn-why";
+  why.textContent = web.warning || "";
+  row.appendChild(why);
+
+  const label = document.createElement("label");
+  label.className = "conn-opt";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = !!web.enabled;
+  box.onchange = () => setWebEnabled(box, box.checked);
+  const text = document.createElement("span");
+  text.className = "conn-opt-text";
+  const t1 = document.createElement("span");
+  t1.textContent = web.label || "Allow web search";
+  text.appendChild(t1);
+  if (web.hint) {
+    const hint = document.createElement("span");
+    hint.className = "conn-opt-hint";
+    hint.textContent = web.hint;
+    text.appendChild(hint);
+  }
+  label.append(box, text);
+  row.appendChild(label);
+  return row;
 }
 
 /** The connectors panel: what REFUGIO is actually plugged into.
@@ -167,20 +294,23 @@ async function showConnectors() {
     return;
   }
 
+  body.innerHTML = "";
   if (!data.connectors?.length) {
     // An empty list right after launch means the pool hasn't read the config
     // yet, NOT that nothing is configured. Telling someone with three working
     // connectors to re-run the installer is worse than saying nothing.
-    body.innerHTML = data.starting
+    //
+    // The web-search section is still appended below: with no connectors at
+    // all it is the one thing here the user can actually switch on.
+    const none = document.createElement("div");
+    none.innerHTML = data.starting
       ? `<div class="conn-empty">Starting\u2026<br>
          <span class="conn-sub">Connectors take a few seconds to come up.</span></div>`
       : `<div class="conn-empty">No connectors configured.<br>
          <span class="conn-sub">Re-run the REFUGIO installer to add WhatsApp, reminders or notes.</span></div>`;
-    return;
+    body.appendChild(none);
   }
-
-  body.innerHTML = "";
-  for (const c of data.connectors) {
+  for (const c of data.connectors || []) {
     const row = document.createElement("div");
     row.className = "conn " + (c.state || (c.ok ? "ok" : "failed"));
 
@@ -339,6 +469,11 @@ async function showConnectors() {
     }
     body.appendChild(row);
   }
+
+  if (data.web) {
+    applyWebSetting(data.web);
+    body.appendChild(webSection(data.web));
+  }
   pendingNotice = null;
 }
 
@@ -452,9 +587,17 @@ async function send() {
   const text = els.input.value.trim();
   if (!text || state.streaming) return;
 
+  // Consume the arming here, before anything is sent. Clearing it in `finally`
+  // would leave it set for as long as the answer takes to stream — and if the
+  // turn failed, still set afterwards, so the next message would search
+  // without the user asking twice.
+  const web = state.webArmed;
+  setWebArmed(false);
+
   els.input.value = "";
   els.input.style.height = "auto";
   addMessage("user", text);
+  if (web) markWebTurn();
   setStreaming(true);
 
   const bubble = addMessage("assistant", "");
@@ -471,6 +614,7 @@ async function send() {
         message: text,
         conversation_id: state.conversationId,
         model: els.model.value || undefined,
+        web,
       }),
     });
 
@@ -593,6 +737,7 @@ els.thread.addEventListener("click", (e) => {
     btn.textContent = "copied"; setTimeout(() => (btn.textContent = "copy"), 1200);
   });
 });
+els.webArm.addEventListener("click", () => setWebArmed(!state.webArmed));
 els.status.addEventListener("click", showConnectors);
 els.newChat.addEventListener("click", newChat);
 els.model.addEventListener("change", () => { state.model = els.model.value; });

@@ -165,9 +165,37 @@ textarea {
 .send:disabled { opacity: .4; cursor: default; }
 .hint { max-width: 46rem; margin: var(--s2) auto 0; font-size: .6875rem; color: var(--ink-faint); }
 
+/* ── Web search ────────────────────────────────────────────
+   The one thing here that leaves the machine, so it never blends in: the
+   button stays quiet until armed, and arming raises a warning directly above
+   the box being typed into. Amber, not the accent — this is a caution, not an
+   error, and not a feature to be encouraged. */
+.web-arm {
+  flex: 0 0 auto; align-self: center;
+  border: 1px solid var(--border); background: none; color: var(--ink-faint);
+  border-radius: var(--radius-pill); font: 500 .75rem var(--font-sans);
+  padding: 4px var(--s3); cursor: pointer; white-space: nowrap;
+}
+.web-arm:hover { color: var(--ink); border-color: var(--ink-faint); }
+.web-arm.armed { background: #e8a33d; border-color: #e8a33d; color: #1b1508; }
+.web-warn {
+  max-width: 46rem; margin: 0 auto var(--s2);
+  padding: var(--s2) var(--s3); border-radius: var(--radius-sm);
+  border-left: 3px solid #e8a33d; background: var(--bg-surface-3);
+  font-size: .75rem; line-height: 1.1rem; color: var(--ink-muted);
+}
+/* Marks the turn in the scrollback — the composer warning is gone the instant
+   the message is sent. */
+.web-turn {
+  max-width: 46rem; margin: 0 auto var(--s3);
+  font-size: .6875rem; color: var(--ink-faint); text-align: center;
+}
+.conn.web .conn-dot { background: var(--ink-faint); }
+.conn.web.on .conn-dot { background: #e8a33d; }
+
 @media (max-width: 720px) {
   .rail { display: none; }
-  .thread, .composer-inner, .hint { max-width: none; }
+  .thread, .composer-inner, .hint, .web-warn, .web-turn { max-width: none; }
 }
 
 /* Tool activity — which connectors a turn actually used. */

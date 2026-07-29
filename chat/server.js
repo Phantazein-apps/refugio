@@ -22,6 +22,7 @@ import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import * as store from "./store.js";
 import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
+import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import { listModels, isUp, chatStream, complete, OLLAMA_BASE } from "./ollama.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,11 +53,30 @@ const SYSTEM_PROMPT =
 function toolPreamble(tools) {
   if (!tools.length) return "";
   const servers = [...new Set(tools.map((t) => t.function.name.split("__")[0]))];
-  return "\n\nYou have tools that read the user's own data on this machine" +
-    ` (${servers.join(", ")}). When a question is about that data, call the` +
-    " relevant tool instead of answering from memory. Never ask the user to" +
-    " paste in data you can fetch yourself — call the tool and use the result.";
+  const local = servers.filter((s) => s !== WEB_SERVER);
+  let out = "";
+  if (local.length) {
+    out += "\n\nYou have tools that read the user's own data on this machine" +
+      ` (${local.join(", ")}). When a question is about that data, call the` +
+      " relevant tool instead of answering from memory. Never ask the user to" +
+      " paste in data you can fetch yourself — call the tool and use the result.";
+  }
+  // Said separately, and only on a turn the user armed. Folding web search into
+  // the sentence above would describe it as one more local connector, which is
+  // the one thing it is not.
+  if (servers.includes(WEB_SERVER)) {
+    out += "\n\nFor this message only, the user has allowed you to search the" +
+      ` public web with ${WEB_TOOL.function.name}. Use it when the answer` +
+      " depends on current or external information you do not already have," +
+      " and keep the query short — it is sent to a search engine. Cite the" +
+      " links you used.";
+  }
+  return out;
 }
+
+// The prefix in `web__search`. Tool names are `server__tool` everywhere else,
+// so web search borrows the shape without being an MCP server.
+const WEB_SERVER = WEB_TOOL.function.name.split("__")[0];
 
 const log = (m) => console.log(`[chat] ${m}`);
 
@@ -134,7 +154,10 @@ let connectorsSettled = false;
 const SETTINGS_PATH = join(DATA_DIR, "connector-settings.json");
 
 function loadSettings() {
-  const defaults = defaultSettings();
+  // Web search rides in the same file: it is one boolean, it belongs with the
+  // other "what may REFUGIO reach" answers, and a user who opens this file
+  // should see every one of them in one place.
+  const defaults = { ...defaultSettings(), web: { ...WEB_DEFAULTS } };
   try {
     const saved = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
     // Merge over defaults so an option added in a later version starts off,
@@ -212,6 +235,20 @@ function countConnectors(rows) {
     ready += Math.max(1, r.accounts.length);
   }
   return { ready, failed, connecting, degraded };
+}
+
+/** What the connectors panel needs, in one shape.
+ *
+ *  Web search travels with the connectors because that panel is where the
+ *  question "what can REFUGIO reach?" is answered — but as its own field, not
+ *  as a row in the list, because it is the one entry that isn't local. */
+function connectorPayload(rows) {
+  return {
+    connectors: rows,
+    starting: !connectorsSettled,
+    ...countConnectors(rows),
+    web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+  };
 }
 
 // Model selection: explicit override, else whatever Ollama has (first entry).
@@ -303,11 +340,30 @@ async function maybeTitle(convoId, firstMessage, model) {
   return title;
 }
 
+/** Execute one tool call.
+ *
+ *  The web check is repeated here rather than trusted from the tools list. A
+ *  model can name a tool it was never offered — either by copying one out of
+ *  the conversation history or by inventing it — and "we didn't put it in the
+ *  array" is not the guarantee the user was given. The guarantee is that no
+ *  search leaves this machine on a turn they did not arm, so it is enforced at
+ *  the only place that actually sends anything. */
+async function runTool(call, webArmed) {
+  if (call.name === WEB_TOOL.function.name) {
+    if (!webArmed) return "Error: web search is not enabled for this message.";
+    const q = String(call.args?.query ?? "").trim();
+    log(`web search: ${JSON.stringify(q.slice(0, 80))}`);
+    return formatResults(q, await webSearch(q));
+  }
+  if (!mcp) return `Error: no tool named ${call.name}`;
+  return mcp.call(call.name, call.args);
+}
+
 /**
  * Run one turn and stream it to the client as SSE.
  * Events: `token` (incremental text), `done` (final metadata), `error`.
  */
-async function streamTurn(res, { conversationId, message, model, persistUser }) {
+async function streamTurn(res, { conversationId, message, model, persistUser, web = false }) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -322,7 +378,12 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 
   send("start", { conversation_id: conversationId });
 
-  const tools = mcp ? mcp.toolDefs(TOOL_LIMIT) : [];
+  // Two conditions, both required, and they mean different things: the setting
+  // is "I am willing to search the web at all", the flag is "search on THIS
+  // message". Neither implies the other, so the model is only handed the tool
+  // when the user has just asked for it.
+  const webArmed = !!web && !!connectorSettings.web?.enabled;
+  const tools = [...(mcp ? mcp.toolDefs(TOOL_LIMIT) : []), ...(webArmed ? [WEB_TOOL] : [])];
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT + toolPreamble(tools) },
@@ -367,7 +428,7 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 
       for (const call of toolCalls) {
         send("tool", { name: call.name, args: call.args });
-        const result = await mcp.call(call.name, call.args);
+        const result = await runTool(call, webArmed);
         toolsUsed.push(call.name);
         send("tool_result", { name: call.name, ok: !result.startsWith("Error"), preview: result.slice(0, 160) });
         messages.push({ role: "tool", content: result, tool_name: call.name });
@@ -411,9 +472,7 @@ async function route(req, res, url) {
     }
     connectorCache = { at: 0, rows: [] };          // force a fresh read
     const rows = await connectorRows({ force: true });
-    return sendJson(res, 200, {
-      connectors: rows, starting: !connectorsSettled, ...countConnectors(rows),
-    });
+    return sendJson(res, 200, connectorPayload(rows));
   }
 
   if (p === "/api/chat/connectors/settings" && req.method === "POST") {
@@ -428,16 +487,25 @@ async function route(req, res, url) {
     mcp?.setSettings(connectorSettings);
     connectorCache = { at: 0, rows: [] };
     const rows = await connectorRows({ force: true });
-    return sendJson(res, 200, {
-      connectors: rows, starting: !connectorsSettled, ...countConnectors(rows),
-    });
+    return sendJson(res, 200, connectorPayload(rows));
   }
 
   if (p === "/api/chat/connectors") {
     const rows = await connectorRows({ force: true });
-    return sendJson(res, 200, {
-      connectors: rows, starting: !connectorsSettled, ...countConnectors(rows),
-    });
+    return sendJson(res, 200, connectorPayload(rows));
+  }
+
+  // Web search gets its own route rather than joining the connector-options
+  // one. That route validates against CONNECTOR_OPTIONS, where every entry
+  // narrows a connector's scope and declares the mechanism that enforces it;
+  // this widens REFUGIO's reach past the machine and enforces nothing. Making
+  // it pass that validator would have meant loosening it for everything.
+  if (p === "/api/chat/web" && req.method === "POST") {
+    const body = await readBody(req);
+    connectorSettings.web = { ...connectorSettings.web, enabled: !!body.enabled };
+    saveSettings(connectorSettings);
+    log(`web search ${connectorSettings.web.enabled ? "enabled" : "disabled"}`);
+    return sendJson(res, 200, connectorPayload(await connectorRows()));
   }
 
   if (p === "/api/chat/status") {
@@ -456,6 +524,9 @@ async function route(req, res, url) {
       // true / false / null-when-unrated. The UI warns only on an explicit
       // false — a model we've never rated is unknown, not incapable.
       modelTools: modelSupportsTools(model),
+      // The composer needs this on every poll: when web search is switched off
+      // the per-message control must disappear, not sit there doing nothing.
+      web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
     });
   }
 
@@ -470,7 +541,7 @@ async function route(req, res, url) {
       });
     }
     const conversationId = (body.conversation_id || "").trim() || randomUUID().replace(/-/g, "");
-    return streamTurn(res, { conversationId, message, model, persistUser: true });
+    return streamTurn(res, { conversationId, message, model, persistUser: true, web: body.web });
   }
 
   // Regenerate / edit both re-run the last turn; they differ only in what the
@@ -484,12 +555,15 @@ async function route(req, res, url) {
 
     if (p === "/api/chat/regenerate") {
       store.truncateFrom(conversationId, { lastAssistant: true });
-      return streamTurn(res, { conversationId, message: "", model, persistUser: false });
+      // `web` is not remembered from the original turn. Re-running is a new
+      // decision, and silently repeating a search the user armed once would
+      // make "manual each time" untrue on exactly the path they aren't watching.
+      return streamTurn(res, { conversationId, message: "", model, persistUser: false, web: body.web });
     }
     const edited = (body.message || "").trim();
     if (!edited) return sendJson(res, 400, { error: "message is required" });
     store.truncateFrom(conversationId, { lastAssistant: false });
-    return streamTurn(res, { conversationId, message: edited, model, persistUser: true });
+    return streamTurn(res, { conversationId, message: edited, model, persistUser: true, web: body.web });
   }
 
   if (p === "/api/chat/conversations" && req.method === "GET") {
