@@ -118,14 +118,15 @@ async function refreshStatus() {
     // person has is WhatsApp, Reminders and Things. A failure gets its own
     // clause rather than being folded into the total — a healthy-looking count
     // while WhatsApp was silently down is exactly what hid a real outage.
-    const c = s.connectors || { ready: 0, failed: 0, connecting: 0 };
+    const c = s.connectors || { ready: 0, failed: 0, connecting: 0, degraded: 0 };
     els.statusText.textContent = !s.available ? "no model"
       : c.failed ? `${c.ready} connected \u00b7 ${c.failed} failed`
+      : c.degraded ? `${c.ready} connected \u00b7 ${c.degraded} offline`
       : c.connecting && !c.ready ? "connecting\u2026"
       : c.connecting ? `${c.ready} connector${c.ready === 1 ? "" : "s"} \u00b7 ${c.connecting} connecting`
       : c.ready ? `ready \u00b7 ${c.ready} connector${c.ready === 1 ? "" : "s"}`
       : "ready \u00b7 no connectors";
-    if (s.available && c.failed) els.status.classList.add("warn");
+    if (s.available && (c.failed || c.degraded)) els.status.classList.add("warn");
     els.status.title = "Click for connector details";
     showModelWarning(s);
     // Label each model with what it needs against the RAM free right now.
@@ -225,7 +226,7 @@ async function showConnectors() {
   body.innerHTML = "";
   for (const c of data.connectors) {
     const row = document.createElement("div");
-    row.className = "conn" + (c.ok ? "" : c.state === "connecting" ? " starting" : " failed");
+    row.className = "conn " + (c.state || (c.ok ? "ok" : "failed"));
 
     const head = document.createElement("div");
     head.className = "conn-head";
@@ -236,8 +237,10 @@ async function showConnectors() {
     name.textContent = c.label || c.id;
     const meta = document.createElement("span");
     meta.className = "conn-meta";
+    const toolCount = `${c.tools} tool${c.tools === 1 ? "" : "s"}`;
     meta.textContent = c.state === "connecting" ? "connecting\u2026"
-      : c.ok ? `${c.tools} tool${c.tools === 1 ? "" : "s"}` : "not working";
+      : c.state === "degraded" ? `${toolCount} \u00b7 not reachable`
+      : c.ok ? toolCount : "not working";
     head.append(dot, name, meta);
     row.appendChild(head);
 
@@ -265,9 +268,26 @@ async function showConnectors() {
     // of the native window, and it stops being true the moment something
     // breaks — which is exactly when a non-technical user is least able to
     // open one.
-    if (c.state === "failed") {
+    // Degraded counts as needing help too. A connector that is running but
+    // can't reach its account was previously a dead end: the panel diagnosed
+    // "offline" and then offered nothing to do about it.
+    if (c.state === "failed" || c.state === "degraded") {
       const actions = document.createElement("div");
       actions.className = "conn-actions";
+
+      // Re-linking is the usual fix for an unreachable account — WhatsApp drops
+      // a linked device after long inactivity, and no amount of restarting
+      // brings it back. Listed first for a degraded connector for that reason.
+      if (c.setup) {
+        const link = document.createElement("a");
+        link.className = "conn-btn" + (c.state === "degraded" ? " primary" : "");
+        link.textContent = c.setup.label;
+        link.href = c.setup.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.title = c.setup.hint || "";
+        actions.appendChild(link);
+      }
 
       if (c.conflict) {
         // Name the process. It may be a leftover, or it may be Claude Desktop
@@ -287,7 +307,7 @@ async function showConnectors() {
 
       const retry = document.createElement("button");
       retry.className = "conn-btn";
-      retry.textContent = "Retry";
+      retry.textContent = c.state === "degraded" ? "Reconnect" : "Retry";
       retry.onclick = () => runFix(retry, c.id, "retry");
       actions.appendChild(retry);
 

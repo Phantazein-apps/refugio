@@ -124,3 +124,33 @@ export function allowedStatuses(settings = {}) {
     .flatMap((o) => o.enumAdd);
   return [...THINGS_BASE_STATUSES, ...extra];
 }
+
+/**
+ * Where a connector sends the user to (re)authorise itself.
+ *
+ * A connector can be running perfectly while the account behind it is
+ * unreachable — WhatsApp unlinks a device after long inactivity, and the fix
+ * is to scan a QR code, not to restart anything. Without this the panel can
+ * diagnose "offline" and then offer nothing, which is the dead end the whole
+ * panel exists to avoid.
+ *
+ * `envPort` names the variable the supervisor sets when it writes the connector
+ * config, so the URL follows a port change rather than hardcoding one.
+ */
+export const CONNECTOR_SETUP = {
+  whatsapp: {
+    envPort: "HERMENEIA_QR_PORT",
+    defaultPort: 3456,
+    path: "/setup",
+    label: "Open WhatsApp setup",
+    hint: "Shows a QR code to link (or re-link) this phone.",
+  },
+};
+
+/** The setup URL for a connector, from its own configured environment. */
+export function setupUrlFor(server, spec) {
+  const cfg = CONNECTOR_SETUP[server];
+  if (!cfg) return null;
+  const port = parseInt(spec?.env?.[cfg.envPort], 10) || cfg.defaultPort;
+  return { url: `http://127.0.0.1:${port}${cfg.path}`, label: cfg.label, hint: cfg.hint };
+}

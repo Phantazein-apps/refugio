@@ -20,7 +20,7 @@ import { homedir } from "os";
 
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import * as store from "./store.js";
-import { CONNECTOR_OPTIONS, defaultSettings, optionsFor } from "./connector-options.js";
+import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
 import { listModels, isUp, chatStream, complete, OLLAMA_BASE } from "./ollama.js";
 
@@ -173,6 +173,9 @@ async function connectorRows({ force = false } = {}) {
   const rows = (await mcp.describe()).map((r) => ({
     ...r,
     label: labelFor(r.id),
+    // Offered whenever the connector isn't fully healthy — a running connector
+    // whose account is unreachable usually needs re-linking, not restarting.
+    setup: r.state === "ok" ? null : setupUrlFor(r.id, mcp.servers.get(r.id)?.spec),
     options: optionsFor(r.id).map((o) => ({
       key: o.key, label: o.label, hint: o.hint || null,
       value: !!connectorSettings[r.id]?.[o.key],
@@ -193,13 +196,16 @@ async function connectorRows({ force = false } = {}) {
  *  than folded in: a healthy-looking total while WhatsApp was silently down is
  *  the exact reassuring-but-wrong signal that hid a real outage. */
 function countConnectors(rows) {
-  let ready = 0, failed = 0, connecting = 0;
+  let ready = 0, failed = 0, connecting = 0, degraded = 0;
   for (const r of rows) {
     if (r.state === "connecting") { connecting++; continue; }
     if (!r.ok) { failed++; continue; }
+    // Running but unreachable is its own category. Counting it as ready is how
+    // a user ends up asking about WhatsApp messages that can't be fetched.
+    if (r.state === "degraded") { degraded++; continue; }
     ready += Math.max(1, r.accounts.length);
   }
-  return { ready, failed, connecting };
+  return { ready, failed, connecting, degraded };
 }
 
 // Model selection: explicit override, else whatever Ollama has (first entry).
