@@ -299,7 +299,9 @@ textarea {
   font: 500 .75rem var(--font-sans); padding: 5px var(--s3); cursor: pointer;
 }
 .conn-btn:hover:not(:disabled) { border-color: var(--ink-faint); }
-a.conn-btn { text-decoration: none; display: inline-block; }
+/* The fallback is a sentence, not a rival button. */
+.conn-next { margin: var(--s2) 0 0 15px; font-size: .75rem; color: var(--ink-faint); }
+.conn-next a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .conn-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .conn-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .conn-btn:disabled { opacity: .55; cursor: default; }

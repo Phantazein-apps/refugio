@@ -268,50 +268,50 @@ async function showConnectors() {
     // of the native window, and it stops being true the moment something
     // breaks — which is exactly when a non-technical user is least able to
     // open one.
-    // Degraded counts as needing help too. A connector that is running but
-    // can't reach its account was previously a dead end: the panel diagnosed
-    // "offline" and then offered nothing to do about it.
+    // ONE button. There is always a single best next thing to try, and asking
+    // someone to choose between "Reconnect" and "Retry" — which called the
+    // same endpoint — was a choice with no answer. The fallback is a sentence
+    // with a link, not a second button competing for the same click.
     if (c.state === "failed" || c.state === "degraded") {
-      const actions = document.createElement("div");
-      actions.className = "conn-actions";
-
-      // Re-linking is the usual fix for an unreachable account — WhatsApp drops
-      // a linked device after long inactivity, and no amount of restarting
-      // brings it back. Listed first for a degraded connector for that reason.
-      if (c.setup) {
-        const link = document.createElement("a");
-        link.className = "conn-btn" + (c.state === "degraded" ? " primary" : "");
-        link.textContent = c.setup.label;
-        link.href = c.setup.url;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.title = c.setup.hint || "";
-        actions.appendChild(link);
-      }
-
       if (c.conflict) {
-        // Name the process. It may be a leftover, or it may be Claude Desktop
+        // Name the process. It may be a leftover, or Claude Desktop
         // legitimately holding the same account — only the user knows which,
         // so show what is about to stop rather than just offering "Fix".
         const what = document.createElement("div");
         what.className = "conn-blocked";
         what.textContent = `Blocked by PID ${c.conflict.pid}: ${c.conflict.command}`;
         row.appendChild(what);
-
-        const stop = document.createElement("button");
-        stop.className = "conn-btn primary";
-        stop.textContent = `Stop it and retry`;
-        stop.onclick = () => runFix(stop, c.id, "resolve");
-        actions.appendChild(stop);
       }
 
-      const retry = document.createElement("button");
-      retry.className = "conn-btn";
-      retry.textContent = c.state === "degraded" ? "Reconnect" : "Retry";
-      retry.onclick = () => runFix(retry, c.id, "retry");
-      actions.appendChild(retry);
+      const actions = document.createElement("div");
+      actions.className = "conn-actions";
 
+      const btn = document.createElement("button");
+      btn.className = "conn-btn primary";
+      // Restarting while something else holds the lock just fails again, so
+      // when a blocker is identified that IS the action — not an extra option.
+      btn.textContent = c.conflict ? "Stop it and restart"
+        : c.state === "degraded" ? "Reconnect" : "Restart";
+      btn.onclick = () => runFix(btn, c.id, c.conflict ? "resolve" : "retry");
+      actions.appendChild(btn);
       row.appendChild(actions);
+
+      // Re-linking is the fallback, not the first thing to try: reconnecting is
+      // instant and usually enough, while re-linking means getting the phone
+      // out. Offer it as a next step for when the quick fix didn't work.
+      if (c.setup) {
+        const more = document.createElement("div");
+        more.className = "conn-next";
+        more.append(document.createTextNode("Still not working? "));
+        const link = document.createElement("a");
+        link.href = c.setup.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = c.setup.label;
+        link.title = c.setup.hint || "";
+        more.appendChild(link);
+        row.appendChild(more);
+      }
     }
 
     // Scope options. All off by default, and off always means narrower — the
