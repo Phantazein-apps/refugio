@@ -324,7 +324,20 @@ export class McpPool {
         // connections both land here, and reporting either as "no accounts"
         // UNDERCOUNTS, which the caller would then cache as though settled.
         row.accountsUnknown = !UNSUPPORTED_TOOL.test(e.message || "");
-        return row;
+
+        // A failed probe must not erase what we already knew. Without this the
+        // connector silently reverts to "no accounts", the offline check below
+        // has nothing to test, and a connector whose account is unreachable
+        // goes GREEN — the pill saying "1 offline" over three green dots.
+        if (row.accountsUnknown && s.lastAccounts?.length) {
+          row.accounts = s.lastAccounts;
+        } else if (row.accountsUnknown) {
+          // Never seen its accounts, and can't ask. Not an assertion of health.
+          row.state = "degraded";
+          return row;
+        } else {
+          return row;
+        }
       }
 
       // The call answered. If the payload isn't an account array the connector
@@ -350,6 +363,7 @@ export class McpPool {
       //
       // Only demoted when the connector reports accounts at all: a connector
       // with no account concept (Reminders, Things) is simply fine.
+      if (row.accounts.length) s.lastAccounts = row.accounts;
       if (row.accounts.length && !row.accounts.some((a) => a.connected)) {
         row.state = "degraded";
       }
