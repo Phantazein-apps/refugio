@@ -67,6 +67,12 @@ body {
 }
 .brand { font-weight: 600; letter-spacing: .04em; font-size: .8125rem; }
 .brand .dot { color: var(--accent); }
+.rail-toggle {
+  margin-left: auto; border: 0; background: none; color: var(--ink-faint);
+  cursor: pointer; font-size: .875rem; line-height: 1; padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.rail-toggle:hover { color: var(--ink); background: var(--bg-surface-3); }
 .new-chat {
   margin: var(--s3) var(--s4); padding: var(--s2) var(--s3);
   background: var(--accent); color: #fff; border: 0;
@@ -74,22 +80,153 @@ body {
   cursor: pointer; text-align: left;
 }
 .new-chat:hover { filter: brightness(1.08); }
+.new-chat .nc-mini { display: none; }
 .convos { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s4); }
+.convos-empty { padding: var(--s3) var(--s3); font-size: .75rem; color: var(--ink-faint); }
+
+/* Date buckets. A flat recency list stops being navigable somewhere around
+   thirty conversations — everything reads as equally important. */
+.convo-group {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s3) var(--s3) var(--s1);
+  font: 500 .6875rem var(--font-sans); color: var(--ink-faint);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.convo-group .cg-count { margin-left: auto; letter-spacing: 0; opacity: .7; }
+.convo-group[data-group="pinned"] { color: var(--accent); }
+
 .convo {
   display: flex; align-items: center; gap: var(--s2);
   padding: var(--s2) var(--s3); margin: 2px 0;
   border-radius: var(--radius-md); cursor: pointer; color: var(--ink-muted);
-  font-size: .8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: .8125rem; white-space: nowrap; overflow: hidden;
 }
 .convo:hover { background: var(--bg-surface-3); color: var(--ink); }
 .convo.active { background: var(--accent-soft); color: var(--ink); }
-.convo-title { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.convo-del {
-  opacity: 0; border: 0; background: none; color: var(--ink-faint);
-  cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px;
+.convo-glyph {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: var(--radius-sm);
+  display: grid; place-items: center; background: var(--bg-surface-3);
+  font: 600 .6875rem var(--font-sans); color: var(--ink-faint);
 }
-.convo:hover .convo-del { opacity: 1; }
+.convo.active .convo-glyph { background: var(--accent); color: #fff; }
+.convo-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.convo-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.convo-when { font-size: .625rem; line-height: .875rem; color: var(--ink-faint); }
+.convo-pin, .convo-del {
+  opacity: 0; border: 0; background: none; color: var(--ink-faint);
+  cursor: pointer; line-height: 1; padding: 0 2px; flex: 0 0 auto;
+}
+.convo-del { font-size: 1rem; }
+.convo-pin { display: grid; place-items: center; }
+.convo:hover .convo-pin, .convo:hover .convo-del { opacity: 1; }
+/* A pinned chat stays marked when the pointer is elsewhere — that is the
+   whole point of pinning it. */
+.convo.pinned .convo-pin { opacity: 1; color: var(--accent); }
+.convo-pin:hover { color: var(--accent); }
 .convo-del:hover { color: var(--accent); }
+
+/* Collapsed rail: glyphs only, tooltips for names. Kept as a real column
+   rather than hidden entirely, so switching chats never needs two clicks. */
+.rail.collapsed { --rail-w: 56px; }
+.rail.collapsed .brand,
+.rail.collapsed .convo-text,
+.rail.collapsed .convo-pin,
+.rail.collapsed .convo-del,
+.rail.collapsed .convos-empty,
+.rail.collapsed .new-chat .nc-full { display: none; }
+.rail.collapsed .rail-toggle { margin: 0 auto; }
+.rail.collapsed .rail-head { padding: var(--s4) var(--s2); }
+.rail.collapsed .new-chat { margin: var(--s3) var(--s2); text-align: center; }
+.rail.collapsed .new-chat .nc-mini { display: inline; }
+.rail.collapsed .convo { justify-content: center; padding: var(--s2) 0; }
+/* The group label has nowhere to go at 56px, so the grouping survives as the
+   rule between buckets — the shape of the list is the part worth keeping. */
+.rail.collapsed .convo-group {
+  height: 1px; padding: 0; margin: var(--s3) var(--s3);
+  background: var(--border-subtle); overflow: hidden;
+}
+/* The label and count have to go, not just be clipped — at 1px tall they
+   showed through as a row of dashes that read like a broken divider. */
+.rail.collapsed .cg-label, .rail.collapsed .cg-count { display: none; }
+
+/* ── Sources gutter ────────────────────────────────────────
+   Collapsed to a 44px tab by default so the thread keeps the width — the
+   answer is what people came for; the evidence is what they check. */
+.gutter {
+  flex: 0 0 320px; width: 320px;
+  background: var(--bg-surface); border-left: 1px solid var(--border-subtle);
+  display: flex; min-height: 0;
+}
+.gutter.is-collapsed { flex-basis: 44px; width: 44px; }
+/* An author `display` beats the UA stylesheet's [hidden] rule, so without this
+   the empty panel sits there before the first answer showing "0 Sources". */
+.gutter[hidden] { display: none; }
+.gutter-rail {
+  display: none; flex: 0 0 44px; width: 44px;
+  border: 0; border-left: 1px solid var(--border-subtle);
+  background: var(--bg-surface); color: var(--ink-muted); cursor: pointer;
+  flex-direction: column; align-items: center; gap: var(--s2); padding-top: var(--s4);
+}
+.gutter.is-collapsed .gutter-rail { display: flex; }
+.gutter.is-collapsed .gutter-panel { display: none; }
+.gutter-rail:hover { color: var(--ink); background: var(--bg-surface-2); }
+.gr-count {
+  min-width: 20px; height: 20px; border-radius: var(--radius-pill);
+  background: var(--accent); color: #fff; display: grid; place-items: center;
+  font: 600 .6875rem var(--font-sans);
+}
+/* Vertical, so the word reads down the tab instead of wrapping to nothing. */
+.gr-label {
+  writing-mode: vertical-rl; font: 500 .6875rem var(--font-sans);
+  letter-spacing: .08em; text-transform: uppercase;
+}
+
+.gutter-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.gutter-head {
+  display: flex; align-items: center; padding: var(--s4);
+  border-bottom: 1px solid var(--border-subtle); font-size: .8125rem;
+}
+.gutter-x {
+  margin-left: auto; border: 0; background: none; color: var(--ink-faint);
+  font-size: 1.25rem; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.gutter-x:hover { color: var(--accent); }
+.gutter-body { flex: 1; overflow-y: auto; padding: var(--s3) var(--s4) var(--s6); }
+
+.src {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  padding: var(--s3); margin-bottom: var(--s3); background: var(--bg-surface-2);
+}
+.src.failed { border-color: var(--accent); }
+.src.flash { border-color: var(--accent); background: var(--accent-soft); }
+.src-head { display: flex; align-items: center; gap: var(--s2); }
+.src-n {
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: var(--radius-pill);
+  background: var(--bg-surface-3); color: var(--ink-muted);
+  display: grid; place-items: center; font: 600 .625rem var(--font-sans);
+}
+.src-title { font: 500 .75rem var(--font-sans); overflow-wrap: anywhere; }
+.src-args {
+  margin-top: var(--s2); font: 400 .6875rem/1rem var(--font-mono);
+  color: var(--ink-faint); overflow-wrap: anywhere;
+}
+.src-links { display: flex; flex-direction: column; gap: 2px; margin-top: var(--s2); }
+.src-links a {
+  font-size: .75rem; color: var(--accent);
+  text-decoration: underline; text-underline-offset: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.src-body {
+  margin: var(--s2) 0 0; max-height: 9rem; overflow: hidden;
+  font: 400 .6875rem/1rem var(--font-mono); color: var(--ink-muted);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.src.expanded .src-body { max-height: 28rem; overflow-y: auto; }
+.src-more {
+  margin-top: var(--s2); border: 0; background: none; padding: 0; cursor: pointer;
+  font: 500 .6875rem var(--font-sans); color: var(--accent);
+}
+.src-trunc { margin-top: var(--s2); font-size: .625rem; color: var(--ink-faint); }
 
 /* ── Main ──────────────────────────────────────────────── */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -140,6 +277,35 @@ body {
 .empty { text-align: center; color: var(--ink-faint); padding-top: 18vh; }
 .empty h1 { font: 600 1.75rem/2.125rem var(--font-sans); color: var(--ink); margin: 0 0 var(--s2); }
 .empty .sub { font-size: .875rem; }
+/* ── Waiting ───────────────────────────────────────────────
+   A local model can take seconds before the first token. Blank space for
+   those seconds reads as a hang, so both waits move. */
+.skel { padding: var(--s6) 0; }
+.skel-row {
+  height: 12px; border-radius: var(--radius-sm); margin-bottom: var(--s3);
+  background: linear-gradient(90deg,
+    var(--bg-surface-3) 25%, var(--bg-surface-2) 50%, var(--bg-surface-3) 75%);
+  background-size: 300% 100%; animation: skel 1.4s ease-in-out infinite;
+}
+.skel-row.w70 { width: 70%; } .skel-row.w40 { width: 40%; }
+.skel-row.w85 { width: 85%; } .skel-row.w55 { width: 55%; }
+@keyframes skel { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+.bubble.thinking { min-height: 20px; }
+.dots { display: inline-flex; gap: 4px; align-items: center; height: 20px; }
+.dots i {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint);
+  animation: dot 1.2s ease-in-out infinite;
+}
+.dots i:nth-child(2) { animation-delay: .15s; }
+.dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .skel-row, .dots i { animation: none; }
+  .dots i { opacity: .5; }
+}
+
 .err {
   border: 1px solid var(--accent); background: var(--accent-soft);
   color: var(--ink); padding: var(--s3); border-radius: var(--radius-md);
@@ -165,19 +331,52 @@ textarea {
 .send:disabled { opacity: .4; cursor: default; }
 .hint { max-width: 46rem; margin: var(--s2) auto 0; font-size: .6875rem; color: var(--ink-faint); }
 
+/* ── Web search ────────────────────────────────────────────
+   The one thing here that leaves the machine, so it never blends in: the
+   button stays quiet until armed, and arming raises a warning directly above
+   the box being typed into. Amber, not the accent — this is a caution, not an
+   error, and not a feature to be encouraged. */
+.web-arm {
+  flex: 0 0 auto; align-self: center;
+  border: 1px solid var(--border); background: none; color: var(--ink-faint);
+  border-radius: var(--radius-pill); font: 500 .75rem var(--font-sans);
+  padding: 4px var(--s3); cursor: pointer; white-space: nowrap;
+}
+.web-arm:hover { color: var(--ink); border-color: var(--ink-faint); }
+.web-arm.armed { background: #e8a33d; border-color: #e8a33d; color: #1b1508; }
+.web-warn {
+  max-width: 46rem; margin: 0 auto var(--s2);
+  padding: var(--s2) var(--s3); border-radius: var(--radius-sm);
+  border-left: 3px solid #e8a33d; background: var(--bg-surface-3);
+  font-size: .75rem; line-height: 1.1rem; color: var(--ink-muted);
+}
+/* Marks the turn in the scrollback — the composer warning is gone the instant
+   the message is sent. */
+.web-turn {
+  max-width: 46rem; margin: 0 auto var(--s3);
+  font-size: .6875rem; color: var(--ink-faint); text-align: center;
+}
+.conn.web .conn-dot { background: var(--ink-faint); }
+.conn.web.on .conn-dot { background: #e8a33d; }
+
 @media (max-width: 720px) {
   .rail { display: none; }
-  .thread, .composer-inner, .hint { max-width: none; }
+  .thread, .composer-inner, .hint, .web-warn, .web-turn { max-width: none; }
+  /* Expanded, the panel would leave the thread about 60px wide. The tab stays
+     so the sources are still reachable. */
+  .gutter:not(.is-collapsed) { position: fixed; inset: 0 0 0 auto; width: 88vw; z-index: 40; }
 }
 
 /* Tool activity — which connectors a turn actually used. */
 .tools { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s2); }
+/* A button, not a label: it is the way into the sources panel. */
 .tool-chip {
   font: 500 .6875rem/1rem var(--font-mono);
   padding: 3px var(--s2); border-radius: var(--radius-pill);
   background: var(--bg-surface-3); color: var(--ink-muted);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle); cursor: pointer;
 }
+.tool-chip:hover { color: var(--ink); border-color: var(--ink-faint); }
 .tool-chip[data-state="running"] { border-color: var(--accent); color: var(--ink); }
 .tool-chip[data-state="ok"]      { border-color: #0dbd8b; }
 .tool-chip[data-state="failed"]  { border-color: var(--accent); color: var(--accent); }
@@ -194,6 +393,24 @@ textarea {
 .bubble a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .bubble hr { border: 0; border-top: 1px solid var(--border); margin: var(--s4) 0; }
 .bubble strong { font-weight: 600; }
+.bubble em { font-style: italic; }
+
+/* Tables. md.js emits these whenever a model formats one, and a table with no
+   borders reads as three stray columns of words — which is what "summarise my
+   reminders" produced before this existed. The wrapper scrolls on its own so a
+   wide table never makes the whole page scroll sideways. */
+.bubble .table-wrap {
+  overflow-x: auto; margin: 0 0 var(--s3);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+}
+.bubble table { border-collapse: collapse; width: 100%; font-size: .8125rem; }
+.bubble th, .bubble td {
+  text-align: left; padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--border-subtle); vertical-align: top;
+}
+.bubble th { font-weight: 600; background: var(--bg-surface-2); white-space: nowrap; }
+.bubble tbody tr:last-child td { border-bottom: 0; }
+.bubble tbody tr:hover td { background: var(--bg-surface-2); }
 
 /* Code block copy button */
 .bubble pre { position: relative; }
@@ -250,6 +467,10 @@ textarea {
 .conn-head { display: flex; align-items: center; gap: var(--s2); }
 .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #0dbd8b; flex: 0 0 auto; }
 .conn.failed .conn-dot { background: var(--accent); }
+.conn.connecting .conn-dot { background: var(--ink-faint); }
+/* Running, but the account behind it is unreachable — its tools will
+   return nothing. Amber, because it is neither working nor broken. */
+.conn.degraded .conn-dot { background: #e8a33d; }
 .conn-name { font-weight: 500; }
 .conn-meta { margin-left: auto; font-size: .6875rem; color: var(--ink-faint); }
 
@@ -259,6 +480,8 @@ textarea {
   color: var(--ink-muted);
 }
 .conn-acct.off { color: var(--accent); }
+/* Paired but not connected right now — a warning, not an error. */
+.conn-acct.idle { color: var(--ink-faint); }
 
 .conn-err {
   margin: var(--s2) 0 0 15px; padding: var(--s2);
@@ -266,6 +489,56 @@ textarea {
   font: 400 .6875rem/1rem var(--font-mono); color: var(--ink-muted);
   overflow-wrap: anywhere;
 }
+/* Scope options — all off by default, off always means narrower.
+   Checkbox on the left, then a COLUMN of label + hint. The hint was previously
+   a sibling of the label, so it competed for the same row and squeezed the
+   label into a stack of single words. */
+.conn-opt {
+  display: flex; align-items: flex-start; gap: var(--s2);
+  margin: var(--s2) 0 0 15px; font-size: .8125rem; cursor: pointer;
+}
+.conn-opt input {
+  accent-color: var(--accent); cursor: pointer;
+  margin: 0; flex: 0 0 auto; margin-top: 3px;   /* aligns with the first line */
+}
+.conn-opt-text { display: flex; flex-direction: column; min-width: 0; }
+.conn-opt-hint { font-size: .6875rem; line-height: 1rem; color: var(--ink-faint); }
+
+/* Fixing a connector, without a terminal. */
+.conn-blocked {
+  margin: var(--s2) 0 0 15px; font-size: .6875rem; color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.conn-actions { display: flex; gap: var(--s2); margin: var(--s3) 0 0 15px; }
+.conn-btn {
+  border: 1px solid var(--border); background: var(--bg-surface-2);
+  color: var(--ink); border-radius: var(--radius-md);
+  font: 500 .75rem var(--font-sans); padding: 5px var(--s3); cursor: pointer;
+}
+.conn-btn:hover:not(:disabled) { border-color: var(--ink-faint); }
+/* Why a connector is broken — stated before anything is clicked. */
+.conn-why {
+  margin: var(--s2) 0 0 15px; font-size: .75rem; line-height: 1.1rem;
+  color: var(--ink-muted);
+}
+
+/* Outcome of a fix. Must survive the panel redraw that follows one. */
+.conn-note {
+  margin: var(--s2) 0 0 15px; padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm); font-size: .75rem; line-height: 1.1rem;
+  border-left: 3px solid var(--ink-faint); background: var(--bg-surface-3);
+}
+.conn-note.good { border-left-color: #0dbd8b; }
+.conn-note.warn { border-left-color: #e8a33d; }
+.conn-note.bad  { border-left-color: var(--accent); }
+
+/* The fallback is a sentence, not a rival button. */
+.conn-next { margin: var(--s2) 0 0 15px; font-size: .75rem; color: var(--ink-faint); }
+.conn-next a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.conn-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.conn-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.conn-btn:disabled { opacity: .55; cursor: default; }
+
 .conn-empty { padding: var(--s4) 0; text-align: center; color: var(--ink-muted); }
 .conn-empty .conn-sub { font-size: .75rem; color: var(--ink-faint); }
 

@@ -39,6 +39,28 @@ xattr -cr "$DEST" 2>/dev/null || true
 
 echo "▸ Launching…"
 open "$DEST"
-echo "✓ Installed to /Applications and launched — look for the mountain in your menu bar."
+echo "✓ Installed to /Applications and launched."
 echo "  Menu: Open / Start / Stop REFUGIO · Launch at Login · Quit."
 echo "  Re-run ./install.sh to update."
+echo
+
+# The failure this app is prone to is invisible: it runs, and nothing appears.
+# Print what it decided, rather than leaving "look for the mountain" as the only
+# feedback when there is no mountain to look for.
+#
+# Long enough to outlast the app's own retries. At 3s this printed "(no log
+# yet)" — the placement check reads up to three times over six seconds, so the
+# script was asking before there was anything to say.
+sleep 10
+echo "▸ Menu bar placement:"
+if [ -f "$HOME/.refugio-logs/menubar.log" ]; then
+  tail -n 2 "$HOME/.refugio-logs/menubar.log" | sed 's/^/  /'
+else
+  echo "  (no log yet)"
+fi
+echo
+echo "  No icon yet? REFUGIO keeps asking for a slot for a minute before falling"
+echo "  back to a Dock icon — and keeps checking after that, so the icon returns"
+echo "  by itself once you close another menu-bar app. 'refugio restart' and"
+echo "  'refugio stop' work from a terminal either way, and 'refugio menubar'"
+echo "  relaunches this app and prints that log."

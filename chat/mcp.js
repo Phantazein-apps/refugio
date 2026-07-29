@@ -11,6 +11,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFileSync, existsSync } from "fs";
+import { execFile } from "child_process";
+import { forcedArgs, activeFilters, allowedStatuses, optionsFor } from "./connector-options.js";
 
 const log = (m) => console.log(`[chat:mcp] ${m}`);
 
@@ -70,6 +72,45 @@ function firstCause(stderr) {
   return (named || lines[0] || "").slice(0, 300);
 }
 
+/**
+ * Identify a process that is blocking a connector, well enough to offer
+ * stopping it from the UI.
+ *
+ * Single-instance connectors (Hermeneia guards one WhatsApp session this way)
+ * report the holder's PID when they refuse to start. That PID is the whole fix
+ * — but acting on it needs care, so two things are checked before it is ever
+ * offered as a button:
+ *
+ *   1. The PID comes from the connector's OWN error text, never from a request.
+ *      Nothing a caller sends can select what gets killed.
+ *   2. The live process must actually look like this connector. PIDs are
+ *      recycled, and "stop PID 36263" landing on something unrelated would be
+ *      a genuinely bad outcome for a click in a chat window.
+ *
+ * The command line is returned so the UI can show what it is about to stop —
+ * that process may legitimately belong to Claude Desktop rather than being a
+ * leftover, and only the user can judge that.
+ */
+async function conflictingProcess(errorText, spec) {
+  if (process.platform === "win32") return null;      // no ps; offer plain retry
+  const m = /already running \(PID (\d+)\)/i.exec(errorText || "");
+  if (!m) return null;
+  const pid = parseInt(m[1], 10);
+  if (!(pid > 1) || pid === process.pid) return null;
+
+  const command = await new Promise((resolve) => {
+    execFile("ps", ["-p", String(pid), "-o", "command="], { timeout: 3000 },
+      (err, stdout) => resolve(err ? null : (stdout || "").trim()));
+  });
+  if (!command) return null;
+
+  // It must be running the same entry point this connector is configured with.
+  const marker = (spec?.args || []).find((a) => typeof a === "string" && a.includes("/"));
+  if (!marker || !command.includes(marker)) return null;
+
+  return { pid, command };
+}
+
 // A server saying "I don't have that tool" is a definite answer. Anything else
 // (timeout, closed connection) means we don't know yet and must not be cached.
 const UNSUPPORTED_TOOL =
@@ -84,6 +125,14 @@ export class McpPool {
     // the thing a user most needs to see, so it must survive here with its
     // reason rather than simply be absent.
     this.servers = new Map();   // server name -> { name, tools, ok, error }
+    // Per-connector scope chosen by the user. Held here because BOTH the schema
+    // handed to the model and the call path must reflect the same choice — a
+    // narrowed enum the call path didn't also enforce would be advisory only.
+    this.settings = {};         // server name -> { [optionKey]: boolean }
+  }
+
+  setSettings(settings) {
+    this.settings = settings || {};
   }
 
   /**
@@ -109,8 +158,8 @@ export class McpPool {
     const servers = Object.entries(config.mcpServers || {})
       .filter(([name]) => !only || only.includes(name));
 
-    for (const [name] of servers) {
-      this.servers.set(name, { name, tools: 0, ok: false, error: null });
+    for (const [name, spec] of servers) {
+      this.servers.set(name, { name, tools: 0, ok: false, error: null, spec });
     }
 
     await Promise.all(servers.map(([name, spec]) =>
@@ -122,6 +171,59 @@ export class McpPool {
 
     log(`${this.tools.length} tools from ${this.clients.size}/${servers.length} server(s)`);
     return this;
+  }
+
+  /**
+   * Reconnect one connector, in place.
+   *
+   * The point is that a failure is recoverable without a terminal: whatever
+   * was in the way (a stale process holding a lock, a connector that hadn't
+   * finished installing) can be dealt with and the connector retried from the
+   * UI. Its old tools are dropped first so a partial previous connect can't
+   * leave duplicates behind.
+   */
+  async reconnect(name, { timeoutMs = 20000 } = {}) {
+    const entry = this.servers.get(name);
+    if (!entry) throw new Error(`unknown connector "${name}"`);
+
+    try { await this.clients.get(name)?.close(); } catch { /* already gone */ }
+    this.clients.delete(name);
+    const prefix = `${name}${SEP}`;
+    this.tools = this.tools.filter((t) => !t.function.name.startsWith(prefix));
+    for (const key of [...this.byName.keys()]) {
+      if (key.startsWith(prefix)) this.byName.delete(key);
+    }
+    Object.assign(entry, { tools: 0, ok: false, error: null });
+
+    try {
+      await this.#connectOne(name, entry.spec, timeoutMs);
+    } catch (e) {
+      entry.error = e.message;
+      log(`"${name}" retry failed: ${e.message}`);
+    }
+    return entry;
+  }
+
+  /**
+   * Stop whatever is blocking a connector, then retry it.
+   *
+   * The PID is re-derived from the connector's current error and re-verified
+   * here rather than taken from the caller — the check must sit next to the
+   * kill, or a later refactor could quietly separate them.
+   */
+  async resolveConflict(name) {
+    const entry = this.servers.get(name);
+    if (!entry) throw new Error(`unknown connector "${name}"`);
+    const conflict = await conflictingProcess(entry.error, entry.spec);
+    if (!conflict) throw new Error("nothing identifiable is blocking this connector");
+
+    try { process.kill(conflict.pid, "SIGTERM"); }
+    catch (e) { throw new Error(`could not stop PID ${conflict.pid}: ${e.message}`); }
+    log(`stopped PID ${conflict.pid} blocking "${name}"`);
+
+    // Give it a moment to release the lock before racing it for the same one.
+    await new Promise((r) => setTimeout(r, 1200));
+    return this.reconnect(name);
   }
 
   async #connectOne(name, spec, timeoutMs) {
@@ -200,9 +302,16 @@ export class McpPool {
    */
   async describe({ timeoutMs = 5000 } = {}) {
     return Promise.all([...this.servers.values()].map(async (s) => {
-      const row = { id: s.name, tools: s.tools, ok: s.ok, error: s.error,
-                    accounts: [], accountsUnknown: false };
-      if (!s.ok) return row;
+      // Three states, not two. A server that has neither connected nor failed
+      // is still starting — reporting that as a failure (or as "none
+      // configured") is a confident lie during the first ~15 seconds.
+      const state = s.ok ? "ok" : s.error ? "failed" : "connecting";
+      const row = { id: s.name, tools: s.tools, ok: s.ok, state, error: s.error,
+                    accounts: [], accountsUnknown: false, conflict: null };
+      if (!s.ok) {
+        if (state === "failed") row.conflict = await conflictingProcess(s.error, s.spec);
+        return row;
+      }
       let raw;
       try {
         raw = await withTimeout(
@@ -215,7 +324,20 @@ export class McpPool {
         // connections both land here, and reporting either as "no accounts"
         // UNDERCOUNTS, which the caller would then cache as though settled.
         row.accountsUnknown = !UNSUPPORTED_TOOL.test(e.message || "");
-        return row;
+
+        // A failed probe must not erase what we already knew. Without this the
+        // connector silently reverts to "no accounts", the offline check below
+        // has nothing to test, and a connector whose account is unreachable
+        // goes GREEN — the pill saying "1 offline" over three green dots.
+        if (row.accountsUnknown && s.lastAccounts?.length) {
+          row.accounts = s.lastAccounts;
+        } else if (row.accountsUnknown) {
+          // Never seen its accounts, and can't ask. Not an assertion of health.
+          row.state = "degraded";
+          return row;
+        } else {
+          return row;
+        }
       }
 
       // The call answered. If the payload isn't an account array the connector
@@ -232,16 +354,60 @@ export class McpPool {
           }));
         }
       } catch { /* not JSON — not an accounts connector */ }
+
+      // "The connector is running" and "the account it fronts is reachable"
+      // are different facts, and showing the first as healthy while the second
+      // is false reads as a contradiction — a green dot above the word
+      // "offline". A WhatsApp connector whose account is offline still lists
+      // its tools, and every one of them will come back empty or stale.
+      //
+      // Only demoted when the connector reports accounts at all: a connector
+      // with no account concept (Reminders, Things) is simply fine.
+      if (row.accounts.length) s.lastAccounts = row.accounts;
+      if (row.accounts.length && !row.accounts.some((a) => a.connected)) {
+        row.state = "degraded";
+      }
       return row;
     }));
   }
 
+  /** Apply the user's scope to the schema the model is shown.
+   *
+   *  Narrowing here as well as at call time is not redundant: a model told it
+   *  may ask for "someday" and then refused is a wasted round trip on a machine
+   *  where every round trip is seconds. Tell it the truth up front. */
+  #scoped(tools) {
+    const things = this.settings.things;
+    if (!things) return tools;
+    const allowed = allowedStatuses(things);
+    return tools.map((t) => {
+      if (!t.function.name.endsWith(`${SEP}things3_get_todos`)) return t;
+      const status = t.function.parameters?.properties?.status;
+      if (!status) return t;
+      return {
+        ...t,
+        function: {
+          ...t.function,
+          parameters: {
+            ...t.function.parameters,
+            properties: {
+              ...t.function.parameters.properties,
+              status: { ...status, enum: allowed,
+                        description: `Filter by Things 3 list (available: ${allowed.join(", ")})` },
+            },
+          },
+        },
+      };
+    });
+  }
+
   toolDefs(limit = 0) {
-    if (limit <= 0) return this.tools;
-    if (this.tools.length <= limit) return this.tools;
+    const all = this.#scoped(this.tools);
+    if (limit <= 0) return all;
+    if (all.length <= limit) return all;
 
     const queues = new Map();
-    for (const t of this.tools) {
+    for (const t of all) {
       const server = t.function.name.split(SEP)[0];
       if (!queues.has(server)) queues.set(server, []);
       queues.get(server).push(t);
@@ -262,7 +428,7 @@ export class McpPool {
     // Once, not on every status poll.
     if (!this._cappedWarned) {
       this._cappedWarned = true;
-      log(`capped at ${limit} of ${this.tools.length} tools across ` +
+      log(`capped at ${limit} of ${all.length} tools across ` +
           `${queues.size} server(s) — raise REFUGIO_TOOL_LIMIT to offer more`);
     }
     return out;
@@ -286,13 +452,37 @@ export class McpPool {
     const client = this.clients.get(entry.server);
     if (!client) return `Error: server "${entry.server}" is not connected`;
 
+    const settings = this.settings[entry.server] || {};
+    const filters = activeFilters(entry.server, settings);
+
+    // The user's scope wins over the model's arguments. Merging the other way
+    // would make every checkbox a suggestion the model could decline.
+    let sendArgs = { ...(args || {}), ...forcedArgs(entry.server, entry.tool, settings) };
+
+    // Things 3's status is an enum we narrow in the schema; a model can still
+    // emit a value outside it, so drop disallowed values rather than trusting
+    // the schema to have been obeyed.
+    if (entry.server === "things" && sendArgs.status) {
+      if (!allowedStatuses(settings).includes(sendArgs.status)) {
+        return `Error: "${sendArgs.status}" is switched off in REFUGIO's connector settings. ` +
+          `Allowed right now: ${allowedStatuses(settings).join(", ")}.`;
+      }
+    }
+
+    // Filtering happens after the tool applied its own limit, so ask for more
+    // when we know we're about to discard some. Imperfect, and deliberately
+    // visible here rather than hidden.
+    if (filters.length && typeof sendArgs.limit === "number") {
+      sendArgs = { ...sendArgs, limit: Math.min(sendArgs.limit * 3, 200) };
+    }
+
     try {
       const res = await withTimeout(
-        client.callTool({ name: entry.tool, arguments: args || {} }),
+        client.callTool({ name: entry.tool, arguments: sendArgs }),
         timeoutMs,
         `${qualifiedName}`
       );
-      return flattenContent(res);
+      return applyFilters(flattenContent(res), filters, args?.limit);
     } catch (e) {
       return `Error calling ${qualifiedName}: ${e.message}`;
     }
@@ -320,6 +510,55 @@ function flattenContent(result) {
   return text.length > RESULT_CHARS
     ? text.slice(0, RESULT_CHARS) + "\n…(truncated — ask for a narrower range for more detail)"
     : text;
+}
+
+/**
+ * Drop rows the user has scoped out, where the connector offers no parameter
+ * for it.
+ *
+ * Only touches JSON array payloads — anything else is returned untouched rather
+ * than guessed at, because silently mangling a tool result would be worse than
+ * not filtering. A note is appended when rows were removed so the model does
+ * not treat a filtered page as the complete picture and confidently tell the
+ * user they have no group chats.
+ */
+function applyFilters(text, filters, limit) {
+  if (!filters.length || !text) return text;
+
+  let rows;
+  try {
+    const parsed = JSON.parse(text);
+    rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : null);
+    if (!rows) return text;
+    var wrapped = !Array.isArray(parsed);
+    var envelope = parsed;
+  } catch { return text; }
+
+  const before = rows.length;
+  let kept = rows;
+
+  if (filters.includes("groups")) {
+    // WhatsApp group JIDs end in @g.us; one-to-one end in @s.whatsapp.net.
+    kept = kept.filter((r) => {
+      const jid = r?.jid || r?.chat_jid || r?.chatJid || "";
+      return !String(jid).endsWith("@g.us");
+    });
+  }
+
+  if (filters.includes("today")) {
+    const today = new Date().toISOString().slice(0, 10);
+    kept = kept.filter((r) => {
+      const due = r?.dueDate || r?.due_date || r?.remindMeDate || null;
+      return due ? String(due).slice(0, 10) <= today : false;
+    });
+  }
+
+  if (typeof limit === "number" && kept.length > limit) kept = kept.slice(0, limit);
+  const removed = before - kept.length;
+  const body = JSON.stringify(wrapped ? { ...envelope, items: kept } : kept, null, 2);
+  return removed > 0
+    ? `${body}\n\n(${removed} row${removed === 1 ? "" : "s"} hidden by the user's connector settings — this is not the full list.)`
+    : body;
 }
 
 function withTimeout(promise, ms, label) {

@@ -10,9 +10,13 @@
 </head>
 <body>
 <div class="app">
-  <aside class="rail">
-    <div class="rail-head"><span class="brand">REFUGIO<span class="dot">.</span></span></div>
-    <button class="new-chat" id="new-chat">+ New chat</button>
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <span class="brand">REFUGIO<span class="dot">.</span></span>
+      <button class="rail-toggle" id="rail-toggle" type="button"
+              title="Collapse history" aria-label="Collapse history">«</button>
+    </div>
+    <button class="new-chat" id="new-chat"><span class="nc-full">+ New chat</span><span class="nc-mini">+</span></button>
     <div class="convos" id="convos"></div>
   </aside>
 
@@ -32,14 +36,35 @@
     </div>
 
     <div class="composer">
+      <!-- Shown only while web search is armed, and only for the next message. -->
+      <div class="web-warn" id="web-warn" hidden></div>
       <div class="composer-inner">
+        <button class="web-arm" id="web-arm" type="button" hidden aria-pressed="false">
+          <span aria-hidden="true">🌐</span> Web
+        </button>
         <textarea id="input" rows="1" placeholder="Message REFUGIO…" autofocus></textarea>
         <button class="send" id="send" title="Send" disabled>↑</button>
       </div>
       <div class="hint">Enter to send · Shift+Enter for a new line</div>
     </div>
   </main>
+
+  <!-- Sources: what the answer was built from. Collapsed to a rail tab until
+       there is something in it. -->
+  <aside class="gutter is-collapsed" id="gutter" hidden>
+    <button class="gutter-rail" id="gutter-rail" type="button" title="Show sources">
+      <span class="gr-count" id="gutter-count">0</span>
+      <span class="gr-label">Sources</span>
+    </button>
+    <div class="gutter-panel">
+      <div class="gutter-head">
+        <strong>Sources</strong>
+        <button class="gutter-x" id="gutter-x" type="button" title="Hide sources">&times;</button>
+      </div>
+      <div class="gutter-body" id="gutter-body"></div>
+    </div>
+  </aside>
 </div>
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

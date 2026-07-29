@@ -15,6 +15,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var loginItem: NSMenuItem!
     private var pollTimer: Timer?
 
+    // Menu-bar placement. Watched continuously in both directions: a slot can
+    // appear or disappear long after launch, so this is never decided once.
+    private var placementTimer: Timer?
+    private var placementStarted = Date()
+    private var lastDockProbe = Date.distantPast
+    private var inDockMode = false
+    private var announcedPlacement = false
+
     private var running = false
     private var startedAt: Date?          // for a transient "starting…" state
 
@@ -26,44 +34,313 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let healthURL = URL(string: "http://127.0.0.1:8080/api/config")!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        setIcon(running: false)
-        buildMenu()
+        createStatusItem()
         refreshStatus()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.refreshStatus()
         }
+        startPlacementWatch()
+    }
+
+    /// Create (or re-create) the status item.
+    private func createStatusItem() {
+        // squareLength, not variableLength. A variable-length item sizes itself
+        // to its content plus padding — ours measured 42 points, where a square
+        // item is one menu-bar thickness, around 24. Asking for less room is
+        // the only lever an ordinary app has on whether it fits; nothing in
+        // AppKit lets one app displace another's item.
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
+        // ⌘-dragging a status item off the menu bar sets isVisible = false, and
+        // macOS persists that against the item's autosave name — every later
+        // launch then faithfully restores "hidden". Naming the item and forcing
+        // it visible at launch is what undoes that.
+        item.autosaveName = "com.phantazein.refugio.menubar.status"
+        item.isVisible = true
+        statusItem = item
+
+        setIcon(running: running)
+        item.menu = makeMenu(live: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// The Dock icon's menu, once we've fallen back to being a Dock app. Built
+    /// fresh each time it opens, so it always reads true.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? { makeMenu(live: false) }
+
+    /// Clicking the Dock icon opens REFUGIO.
+    ///
+    /// Without this, a left-click on an app with no windows does nothing at
+    /// all — the icon looks broken, and the menu is only reachable by knowing
+    /// to right-click it. The obvious gesture should do the obvious thing.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { openApp() }
+        return true
+    }
+
+    // ── Making sure the icon is actually there ──────────────
+
+    /// Append a line to ~/.refugio-logs/menubar.log.
+    ///
+    /// This app had no log at all, and every interesting failure in it is
+    /// invisible by nature — there is no window to put an error in. "I see no
+    /// menu bar item" is unanswerable without this.
+    private func log(_ line: String) {
+        let url = home.appendingPathComponent(".refugio-logs/menubar.log")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        guard let data = "\(stamp) \(line)\n".data(using: .utf8) else { return }
+        if let fh = try? FileHandle(forWritingTo: url) {
+            fh.seekToEndOfFile(); fh.write(data); try? fh.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    /// Is the item actually ON the menu bar?
+    ///
+    /// None of the obvious properties can answer this. An item macOS declines
+    /// to lay out keeps AppKit's default frame — measured here as
+    /// (0, -22, 42, 22), off the bottom of the screen — while reporting a
+    /// button, a resolved image, isVisible = true and a non-zero width.
+    /// Everything reads healthy and nothing is drawn. Only the position knows.
+    private func isPlaced() -> Bool {
+        guard let item = statusItem, item.isVisible,
+              let win = item.button?.window, win.frame.width > 0 else { return false }
+        let f = win.frame
+
+        // `window.screen == nil` is the giveaway. On macOS 26 a status item the
+        // system has blocked is created completely normally — visible, with a
+        // button, with a window of sensible width — and its window is parked
+        // off-screen with no screen attached. Nothing about the item itself
+        // says "blocked"; only the window's relationship to a display does.
+        if win.screen == nil { return false }
+
+        let onMenuBar = NSScreen.screens.contains { s in
+            NSRect(x: s.frame.minX, y: s.frame.maxY - 44,
+                   width: s.frame.width, height: 44).intersects(f)
+        }
+        // On a notched Mac the bar continues under the notch, where an item is
+        // positioned and still invisible.
+        var notched = false
+        if let screen = NSScreen.main,
+           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            notched = NSRect(x: left.maxX, y: min(left.minY, right.minY),
+                             width: max(0, right.minX - left.maxX),
+                             height: max(left.height, right.height)).intersects(f)
+        }
+        return onMenuBar && !notched
+    }
+
+    /// The menu-bar manager running right now, if any.
+    ///
+    /// Matched on bundle identifier where they are stable, and on name as a
+    /// catch-all, since this list will always be out of date.
+    private func menuBarManager() -> String? {
+        let known = [
+            "com.surteesstudios.Bartender": "Bartender",
+            "com.jordanbaird.Ice": "Ice",
+            "com.dwarvesv.minimalbar": "Hidden Bar",
+            "com.matthewpalmer.Vanilla": "Vanilla",
+        ]
+        for app in NSWorkspace.shared.runningApplications {
+            if let id = app.bundleIdentifier, let name = known[id] { return name }
+            if let n = app.localizedName,
+               ["Bartender", "Ice", "Hidden Bar", "Vanilla", "Dozer"].contains(n) { return n }
+        }
+        return nil
+    }
+
+    /// Keep trying for a slot, and keep the one we get.
+    ///
+    /// The first version of this gave up after six seconds and turned into a
+    /// Dock icon. That is not what other menu-bar apps do, and it isn't what
+    /// this should do either: a slot can appear at any time — the user quits
+    /// something, a display is connected, the login-time crowd settles — and an
+    /// app that decided once at launch will sit in the Dock forever afterwards.
+    ///
+    /// So: keep watching in both directions. A minute of failure before the
+    /// Dock fallback, rather than six seconds, and once there, keep testing so
+    /// the icon comes back on its own the moment there is room for it.
+    private func startPlacementWatch() {
+        placementStarted = Date()
+        placementTimer?.invalidate()
+        placementTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            self?.evaluatePlacement()
+        }
+        evaluatePlacement()
+    }
+
+    private func evaluatePlacement() {
+        if inDockMode {
+            // Periodically re-offer ourselves to the menu bar. Cheap, and it is
+            // the difference between "you must relaunch it" and the icon simply
+            // reappearing when you close something.
+            guard Date().timeIntervalSince(lastDockProbe) > 20 else { return }
+            lastDockProbe = Date()
+            createStatusItem()
+            if isPlaced() {
+                log("a menu bar slot opened up — leaving Dock mode")
+                leaveDockMode()
+            } else if let item = statusItem {          // no room still; don't leave a ghost
+                NSStatusBar.system.removeStatusItem(item)
+                statusItem = nil
+            }
+            return
+        }
+
+        if isPlaced() {
+            if !announcedPlacement {
+                announcedPlacement = true
+                log("placed on the menu bar at \(statusItem?.button?.window?.frame ?? .zero)")
+            }
+            return
+        }
+
+        // A menu-bar manager makes "not placed" mean something else entirely.
+        // Bartender, Ice and the rest work by taking items out of the visible
+        // bar — an item they have collected reports exactly what an unplaced
+        // one does, and from in here the two are indistinguishable. But it is
+        // not missing: it is in that app's shelf, one click away, and turning
+        // into a Dock icon would be REFUGIO overriding a choice the user made
+        // deliberately when they installed the manager.
+        if let manager = menuBarManager() {
+            if !announcedPlacement {
+                announcedPlacement = true
+                log("not on the visible bar, but \(manager) is running — " +
+                    "assuming it is managing the item, not falling back")
+            }
+            return
+        }
+
+        let waited = Date().timeIntervalSince(placementStarted)
+        if waited < 60 {
+            if Int(waited) % 15 == 0 {
+                let win = statusItem?.button?.window
+                log("not placed after \(Int(waited))s: frame=\(win?.frame ?? .zero) " +
+                    "screen=\(win?.screen != nil) screens=\(NSScreen.screens.count)")
+                if win != nil && win?.screen == nil {
+                    // Name the cause and where it lives, so this is one grep
+                    // next time instead of eleven rounds of guessing.
+                    log("signature of a system-blocked item (window off-screen, no screen). " +
+                        "Check isAllowed for \(Bundle.main.bundleIdentifier ?? "?") in " +
+                        "~/Library/Group Containers/group.com.apple.controlcenter/Library/" +
+                        "Preferences/group.com.apple.controlcenter.plist ▸ trackedApplications, " +
+                        "or System Settings ▸ Control Center.")
+                }
+            }
+            return
+        }
+        enterDockMode()
+    }
+
+    /// No menu-bar slot after a minute: appear in the Dock, so the controls
+    /// exist at all. Reversible — see evaluatePlacement().
+    private func enterDockMode() {
+        guard !inDockMode else { return }
+        inDockMode = true
+        lastDockProbe = Date()
+        log("no room in the menu bar after 60s — falling back to a Dock icon")
+        statusItem?.menu = nil
+        if let item = statusItem { NSStatusBar.system.removeStatusItem(item) }
+        statusItem = nil                       // so setIcon() stops trying
+        NSApp.setActivationPolicy(.regular)
+
+        // A Dock app with no icon gets the generic blank one, which reads as a
+        // crashed app rather than the thing the alert just described.
+        if let img = NSImage(systemSymbolName: "mountain.2.fill", accessibilityDescription: "REFUGIO") {
+            NSApp.applicationIconImage =
+                img.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 256, weight: .regular))
+        }
+
+        // With .regular and no main menu the menu bar is empty and even ⌘Q is
+        // gone — the app would be exactly as unreachable as it was before.
+        let main = NSMenu()
+        let appEntry = NSMenuItem()
+        let menu = makeMenu(live: true)
+        menu.title = "REFUGIO"
+        appEntry.submenu = menu
+        main.addItem(appEntry)
+        NSApp.mainMenu = main
+
+        // Explain once. Every launch would be nagging about a thing the user
+        // has already decided to live with — and this app starts at login.
+        let shownKey = "dockFallbackNoticeShown"
+        if UserDefaults.standard.bool(forKey: shownKey) { return }
+        UserDefaults.standard.set(true, forKey: shownKey)
+
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = "macOS is blocking REFUGIO’s menu bar icon"
+        a.informativeText =
+            "macOS keeps a per-app list of which menu bar icons may appear, and REFUGIO " +
+            "is switched off in it. The icon is created correctly — the system just " +
+            "won’t display it.\n\n" +
+            "To fix it: System Settings ▸ Control Center, find REFUGIO in the menu bar " +
+            "items, and turn it on. The icon appears immediately; no restart needed.\n\n" +
+            "Until then REFUGIO is in the Dock — right-click its icon to start, stop or open it."
+        a.addButton(withTitle: "Open Control Center Settings")
+        a.addButton(withTitle: "Later")
+        if a.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Room appeared: go back to the menu bar and drop the Dock icon.
+    private func leaveDockMode() {
+        inDockMode = false
+        NSApp.mainMenu = nil
+        NSApp.setActivationPolicy(.accessory)
+        announcedPlacement = false
+    }
+
     // ── Menu ────────────────────────────────────────────────
-    private func buildMenu() {
+
+    private func headerTitle() -> String {
+        if running {
+            let mb = stackMemoryMB()
+            return mb > 0 ? String(format: "REFUGIO — running · %.1f GB RAM", Double(mb) / 1024.0)
+                          : "REFUGIO — running"
+        }
+        if startedAt.map({ Date().timeIntervalSince($0) < 90 }) ?? false { return "REFUGIO — starting…" }
+        return "REFUGIO — stopped"
+    }
+    private func toggleTitle() -> String {
+        running || (startedAt != nil) ? "Stop REFUGIO (frees memory)" : "Start REFUGIO"
+    }
+
+    /// Build the menu. `live` means "keep references to these items so status
+    /// polling updates them" — true for whichever menu is permanently attached,
+    /// false for the Dock menu, which is rebuilt every time it opens.
+    private func makeMenu(live: Bool) -> NSMenu {
         let menu = NSMenu()
 
-        headerItem = NSMenuItem(title: "REFUGIO — checking…", action: nil, keyEquivalent: "")
-        headerItem.isEnabled = false
-        menu.addItem(headerItem)
+        let header = NSMenuItem(title: headerTitle(), action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
         menu.addItem(.separator())
 
-        openItem = NSMenuItem(title: "Open REFUGIO", action: #selector(openApp), keyEquivalent: "o")
-        openItem.target = self
-        menu.addItem(openItem)
+        let open = NSMenuItem(title: "Open REFUGIO", action: #selector(openApp), keyEquivalent: "o")
+        open.target = self
+        menu.addItem(open)
 
         // Freeing RAM is the common reason people reach for this menu (the stack
         // can hold GBs) — and it should NOT cost them the menu bar, or there is
         // nothing left to restart from. So the memory-freeing action is this
         // toggle, which leaves the icon in place and flips to "Start REFUGIO".
-        toggleItem = NSMenuItem(title: "Start REFUGIO", action: #selector(toggleRun), keyEquivalent: "")
-        toggleItem.target = self
-        menu.addItem(toggleItem)
+        let toggle = NSMenuItem(title: toggleTitle(), action: #selector(toggleRun), keyEquivalent: "")
+        toggle.target = self
+        menu.addItem(toggle)
 
         menu.addItem(.separator())
 
-        loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
-        loginItem.target = self
-        loginItem.state = LoginItem.isEnabled ? .on : .off
-        menu.addItem(loginItem)
+        let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
+        login.target = self
+        login.state = LoginItem.isEnabled ? .on : .off
+        menu.addItem(login)
 
         // One exit, and ⌘Q maps to it. It used to map to "Stop REFUGIO & Quit",
         // which meant the reflexive keystroke removed the only way back — quit
@@ -72,11 +349,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quit.target = self
         menu.addItem(quit)
 
-        statusItem.menu = menu
+        if live {
+            headerItem = header; openItem = open; toggleItem = toggle; loginItem = login
+        }
+        return menu
     }
 
     private func setIcon(running: Bool) {
-        guard let btn = statusItem.button else { return }
+        // No button means no slot in the menu bar. It used to return silently
+        // here, which is how an app that had already failed went on looking
+        // healthy; the placement watch is what notices instead.
+        guard let btn = statusItem?.button else { return }
+
+        // A word instead of the symbol, on request:
+        //   defaults write com.phantazein.refugio.menubar showTextLabel -bool true
+        //
+        // "No icon" has two shapes that look identical from outside — the item
+        // was never placed, or it was placed and the symbol renders blank. A
+        // template image that fails to draw leaves a button of the right size
+        // showing nothing, which is indistinguishable from an absent item. Text
+        // cannot fail that way, so if the word appears the placement is fine
+        // and the icon is the bug.
+        if UserDefaults.standard.bool(forKey: "showTextLabel") {
+            statusItem?.length = NSStatusItem.variableLength   // text needs the room
+            btn.image = nil
+            btn.title = running ? "REFUGIO●" : "REFUGIO"
+            return
+        }
+
         let name = running ? "mountain.2.fill" : "mountain.2"
         if let img = NSImage(systemSymbolName: name, accessibilityDescription: "REFUGIO") {
             img.isTemplate = true
@@ -112,7 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleLogin() {
         LoginItem.setEnabled(!LoginItem.isEnabled)
-        loginItem.state = LoginItem.isEnabled ? .on : .off
+        loginItem?.state = LoginItem.isEnabled ? .on : .off
     }
 
     /// Quit the menu-bar app. Quitting the icon is not the same as stopping the
@@ -184,7 +484,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startStack(openBrowser: Bool) {
         guard FileManager.default.fileExists(atPath: startScript.path) else {
-            headerItem.title = "REFUGIO not installed (~/refugio)"
+            headerItem?.title = "REFUGIO not installed (~/refugio)"
             return
         }
         let task = Process()
@@ -219,11 +519,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try task.run()
             startedAt = Date()
-            headerItem.title = "REFUGIO — starting…"
-            toggleItem.title = "Stop REFUGIO (frees memory)"
+            headerItem?.title = "REFUGIO — starting…"
+            toggleItem?.title = "Stop REFUGIO (frees memory)"
             setIcon(running: true)
         } catch {
-            headerItem.title = "Start failed: \(error.localizedDescription)"
+            headerItem?.title = "Start failed: \(error.localizedDescription)"
         }
     }
 
@@ -242,8 +542,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startedAt = nil
         running = false
-        headerItem.title = "REFUGIO — stopping…"
-        toggleItem.title = "Start REFUGIO"
+        headerItem?.title = "REFUGIO — stopping…"
+        toggleItem?.title = "Start REFUGIO"
         setIcon(running: false)
     }
 
@@ -293,16 +593,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // WebUI) can hold GBs, and "is this what's eating my machine?" is
             // the question that sends people to this menu.
             let mb = stackMemoryMB()
-            headerItem.title = mb > 0
+            headerItem?.title = mb > 0
                 ? String(format: "REFUGIO — running · %.1f GB RAM", Double(mb) / 1024.0)
                 : "REFUGIO — running"
-            toggleItem.title = "Stop REFUGIO (frees memory)"
+            toggleItem?.title = "Stop REFUGIO (frees memory)"
         } else if starting {
-            headerItem.title = "REFUGIO — starting…"
-            toggleItem.title = "Stop REFUGIO (frees memory)"
+            headerItem?.title = "REFUGIO — starting…"
+            toggleItem?.title = "Stop REFUGIO (frees memory)"
         } else {
-            headerItem.title = "REFUGIO — stopped"
-            toggleItem.title = "Start REFUGIO"
+            headerItem?.title = "REFUGIO — stopped"
+            toggleItem?.title = "Start REFUGIO"
         }
         setIcon(running: up || starting)
     }

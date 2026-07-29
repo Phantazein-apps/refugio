@@ -232,9 +232,24 @@ function installMenuBarApp(targetDir) {
   const script = path.join(menubarDir, "install.sh")
   if (!fs.existsSync(script)) return
 
-  if (fs.existsSync("/Applications/REFUGIO.app")) {
-    ok("Menu-bar app already installed (/Applications/REFUGIO.app)")
-    return
+  // "Already installed" used to end it, so the app never picked up a newer
+  // build — someone who installed once kept a months-old menu bar forever, and
+  // a broken app stayed broken because the installer congratulated itself and
+  // moved on. Rebuild whenever the sources are newer than what is installed.
+  const installed = "/Applications/REFUGIO.app"
+  if (fs.existsSync(installed)) {
+    let stale = true
+    try {
+      const appTime = fs.statSync(path.join(installed, "Contents", "MacOS", "RefugioBar")).mtimeMs
+      const srcTime = Math.max(...fs.readdirSync(path.join(menubarDir, "Sources", "RefugioBar"))
+        .map((f) => fs.statSync(path.join(menubarDir, "Sources", "RefugioBar", f)).mtimeMs))
+      stale = srcTime > appTime
+    } catch { /* can't tell — rebuilding is the safe answer */ }
+    if (!stale) {
+      ok("Menu-bar app is up to date (/Applications/REFUGIO.app)")
+      return
+    }
+    console.log(`  ${C.dim}Menu-bar app is out of date — rebuilding.${C.reset}`)
   }
   if (!has("swift")) {
     console.log(`  ${C.dim}Menu-bar app skipped — needs the Swift toolchain.`)
@@ -245,12 +260,22 @@ function installMenuBarApp(targetDir) {
 
   console.log(`  ${C.bold}Menu-bar app${C.reset} ${C.dim}— start/stop/quit REFUGIO without a terminal${C.reset}`)
   try {
-    // The build is quiet unless it fails; it takes a few seconds.
-    execSync(`"${script}"`, { cwd: menubarDir, stdio: "ignore" })
+    // Capture rather than discard: a build that fails silently leaves someone
+    // with no menu bar and no idea why, which is exactly the state this app
+    // exists to avoid being in.
+    execSync(`"${script}"`, { cwd: menubarDir, stdio: "pipe" })
     ok("Menu-bar app installed — look for the mountain icon in your menu bar")
-    console.log(`    ${C.dim}Use “Stop REFUGIO & Quit” there to free the memory it uses.${C.reset}`)
+    console.log(`    ${C.dim}Use “Stop REFUGIO” there to free the memory it uses.${C.reset}`)
   } catch (e) {
     warn(`Menu-bar app build failed — REFUGIO still works from the terminal.`)
+    // The informative lines, not the last ones. swift build ends a failure with
+    // "note:" hints and a source excerpt, so the tail is the least useful part
+    // of it — the `error:` line was reliably the one cut off.
+    const lines = String(e.stderr || e.stdout || e.message || "").split("\n").filter(Boolean)
+    const errs = lines.filter((l) => /\berror:/.test(l))
+    const why = (errs.length ? errs : lines).slice(0, 4)
+      .map((l) => l.trim()).join("\n      ")
+    if (why) console.log(`      ${C.dim}${why}${C.reset}`)
     console.log(`    ${C.dim}Retry with: cd "${menubarDir}" && ./install.sh${C.reset}`)
   }
 }
@@ -339,7 +364,7 @@ const HERMENEIA_REPO = "https://github.com/Phantazein-apps/hermeneia.git"
 // bridge and silently lost WhatsApp. Pinning the checkout AND pulling the
 // bridge from that same release keeps the two halves in lockstep.
 // Override for testing: HERMENEIA_VERSION=master.
-const HERMENEIA_VERSION = process.env.HERMENEIA_VERSION || "v0.4.12"
+const HERMENEIA_VERSION = process.env.HERMENEIA_VERSION || "v0.4.13"
 const HERMENEIA_RELEASE_BASE =
   `https://github.com/Phantazein-apps/hermeneia/releases/download/${HERMENEIA_VERSION}`
 const HERMENEIA_QR_PORT = 3456
@@ -1854,21 +1879,61 @@ function setupOnDemand(targetDir, nodePath, startScript) {
   }
 
   if (!isWin) {
-    // `refugio` CLI on PATH (~/.local/bin is on PATH via uv): start | stop | status
+    // `refugio` CLI on PATH (~/.local/bin is on PATH via uv):
+    //   start | bg | stop | restart | status | menubar
+    //
+    // `bg`, `restart` and `menubar` exist because the menu-bar icon is not
+    // guaranteed — it can fail to get a slot on a full menu bar. When that
+    // happens the only way to stop and restart was a foreground process
+    // holding a terminal open, which is not where a fallback belongs.
     const binDir = path.join(home, ".local", "bin")
     try { fs.mkdirSync(binDir, { recursive: true }) } catch {}
     const cli = `#!/bin/sh
 # REFUGIO on-demand launcher
 NODE="${nodePath}"
 DIR="${targetDir}"
-PIDF="$HOME/.refugio-logs/supervisor.pid"
+LOGS="$HOME/.refugio-logs"
+PIDF="$LOGS/supervisor.pid"
+
+refugio_stop() {
+  if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "REFUGIO stopped (RAM freed)"
+  else echo "REFUGIO is not running"; fi
+}
+refugio_bg() {
+  mkdir -p "$LOGS"
+  nohup "$NODE" "$DIR/start-refugio.cjs" --no-browser >>"$LOGS/refugio.log" 2>&1 &
+}
+
 case "$1" in
-  stop)
-    if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "REFUGIO stopped (RAM freed)"; else echo "REFUGIO is not running"; fi ;;
+  stop) refugio_stop ;;
+  bg)
+    refugio_bg
+    echo "REFUGIO starting in the background — 'refugio status' to check, 'refugio stop' to stop." ;;
+  restart)
+    refugio_stop
+    sleep 2
+    refugio_bg
+    echo "REFUGIO restarting in the background — 'refugio status' to check." ;;
   status)
-    if curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080"; else echo "stopped"; fi ;;
+    if curl -s --max-time 2 http://127.0.0.1:8090/api/chat/status >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8090"
+    elif curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080 (Open WebUI)"
+    else echo "stopped"; fi ;;
+  menubar)
+    # Relaunch the menu-bar app and show what it decided. It writes one line per
+    # launch saying whether it got a slot in the menu bar.
+    if [ -d /Applications/REFUGIO.app ]; then
+      pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar" 2>/dev/null
+      sleep 1
+      open /Applications/REFUGIO.app
+      sleep 3
+      echo "--- $LOGS/menubar.log ---"
+      tail -n 5 "$LOGS/menubar.log" 2>/dev/null || echo "(no log yet — this build predates it)"
+    else
+      echo "Menu-bar app is not installed. Build it with: cd $DIR/menubar && ./install.sh"
+    fi ;;
   *)
     echo "Starting REFUGIO... (Ctrl+C or 'refugio stop' to stop and free RAM)"
+    echo "Tip: 'refugio bg' starts it without holding this terminal."
     exec "$NODE" "$DIR/start-refugio.cjs" ;;
 esac
 `

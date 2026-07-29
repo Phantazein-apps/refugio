@@ -18,8 +18,11 @@ import { randomUUID } from "crypto";
 import { createRequire } from "module";
 import { homedir } from "os";
 
+import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import * as store from "./store.js";
+import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
+import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import { listModels, isUp, chatStream, complete, OLLAMA_BASE } from "./ollama.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,11 +53,30 @@ const SYSTEM_PROMPT =
 function toolPreamble(tools) {
   if (!tools.length) return "";
   const servers = [...new Set(tools.map((t) => t.function.name.split("__")[0]))];
-  return "\n\nYou have tools that read the user's own data on this machine" +
-    ` (${servers.join(", ")}). When a question is about that data, call the` +
-    " relevant tool instead of answering from memory. Never ask the user to" +
-    " paste in data you can fetch yourself — call the tool and use the result.";
+  const local = servers.filter((s) => s !== WEB_SERVER);
+  let out = "";
+  if (local.length) {
+    out += "\n\nYou have tools that read the user's own data on this machine" +
+      ` (${local.join(", ")}). When a question is about that data, call the` +
+      " relevant tool instead of answering from memory. Never ask the user to" +
+      " paste in data you can fetch yourself — call the tool and use the result.";
+  }
+  // Said separately, and only on a turn the user armed. Folding web search into
+  // the sentence above would describe it as one more local connector, which is
+  // the one thing it is not.
+  if (servers.includes(WEB_SERVER)) {
+    out += "\n\nFor this message only, the user has allowed you to search the" +
+      ` public web with ${WEB_TOOL.function.name}. Use it when the answer` +
+      " depends on current or external information you do not already have," +
+      " and keep the query short — it is sent to a search engine. Cite the" +
+      " links you used.";
+  }
+  return out;
 }
+
+// The prefix in `web__search`. Tool names are `server__tool` everywhere else,
+// so web search borrows the shape without being an MCP server.
+const WEB_SERVER = WEB_TOOL.function.name.split("__")[0];
 
 const log = (m) => console.log(`[chat] ${m}`);
 
@@ -63,15 +85,46 @@ const log = (m) => console.log(`[chat] ${m}`);
 // Loaded lazily and tolerantly: the chat UI must still start if scripts/ is
 // missing (a bare checkout, a future split of this directory).
 let _memFit;
-function modelSupportsTools(tag) {
-  if (!tag) return null;
+function memFit() {
   if (_memFit === undefined) {
     try {
       _memFit = createRequire(import.meta.url)(join(dirname(__dirname), "scripts", "mem-fit.cjs"));
     } catch { _memFit = null; }
   }
+  return _memFit;
+}
+function modelSupportsTools(tag) {
+  if (!tag) return null;
   // Bare tag ("qwen2.5:3b") vs. an Ollama name that may carry a digest suffix.
-  return _memFit ? _memFit.supportsTools(tag.split("@")[0]) : null;
+  return memFit() ? memFit().supportsTools(tag.split("@")[0]) : null;
+}
+
+/** Describe each installed model against the RAM free right now.
+ *
+ *  Switching model is the main lever a user has over speed, and picking one
+ *  blind means discovering it doesn't fit by watching the machine swap. Open
+ *  WebUI labelled models this way and it was genuinely useful; the built-in UI
+ *  should not be a downgrade. `needGb` is what the model wants; `fits` answers
+ *  the actual question — can I run this without closing anything first. */
+function describeModels(names) {
+  const mf = memFit();
+  const freeGb = mf ? mf.availableMemGb() : null;
+  const budget = freeGb == null ? null : freeGb - 0.05 - 1.0;  // chat UI + headroom
+  return names.map((name) => {
+    const needGb = mf ? mf.modelRamGb(name.split("@")[0]) : 0;
+    const fits = needGb && budget != null ? needGb <= budget : null;
+    return {
+      name,
+      needGb: needGb || null,                    // null = not on the ladder, unknown
+      fits,
+      // How much more RAM to free before this model is usable. "Won't fit" says
+      // a model is out of reach; this says what to do about it, which is the
+      // difference between a warning and an instruction. Open WebUI gave the
+      // number and it was the useful half.
+      freeUpGb: fits === false ? Math.max(0.1, Math.round((needGb - budget) * 10) / 10) : null,
+      tools: modelSupportsTools(name),
+    };
+  });
 }
 
 // Tool limits. A large tool surface degrades model accuracy — they pick wrong
@@ -85,11 +138,53 @@ function modelSupportsTools(tag) {
 // evenly across servers rather than truncating whichever connected last.
 const TOOL_LIMIT = parseInt(process.env.REFUGIO_TOOL_LIMIT || "40", 10);
 const MAX_TOOL_ROUNDS = parseInt(process.env.REFUGIO_MAX_TOOL_ROUNDS || "5", 10);
+// How much of a tool result is sent to the browser for the sources panel.
+// Generous — this is a local socket, and a truncated source is only half an
+// answer to "where did this come from?" — but not unbounded.
+const SOURCE_CHARS = parseInt(process.env.REFUGIO_SOURCE_CHARS || "8000", 10);
 const MCP_CONFIG = process.env.REFUGIO_MCPO_CONFIG ||
   join(dirname(__dirname), "mcpo-config.json");
 
 /** @type {McpPool|null} */
 let mcp = null;
+// False until the first connect sweep finishes. Distinguishes "nothing is
+// configured" from "we haven't looked yet" — the difference between telling
+// someone to re-run the installer and telling them to wait five seconds.
+let connectorsSettled = false;
+
+// Connector scope settings, saved beside the chat database. A JSON file rather
+// than a table: it is a handful of booleans a user may reasonably want to read
+// or edit by hand, and it must survive the database being deleted.
+const SETTINGS_PATH = join(DATA_DIR, "connector-settings.json");
+
+function loadSettings() {
+  // Web search rides in the same file: it is one boolean, it belongs with the
+  // other "what may REFUGIO reach" answers, and a user who opens this file
+  // should see every one of them in one place.
+  const defaults = { ...defaultSettings(), web: { ...WEB_DEFAULTS } };
+  try {
+    const saved = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
+    // Merge over defaults so an option added in a later version starts off,
+    // and an option removed from the code doesn't linger as a live setting.
+    for (const [server, opts] of Object.entries(defaults)) {
+      for (const key of Object.keys(opts)) {
+        if (typeof saved?.[server]?.[key] === "boolean") opts[key] = saved[server][key];
+      }
+    }
+  } catch { /* first run, or unreadable — defaults are the safe answer */ }
+  return defaults;
+}
+
+function saveSettings(settings) {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n");
+  } catch (e) {
+    log(`could not save connector settings: ${e.message}`);
+  }
+}
+
+let connectorSettings = loadSettings();
 
 // Human-facing names for the server ids in mcpo-config.json. Anything not
 // listed falls back to its id capitalised, so a new connector reads correctly
@@ -108,11 +203,21 @@ const CONNECTOR_TTL = 30_000;
 async function connectorRows({ force = false } = {}) {
   if (!mcp) return [];
   if (!force && Date.now() - connectorCache.at < CONNECTOR_TTL) return connectorCache.rows;
-  const rows = (await mcp.describe()).map((r) => ({ ...r, label: labelFor(r.id) }));
+  const rows = (await mcp.describe()).map((r) => ({
+    ...r,
+    label: labelFor(r.id),
+    // Offered whenever the connector isn't fully healthy — a running connector
+    // whose account is unreachable usually needs re-linking, not restarting.
+    setup: r.state === "ok" ? null : setupUrlFor(r.id, mcp.servers.get(r.id)?.spec),
+    options: optionsFor(r.id).map((o) => ({
+      key: o.key, label: o.label, hint: o.hint || null,
+      value: !!connectorSettings[r.id]?.[o.key],
+    })),
+  }));
   // Don't let an incomplete answer harden into a 30s lie. A connector still
   // booting can't list its accounts yet, which undercounts — cache that only
   // briefly so the number corrects itself instead of sitting wrong.
-  const settled = !rows.some((r) => r.accountsUnknown);
+  const settled = !rows.some((r) => r.accountsUnknown || r.state === "connecting");
   connectorCache = { at: settled ? Date.now() : Date.now() - (CONNECTOR_TTL - 3000), rows };
   return rows;
 }
@@ -124,12 +229,30 @@ async function connectorRows({ force = false } = {}) {
  *  than folded in: a healthy-looking total while WhatsApp was silently down is
  *  the exact reassuring-but-wrong signal that hid a real outage. */
 function countConnectors(rows) {
-  let ready = 0, failed = 0;
+  let ready = 0, failed = 0, connecting = 0, degraded = 0;
   for (const r of rows) {
+    if (r.state === "connecting") { connecting++; continue; }
     if (!r.ok) { failed++; continue; }
+    // Running but unreachable is its own category. Counting it as ready is how
+    // a user ends up asking about WhatsApp messages that can't be fetched.
+    if (r.state === "degraded") { degraded++; continue; }
     ready += Math.max(1, r.accounts.length);
   }
-  return { ready, failed };
+  return { ready, failed, connecting, degraded };
+}
+
+/** What the connectors panel needs, in one shape.
+ *
+ *  Web search travels with the connectors because that panel is where the
+ *  question "what can REFUGIO reach?" is answered — but as its own field, not
+ *  as a row in the list, because it is the one entry that isn't local. */
+function connectorPayload(rows) {
+  return {
+    connectors: rows,
+    starting: !connectorsSettled,
+    ...countConnectors(rows),
+    web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+  };
 }
 
 // Model selection: explicit override, else whatever Ollama has (first entry).
@@ -221,11 +344,34 @@ async function maybeTitle(convoId, firstMessage, model) {
   return title;
 }
 
+/** Execute one tool call.
+ *
+ *  The web check is repeated here rather than trusted from the tools list. A
+ *  model can name a tool it was never offered — either by copying one out of
+ *  the conversation history or by inventing it — and "we didn't put it in the
+ *  array" is not the guarantee the user was given. The guarantee is that no
+ *  search leaves this machine on a turn they did not arm, so it is enforced at
+ *  the only place that actually sends anything. */
+async function runTool(call, webArmed) {
+  if (call.name === WEB_TOOL.function.name) {
+    if (!webArmed) return { text: "Error: web search is not enabled for this message.", links: [] };
+    const q = String(call.args?.query ?? "").trim();
+    log(`web search: ${JSON.stringify(q.slice(0, 80))}`);
+    const found = await webSearch(q);
+    // The links go to the UI as structured data as well as into the model's
+    // prompt as text. A web result is the one source here a person may
+    // genuinely want to open for themselves.
+    return { text: formatResults(q, found), links: found.results };
+  }
+  if (!mcp) return { text: `Error: no tool named ${call.name}`, links: [] };
+  return { text: await mcp.call(call.name, call.args), links: [] };
+}
+
 /**
  * Run one turn and stream it to the client as SSE.
  * Events: `token` (incremental text), `done` (final metadata), `error`.
  */
-async function streamTurn(res, { conversationId, message, model, persistUser }) {
+async function streamTurn(res, { conversationId, message, model, persistUser, web = false }) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -240,7 +386,12 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 
   send("start", { conversation_id: conversationId });
 
-  const tools = mcp ? mcp.toolDefs(TOOL_LIMIT) : [];
+  // Two conditions, both required, and they mean different things: the setting
+  // is "I am willing to search the web at all", the flag is "search on THIS
+  // message". Neither implies the other, so the model is only handed the tool
+  // when the user has just asked for it.
+  const webArmed = !!web && !!connectorSettings.web?.enabled;
+  const tools = [...(mcp ? mcp.toolDefs(TOOL_LIMIT) : []), ...(webArmed ? [WEB_TOOL] : [])];
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT + toolPreamble(tools) },
@@ -285,9 +436,20 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 
       for (const call of toolCalls) {
         send("tool", { name: call.name, args: call.args });
-        const result = await mcp.call(call.name, call.args);
+        const { text: result, links } = await runTool(call, webArmed);
         toolsUsed.push(call.name);
-        send("tool_result", { name: call.name, ok: !result.startsWith("Error"), preview: result.slice(0, 160) });
+        // The full result, not a 160-character preview. "Which of my chats did
+        // this come from?" is the first question anyone asks of an answer built
+        // from their own data, and a preview cannot answer it. Capped so one
+        // enormous tool result can't wedge the stream.
+        send("tool_result", {
+          name: call.name,
+          ok: !result.startsWith("Error"),
+          args: call.args,
+          text: result.slice(0, SOURCE_CHARS),
+          truncated: result.length > SOURCE_CHARS,
+          links,
+        });
         messages.push({ role: "tool", content: result, tool_name: call.name });
       }
     }
@@ -314,9 +476,55 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 async function route(req, res, url) {
   const p = url.pathname;
 
+  // Retry one connector, or stop what's blocking it first. POST because both
+  // change state. The connector id comes from the path and must exist in the
+  // pool; nothing about which process gets stopped is caller-controlled.
+  const fix = /^\/api\/chat\/connectors\/([A-Za-z0-9_-]{1,64})\/(retry|resolve)$/.exec(p);
+  if (fix && req.method === "POST") {
+    if (!mcp) return sendJson(res, 503, { error: "connectors are still starting" });
+    const [, id, action] = fix;
+    if (!mcp.servers.has(id)) return sendJson(res, 404, { error: `unknown connector "${id}"` });
+    try {
+      await (action === "resolve" ? mcp.resolveConflict(id) : mcp.reconnect(id));
+    } catch (e) {
+      return sendJson(res, 409, { error: e.message });
+    }
+    connectorCache = { at: 0, rows: [] };          // force a fresh read
+    const rows = await connectorRows({ force: true });
+    return sendJson(res, 200, connectorPayload(rows));
+  }
+
+  if (p === "/api/chat/connectors/settings" && req.method === "POST") {
+    const body = await readBody(req);
+    const { server, key, value } = body || {};
+    // Only keys this build actually declares; nothing arbitrary lands in the file.
+    if (!CONNECTOR_OPTIONS[server] || !optionsFor(server).some((o) => o.key === key)) {
+      return sendJson(res, 400, { error: "unknown connector option" });
+    }
+    connectorSettings[server] = { ...connectorSettings[server], [key]: !!value };
+    saveSettings(connectorSettings);
+    mcp?.setSettings(connectorSettings);
+    connectorCache = { at: 0, rows: [] };
+    const rows = await connectorRows({ force: true });
+    return sendJson(res, 200, connectorPayload(rows));
+  }
+
   if (p === "/api/chat/connectors") {
     const rows = await connectorRows({ force: true });
-    return sendJson(res, 200, { connectors: rows, ...countConnectors(rows) });
+    return sendJson(res, 200, connectorPayload(rows));
+  }
+
+  // Web search gets its own route rather than joining the connector-options
+  // one. That route validates against CONNECTOR_OPTIONS, where every entry
+  // narrows a connector's scope and declares the mechanism that enforces it;
+  // this widens REFUGIO's reach past the machine and enforces nothing. Making
+  // it pass that validator would have meant loosening it for everything.
+  if (p === "/api/chat/web" && req.method === "POST") {
+    const body = await readBody(req);
+    connectorSettings.web = { ...connectorSettings.web, enabled: !!body.enabled };
+    saveSettings(connectorSettings);
+    log(`web search ${connectorSettings.web.enabled ? "enabled" : "disabled"}`);
+    return sendJson(res, 200, connectorPayload(await connectorRows()));
   }
 
   if (p === "/api/chat/status") {
@@ -328,12 +536,16 @@ async function route(req, res, url) {
       connectors: countConnectors(rows),
       available: up && !!model,
       model,
-      models: models.map((m) => m.name),
+      models: describeModels(models.map((m) => m.name)),
+      freeGb: memFit() ? Math.round(memFit().availableMemGb() * 10) / 10 : null,
       ollama: OLLAMA_BASE,
       tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],
       // true / false / null-when-unrated. The UI warns only on an explicit
       // false — a model we've never rated is unknown, not incapable.
       modelTools: modelSupportsTools(model),
+      // The composer needs this on every poll: when web search is switched off
+      // the per-message control must disappear, not sit there doing nothing.
+      web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
     });
   }
 
@@ -348,7 +560,7 @@ async function route(req, res, url) {
       });
     }
     const conversationId = (body.conversation_id || "").trim() || randomUUID().replace(/-/g, "");
-    return streamTurn(res, { conversationId, message, model, persistUser: true });
+    return streamTurn(res, { conversationId, message, model, persistUser: true, web: body.web });
   }
 
   // Regenerate / edit both re-run the last turn; they differ only in what the
@@ -362,12 +574,15 @@ async function route(req, res, url) {
 
     if (p === "/api/chat/regenerate") {
       store.truncateFrom(conversationId, { lastAssistant: true });
-      return streamTurn(res, { conversationId, message: "", model, persistUser: false });
+      // `web` is not remembered from the original turn. Re-running is a new
+      // decision, and silently repeating a search the user armed once would
+      // make "manual each time" untrue on exactly the path they aren't watching.
+      return streamTurn(res, { conversationId, message: "", model, persistUser: false, web: body.web });
     }
     const edited = (body.message || "").trim();
     if (!edited) return sendJson(res, 400, { error: "message is required" });
     store.truncateFrom(conversationId, { lastAssistant: false });
-    return streamTurn(res, { conversationId, message: edited, model, persistUser: true });
+    return streamTurn(res, { conversationId, message: edited, model, persistUser: true, web: body.web });
   }
 
   if (p === "/api/chat/conversations" && req.method === "GET") {
@@ -420,6 +635,20 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// A bind failure is the one startup error worth explaining. Unhandled, it
+// prints a stack trace and exits 1 — and under the supervisor, which restarts
+// on exit 1, that becomes ten identical failures whose cause is one line of
+// text nobody sees. Say what is wrong and stop.
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    log(`port ${PORT} is already in use — REFUGIO chat is probably already running.`);
+    log(`Open http://127.0.0.1:${PORT}, or stop the other copy and start again.`);
+  } else {
+    log(`could not start: ${e.message}`);
+  }
+  process.exit(1);
+});
+
 // Bind to loopback only. This serves the user's private conversations with no
 // authentication — it must never be reachable from the network.
 server.listen(PORT, "127.0.0.1", async () => {
@@ -430,9 +659,20 @@ server.listen(PORT, "127.0.0.1", async () => {
 
   // Tools connect after the server is listening so a slow or broken connector
   // delays tool availability, never the UI itself.
+  //
+  // The pool is published BEFORE connecting, not after. Assigning it only on
+  // completion left a 10-15s window (Hermeneia is not quick to start) in which
+  // the UI could see no pool at all and say "No connectors configured — re-run
+  // the installer", which is both wrong and alarming. The pool registers every
+  // configured server up front, so publishing early means that window reports
+  // "connecting" instead.
   if (process.env.REFUGIO_TOOLS !== "0") {
-    mcp = await new McpPool().connectAll(MCP_CONFIG);
+    const pool = new McpPool();
+    pool.setSettings(connectorSettings);
+    mcp = pool;
+    await pool.connectAll(MCP_CONFIG);
   }
+  connectorsSettled = true;
 });
 
 for (const sig of ["SIGINT", "SIGTERM"]) {
