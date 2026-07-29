@@ -200,7 +200,11 @@ export class McpPool {
    */
   async describe({ timeoutMs = 5000 } = {}) {
     return Promise.all([...this.servers.values()].map(async (s) => {
-      const row = { id: s.name, tools: s.tools, ok: s.ok, error: s.error,
+      // Three states, not two. A server that has neither connected nor failed
+      // is still starting — reporting that as a failure (or as "none
+      // configured") is a confident lie during the first ~15 seconds.
+      const state = s.ok ? "ok" : s.error ? "failed" : "connecting";
+      const row = { id: s.name, tools: s.tools, ok: s.ok, state, error: s.error,
                     accounts: [], accountsUnknown: false };
       if (!s.ok) return row;
       let raw;

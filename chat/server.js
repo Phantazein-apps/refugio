@@ -90,6 +90,10 @@ const MCP_CONFIG = process.env.REFUGIO_MCPO_CONFIG ||
 
 /** @type {McpPool|null} */
 let mcp = null;
+// False until the first connect sweep finishes. Distinguishes "nothing is
+// configured" from "we haven't looked yet" — the difference between telling
+// someone to re-run the installer and telling them to wait five seconds.
+let connectorsSettled = false;
 
 // Human-facing names for the server ids in mcpo-config.json. Anything not
 // listed falls back to its id capitalised, so a new connector reads correctly
@@ -112,7 +116,7 @@ async function connectorRows({ force = false } = {}) {
   // Don't let an incomplete answer harden into a 30s lie. A connector still
   // booting can't list its accounts yet, which undercounts — cache that only
   // briefly so the number corrects itself instead of sitting wrong.
-  const settled = !rows.some((r) => r.accountsUnknown);
+  const settled = !rows.some((r) => r.accountsUnknown || r.state === "connecting");
   connectorCache = { at: settled ? Date.now() : Date.now() - (CONNECTOR_TTL - 3000), rows };
   return rows;
 }
@@ -124,12 +128,13 @@ async function connectorRows({ force = false } = {}) {
  *  than folded in: a healthy-looking total while WhatsApp was silently down is
  *  the exact reassuring-but-wrong signal that hid a real outage. */
 function countConnectors(rows) {
-  let ready = 0, failed = 0;
+  let ready = 0, failed = 0, connecting = 0;
   for (const r of rows) {
+    if (r.state === "connecting") { connecting++; continue; }
     if (!r.ok) { failed++; continue; }
     ready += Math.max(1, r.accounts.length);
   }
-  return { ready, failed };
+  return { ready, failed, connecting };
 }
 
 // Model selection: explicit override, else whatever Ollama has (first entry).
@@ -316,7 +321,9 @@ async function route(req, res, url) {
 
   if (p === "/api/chat/connectors") {
     const rows = await connectorRows({ force: true });
-    return sendJson(res, 200, { connectors: rows, ...countConnectors(rows) });
+    return sendJson(res, 200, {
+      connectors: rows, starting: !connectorsSettled, ...countConnectors(rows),
+    });
   }
 
   if (p === "/api/chat/status") {
@@ -430,9 +437,19 @@ server.listen(PORT, "127.0.0.1", async () => {
 
   // Tools connect after the server is listening so a slow or broken connector
   // delays tool availability, never the UI itself.
+  //
+  // The pool is published BEFORE connecting, not after. Assigning it only on
+  // completion left a 10-15s window (Hermeneia is not quick to start) in which
+  // the UI could see no pool at all and say "No connectors configured — re-run
+  // the installer", which is both wrong and alarming. The pool registers every
+  // configured server up front, so publishing early means that window reports
+  // "connecting" instead.
   if (process.env.REFUGIO_TOOLS !== "0") {
-    mcp = await new McpPool().connectAll(MCP_CONFIG);
+    const pool = new McpPool();
+    mcp = pool;
+    await pool.connectAll(MCP_CONFIG);
   }
+  connectorsSettled = true;
 });
 
 for (const sig of ["SIGINT", "SIGTERM"]) {

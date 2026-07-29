@@ -250,6 +250,7 @@ textarea {
 .conn-head { display: flex; align-items: center; gap: var(--s2); }
 .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #0dbd8b; flex: 0 0 auto; }
 .conn.failed .conn-dot { background: var(--accent); }
+.conn.starting .conn-dot { background: var(--ink-faint); }
 .conn-name { font-weight: 500; }
 .conn-meta { margin-left: auto; font-size: .6875rem; color: var(--ink-faint); }
 
