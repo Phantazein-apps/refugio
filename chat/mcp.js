@@ -12,6 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFileSync, existsSync } from "fs";
 import { execFile } from "child_process";
+import { forcedArgs, activeFilters, allowedStatuses, optionsFor } from "./connector-options.js";
 
 const log = (m) => console.log(`[chat:mcp] ${m}`);
 
@@ -124,6 +125,14 @@ export class McpPool {
     // the thing a user most needs to see, so it must survive here with its
     // reason rather than simply be absent.
     this.servers = new Map();   // server name -> { name, tools, ok, error }
+    // Per-connector scope chosen by the user. Held here because BOTH the schema
+    // handed to the model and the call path must reflect the same choice — a
+    // narrowed enum the call path didn't also enforce would be advisory only.
+    this.settings = {};         // server name -> { [optionKey]: boolean }
+  }
+
+  setSettings(settings) {
+    this.settings = settings || {};
   }
 
   /**
@@ -336,12 +345,43 @@ export class McpPool {
     }));
   }
 
+  /** Apply the user's scope to the schema the model is shown.
+   *
+   *  Narrowing here as well as at call time is not redundant: a model told it
+   *  may ask for "someday" and then refused is a wasted round trip on a machine
+   *  where every round trip is seconds. Tell it the truth up front. */
+  #scoped(tools) {
+    const things = this.settings.things;
+    if (!things) return tools;
+    const allowed = allowedStatuses(things);
+    return tools.map((t) => {
+      if (!t.function.name.endsWith(`${SEP}things3_get_todos`)) return t;
+      const status = t.function.parameters?.properties?.status;
+      if (!status) return t;
+      return {
+        ...t,
+        function: {
+          ...t.function,
+          parameters: {
+            ...t.function.parameters,
+            properties: {
+              ...t.function.parameters.properties,
+              status: { ...status, enum: allowed,
+                        description: `Filter by Things 3 list (available: ${allowed.join(", ")})` },
+            },
+          },
+        },
+      };
+    });
+  }
+
   toolDefs(limit = 0) {
-    if (limit <= 0) return this.tools;
-    if (this.tools.length <= limit) return this.tools;
+    const all = this.#scoped(this.tools);
+    if (limit <= 0) return all;
+    if (all.length <= limit) return all;
 
     const queues = new Map();
-    for (const t of this.tools) {
+    for (const t of all) {
       const server = t.function.name.split(SEP)[0];
       if (!queues.has(server)) queues.set(server, []);
       queues.get(server).push(t);
@@ -362,7 +402,7 @@ export class McpPool {
     // Once, not on every status poll.
     if (!this._cappedWarned) {
       this._cappedWarned = true;
-      log(`capped at ${limit} of ${this.tools.length} tools across ` +
+      log(`capped at ${limit} of ${all.length} tools across ` +
           `${queues.size} server(s) — raise REFUGIO_TOOL_LIMIT to offer more`);
     }
     return out;
@@ -386,13 +426,37 @@ export class McpPool {
     const client = this.clients.get(entry.server);
     if (!client) return `Error: server "${entry.server}" is not connected`;
 
+    const settings = this.settings[entry.server] || {};
+    const filters = activeFilters(entry.server, settings);
+
+    // The user's scope wins over the model's arguments. Merging the other way
+    // would make every checkbox a suggestion the model could decline.
+    let sendArgs = { ...(args || {}), ...forcedArgs(entry.server, entry.tool, settings) };
+
+    // Things 3's status is an enum we narrow in the schema; a model can still
+    // emit a value outside it, so drop disallowed values rather than trusting
+    // the schema to have been obeyed.
+    if (entry.server === "things" && sendArgs.status) {
+      if (!allowedStatuses(settings).includes(sendArgs.status)) {
+        return `Error: "${sendArgs.status}" is switched off in REFUGIO's connector settings. ` +
+          `Allowed right now: ${allowedStatuses(settings).join(", ")}.`;
+      }
+    }
+
+    // Filtering happens after the tool applied its own limit, so ask for more
+    // when we know we're about to discard some. Imperfect, and deliberately
+    // visible here rather than hidden.
+    if (filters.length && typeof sendArgs.limit === "number") {
+      sendArgs = { ...sendArgs, limit: Math.min(sendArgs.limit * 3, 200) };
+    }
+
     try {
       const res = await withTimeout(
-        client.callTool({ name: entry.tool, arguments: args || {} }),
+        client.callTool({ name: entry.tool, arguments: sendArgs }),
         timeoutMs,
         `${qualifiedName}`
       );
-      return flattenContent(res);
+      return applyFilters(flattenContent(res), filters, args?.limit);
     } catch (e) {
       return `Error calling ${qualifiedName}: ${e.message}`;
     }
@@ -420,6 +484,55 @@ function flattenContent(result) {
   return text.length > RESULT_CHARS
     ? text.slice(0, RESULT_CHARS) + "\n…(truncated — ask for a narrower range for more detail)"
     : text;
+}
+
+/**
+ * Drop rows the user has scoped out, where the connector offers no parameter
+ * for it.
+ *
+ * Only touches JSON array payloads — anything else is returned untouched rather
+ * than guessed at, because silently mangling a tool result would be worse than
+ * not filtering. A note is appended when rows were removed so the model does
+ * not treat a filtered page as the complete picture and confidently tell the
+ * user they have no group chats.
+ */
+function applyFilters(text, filters, limit) {
+  if (!filters.length || !text) return text;
+
+  let rows;
+  try {
+    const parsed = JSON.parse(text);
+    rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : null);
+    if (!rows) return text;
+    var wrapped = !Array.isArray(parsed);
+    var envelope = parsed;
+  } catch { return text; }
+
+  const before = rows.length;
+  let kept = rows;
+
+  if (filters.includes("groups")) {
+    // WhatsApp group JIDs end in @g.us; one-to-one end in @s.whatsapp.net.
+    kept = kept.filter((r) => {
+      const jid = r?.jid || r?.chat_jid || r?.chatJid || "";
+      return !String(jid).endsWith("@g.us");
+    });
+  }
+
+  if (filters.includes("today")) {
+    const today = new Date().toISOString().slice(0, 10);
+    kept = kept.filter((r) => {
+      const due = r?.dueDate || r?.due_date || r?.remindMeDate || null;
+      return due ? String(due).slice(0, 10) <= today : false;
+    });
+  }
+
+  if (typeof limit === "number" && kept.length > limit) kept = kept.slice(0, limit);
+  const removed = before - kept.length;
+  const body = JSON.stringify(wrapped ? { ...envelope, items: kept } : kept, null, 2);
+  return removed > 0
+    ? `${body}\n\n(${removed} row${removed === 1 ? "" : "s"} hidden by the user's connector settings — this is not the full list.)`
+    : body;
 }
 
 function withTimeout(promise, ms, label) {

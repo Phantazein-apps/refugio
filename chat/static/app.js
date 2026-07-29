@@ -128,16 +128,24 @@ async function refreshStatus() {
     if (s.available && c.failed) els.status.classList.add("warn");
     els.status.title = "Click for connector details";
     showModelWarning(s);
+    // Label each model with what it needs against the RAM free right now.
+    // Choosing a model is the main lever over speed, and picking one blind
+    // means finding out it doesn't fit by watching the machine swap.
     els.model.innerHTML = "";
     for (const m of s.models || []) {
       const o = document.createElement("option");
-      o.value = o.textContent = m;
-      if (m === s.model) o.selected = true;
+      o.value = m.name;
+      const need = m.needGb ? `${m.needGb} GB` : null;
+      o.textContent = m.name +
+        (need ? `  \u00b7 ${need}${m.fits === false ? " \u26a0 won't fit" : ""}` : "");
+      if (m.fits === false) o.dataset.tight = "1";
+      if (m.name === s.model) o.selected = true;
       els.model.appendChild(o);
     }
-    if (!s.models?.length) {
-      els.model.innerHTML = "<option>no models</option>";
-    }
+    if (!s.models?.length) els.model.innerHTML = "<option>no models</option>";
+    els.model.title = s.freeGb != null
+      ? `${s.freeGb} GB RAM free right now`
+      : "";
     state.model = s.model;
   } catch {
     els.status.className = "status down";
@@ -282,7 +290,50 @@ async function showConnectors() {
 
       row.appendChild(actions);
     }
+
+    // Scope options. All off by default, and off always means narrower — the
+    // defaults are what people actually ask about, and every extra row a tool
+    // returns is prompt the local model must read before it can answer.
+    for (const opt of c.options || []) {
+      const label = document.createElement("label");
+      label.className = "conn-opt";
+
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !!opt.value;
+      box.onchange = () => setConnectorOption(box, c.id, opt.key, box.checked);
+
+      const text = document.createElement("span");
+      text.textContent = opt.label;
+
+      label.append(box, text);
+      if (opt.hint) {
+        const hint = document.createElement("span");
+        hint.className = "conn-opt-hint";
+        hint.textContent = opt.hint;
+        label.appendChild(hint);
+      }
+      row.appendChild(label);
+    }
     body.appendChild(row);
+  }
+}
+
+/** Persist one connector option. Reverts the box if the server refuses, so the
+ *  UI can never show a scope that isn't actually in force. */
+async function setConnectorOption(box, server, key, value) {
+  box.disabled = true;
+  try {
+    const res = await fetch("/api/chat/connectors/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ server, key, value }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "failed");
+  } catch {
+    box.checked = !value;
+  } finally {
+    box.disabled = false;
   }
 }
 
