@@ -118,9 +118,11 @@ async function refreshStatus() {
     // person has is WhatsApp, Reminders and Things. A failure gets its own
     // clause rather than being folded into the total — a healthy-looking count
     // while WhatsApp was silently down is exactly what hid a real outage.
-    const c = s.connectors || { ready: 0, failed: 0 };
+    const c = s.connectors || { ready: 0, failed: 0, connecting: 0 };
     els.statusText.textContent = !s.available ? "no model"
       : c.failed ? `${c.ready} connected \u00b7 ${c.failed} failed`
+      : c.connecting && !c.ready ? "connecting\u2026"
+      : c.connecting ? `${c.ready} connector${c.ready === 1 ? "" : "s"} \u00b7 ${c.connecting} connecting`
       : c.ready ? `ready \u00b7 ${c.ready} connector${c.ready === 1 ? "" : "s"}`
       : "ready \u00b7 no connectors";
     if (s.available && c.failed) els.status.classList.add("warn");
@@ -201,15 +203,21 @@ async function showConnectors() {
   }
 
   if (!data.connectors?.length) {
-    body.innerHTML = `<div class="conn-empty">No connectors configured.<br>
-      <span class="conn-sub">Re-run the REFUGIO installer to add WhatsApp, reminders or notes.</span></div>`;
+    // An empty list right after launch means the pool hasn't read the config
+    // yet, NOT that nothing is configured. Telling someone with three working
+    // connectors to re-run the installer is worse than saying nothing.
+    body.innerHTML = data.starting
+      ? `<div class="conn-empty">Starting\u2026<br>
+         <span class="conn-sub">Connectors take a few seconds to come up.</span></div>`
+      : `<div class="conn-empty">No connectors configured.<br>
+         <span class="conn-sub">Re-run the REFUGIO installer to add WhatsApp, reminders or notes.</span></div>`;
     return;
   }
 
   body.innerHTML = "";
   for (const c of data.connectors) {
     const row = document.createElement("div");
-    row.className = "conn" + (c.ok ? "" : " failed");
+    row.className = "conn" + (c.ok ? "" : c.state === "connecting" ? " starting" : " failed");
 
     const head = document.createElement("div");
     head.className = "conn-head";
@@ -220,7 +228,8 @@ async function showConnectors() {
     name.textContent = c.label || c.id;
     const meta = document.createElement("span");
     meta.className = "conn-meta";
-    meta.textContent = c.ok ? `${c.tools} tool${c.tools === 1 ? "" : "s"}` : "not working";
+    meta.textContent = c.state === "connecting" ? "connecting\u2026"
+      : c.ok ? `${c.tools} tool${c.tools === 1 ? "" : "s"}` : "not working";
     head.append(dot, name, meta);
     row.appendChild(head);
 
