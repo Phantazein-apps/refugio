@@ -299,6 +299,7 @@ textarea {
   font: 500 .75rem var(--font-sans); padding: 5px var(--s3); cursor: pointer;
 }
 .conn-btn:hover:not(:disabled) { border-color: var(--ink-faint); }
+a.conn-btn { text-decoration: none; display: inline-block; }
 .conn-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .conn-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .conn-btn:disabled { opacity: .55; cursor: default; }

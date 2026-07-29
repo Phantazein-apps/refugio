@@ -268,9 +268,26 @@ async function showConnectors() {
     // of the native window, and it stops being true the moment something
     // breaks — which is exactly when a non-technical user is least able to
     // open one.
-    if (c.state === "failed") {
+    // Degraded counts as needing help too. A connector that is running but
+    // can't reach its account was previously a dead end: the panel diagnosed
+    // "offline" and then offered nothing to do about it.
+    if (c.state === "failed" || c.state === "degraded") {
       const actions = document.createElement("div");
       actions.className = "conn-actions";
+
+      // Re-linking is the usual fix for an unreachable account — WhatsApp drops
+      // a linked device after long inactivity, and no amount of restarting
+      // brings it back. Listed first for a degraded connector for that reason.
+      if (c.setup) {
+        const link = document.createElement("a");
+        link.className = "conn-btn" + (c.state === "degraded" ? " primary" : "");
+        link.textContent = c.setup.label;
+        link.href = c.setup.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.title = c.setup.hint || "";
+        actions.appendChild(link);
+      }
 
       if (c.conflict) {
         // Name the process. It may be a leftover, or it may be Claude Desktop
@@ -290,7 +307,7 @@ async function showConnectors() {
 
       const retry = document.createElement("button");
       retry.className = "conn-btn";
-      retry.textContent = "Retry";
+      retry.textContent = c.state === "degraded" ? "Reconnect" : "Retry";
       retry.onclick = () => runFix(retry, c.id, "retry");
       actions.appendChild(retry);
 
