@@ -141,9 +141,14 @@ async function refreshStatus() {
     for (const m of s.models || []) {
       const o = document.createElement("option");
       o.value = m.name;
-      const need = m.needGb ? `${m.needGb} GB` : null;
-      o.textContent = m.name +
-        (need ? `  \u00b7 ${need}${m.fits === false ? " \u26a0 won't fit" : ""}` : "");
+      // Name · what it needs · what to do. "Won't fit" alone leaves someone
+      // staring at a model they can't use with no idea how close they are.
+      const parts = [];
+      if (m.needGb) parts.push(`${m.needGb} GB`);
+      if (m.fits === false) {
+        parts.push(m.freeUpGb ? `\u26a0 free ${m.freeUpGb} GB more` : "\u26a0 won't fit");
+      }
+      o.textContent = m.name + (parts.length ? `  \u00b7 ${parts.join("  \u00b7 ")}` : "");
       if (m.fits === false) o.dataset.tight = "1";
       if (m.name === s.model) o.selected = true;
       els.model.appendChild(o);

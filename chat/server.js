@@ -92,10 +92,16 @@ function describeModels(names) {
   const budget = freeGb == null ? null : freeGb - 0.05 - 1.0;  // chat UI + headroom
   return names.map((name) => {
     const needGb = mf ? mf.modelRamGb(name.split("@")[0]) : 0;
+    const fits = needGb && budget != null ? needGb <= budget : null;
     return {
       name,
       needGb: needGb || null,                    // null = not on the ladder, unknown
-      fits: needGb && budget != null ? needGb <= budget : null,
+      fits,
+      // How much more RAM to free before this model is usable. "Won't fit" says
+      // a model is out of reach; this says what to do about it, which is the
+      // difference between a warning and an instruction. Open WebUI gave the
+      // number and it was the useful half.
+      freeUpGb: fits === false ? Math.max(0.1, Math.round((needGb - budget) * 10) / 10) : null,
       tools: modelSupportsTools(name),
     };
   });
