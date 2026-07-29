@@ -299,6 +299,12 @@ textarea {
   font: 500 .75rem var(--font-sans); padding: 5px var(--s3); cursor: pointer;
 }
 .conn-btn:hover:not(:disabled) { border-color: var(--ink-faint); }
+/* Why a connector is broken — stated before anything is clicked. */
+.conn-why {
+  margin: var(--s2) 0 0 15px; font-size: .75rem; line-height: 1.1rem;
+  color: var(--ink-muted);
+}
+
 /* Outcome of a fix. Must survive the panel redraw that follows one. */
 .conn-note {
   margin: var(--s2) 0 0 15px; padding: var(--s2) var(--s3);

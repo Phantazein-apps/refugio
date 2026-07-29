@@ -273,10 +273,8 @@ async function showConnectors() {
     // of the native window, and it stops being true the moment something
     // breaks — which is exactly when a non-technical user is least able to
     // open one.
-    // ONE button. There is always a single best next thing to try, and asking
-    // someone to choose between "Reconnect" and "Retry" — which called the
-    // same endpoint — was a choice with no answer. The fallback is a sentence
-    // with a link, not a second button competing for the same click.
+    // One primary action: the thing most likely to actually work, chosen from
+    // the connector's state rather than from what is cheapest to run.
     if (c.state === "failed" || c.state === "degraded") {
       if (c.conflict) {
         // Name the process. It may be a leftover, or Claude Desktop
@@ -288,23 +286,59 @@ async function showConnectors() {
         row.appendChild(what);
       }
 
+      // Say what is wrong BEFORE anything is clicked. Making someone press a
+      // button to learn why it won't help is a bad trade, and restarting is
+      // exactly that here: the connector is running fine, so there is nothing
+      // for a restart to repair.
+      const relinkFirst = c.state === "degraded" && !c.conflict && !!c.setup;
+      if (relinkFirst) {
+        const why = document.createElement("div");
+        why.className = "conn-why";
+        why.textContent =
+          "The connector is running, but this account isn't connected to WhatsApp. " +
+          "That usually means the phone unlinked this device, which only re-linking fixes.";
+        row.appendChild(why);
+      }
+
       const actions = document.createElement("div");
       actions.className = "conn-actions";
 
+      if (relinkFirst) {
+        // Re-link leads. Reconnect was primary here and could never succeed —
+        // a prominent button that cannot fix the problem it is offered for.
+        const link = document.createElement("a");
+        link.className = "conn-btn primary";
+        link.href = c.setup.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = c.setup.label;
+        actions.appendChild(link);
+      }
+
       const btn = document.createElement("button");
-      btn.className = "conn-btn primary";
+      btn.className = "conn-btn" + (relinkFirst ? "" : " primary");
       // Restarting while something else holds the lock just fails again, so
       // when a blocker is identified that IS the action — not an extra option.
       btn.textContent = c.conflict ? "Stop it and restart"
-        : c.state === "degraded" ? "Reconnect" : "Restart";
+        : c.state === "degraded" ? "Reconnect anyway" : "Restart";
       btn.onclick = () => runFix(btn, c.id, c.conflict ? "resolve" : "retry");
       actions.appendChild(btn);
       row.appendChild(actions);
 
+      // The outcome belongs between the button that produced it and the next
+      // step it recommends. Rendered after the fallback link, "re-link below"
+      // pointed at a link that was above it.
+      if (pendingNotice && pendingNotice.id === c.id) {
+        const note = document.createElement("div");
+        note.className = `conn-note ${pendingNotice.tone}`;
+        note.textContent = pendingNotice.text;
+        row.appendChild(note);
+      }
+
       // Re-linking is the fallback, not the first thing to try: reconnecting is
       // instant and usually enough, while re-linking means getting the phone
       // out. Offer it as a next step for when the quick fix didn't work.
-      if (c.setup) {
+      if (c.setup && !relinkFirst) {
         const more = document.createElement("div");
         more.className = "conn-next";
         more.append(document.createTextNode("Still not working? "));
@@ -317,13 +351,6 @@ async function showConnectors() {
         more.appendChild(link);
         row.appendChild(more);
       }
-    }
-
-    if (pendingNotice && pendingNotice.id === c.id) {
-      const note = document.createElement("div");
-      note.className = `conn-note ${pendingNotice.tone}`;
-      note.textContent = pendingNotice.text;
-      row.appendChild(note);
     }
 
     // Scope options only on a connector that works. Offering "include archived
@@ -422,7 +449,7 @@ function describeOutcome(row, action) {
   if (row.state === "connecting") return { tone: "info", text: "Restarted — still starting up." };
   if (row.state === "degraded") {
     return { tone: "warn", text: row.setup
-      ? "Restarted, but the account is still unreachable. WhatsApp has probably unlinked this device — re-link below."
+      ? "Restarted, and the account is still unreachable — as expected when the device has been unlinked. Use Open WhatsApp setup to re-link."
       : "Restarted, but the account is still unreachable." };
   }
   return { tone: "bad", text: "Still not working." };
