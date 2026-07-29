@@ -67,6 +67,20 @@ body {
 }
 .brand { font-weight: 600; letter-spacing: .04em; font-size: .8125rem; }
 .brand .dot { color: var(--accent); }
+/* Beta, stated where the product names itself. Not a dismissible banner: this
+   is true for as long as it is true, and someone who dismissed it on day one
+   would spend the whole beta not knowing they were in one. */
+.beta {
+  font: 600 .5625rem/1 var(--font-sans); letter-spacing: .08em;
+  text-transform: uppercase; color: #fff; background: var(--accent);
+  padding: 3px 5px; border-radius: var(--radius-sm);
+}
+.rail.collapsed .beta { display: none; }
+.empty .beta-note {
+  max-width: 30rem; margin: var(--s5) auto 0; padding-top: var(--s4);
+  border-top: 1px solid var(--border-subtle); font-size: .75rem; line-height: 1.1rem;
+}
+.empty .beta-note a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .rail-toggle {
   margin-left: auto; border: 0; background: none; color: var(--ink-faint);
   cursor: pointer; font-size: .875rem; line-height: 1; padding: 2px 4px;

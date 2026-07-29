@@ -91,7 +91,11 @@ Write-Host ""
 # Use a unique temp file name (no .js extension needed)
 $tmpFile = Join-Path $env:TEMP "refugio-install-$(Get-Random).cjs"
 try {
-    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-node.cjs" -OutFile $tmpFile
+    # Same pin as the bash installer. This used to fetch from main unconditionally,
+    # so a Windows install ignored REFUGIO_VERSION entirely and took whatever was
+    # on the integration branch — the one thing pinning exists to prevent.
+    if (-not $env:REFUGIO_VERSION) { $env:REFUGIO_VERSION = "v2.0.0-beta.2" }
+    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Phantazein-apps/refugio/$($env:REFUGIO_VERSION)/install-node.cjs" -OutFile $tmpFile
     # Run node with stdin connected to the console (not the pipe)
     Start-Process -FilePath "node" -ArgumentList $tmpFile -NoNewWindow -Wait
 } finally {

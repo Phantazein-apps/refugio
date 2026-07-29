@@ -53,7 +53,7 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
             backing: .buffered,
             defer: false
         )
-        w.title = "REFUGIO"
+        w.title = "REFUGIO (beta)"
         w.titlebarAppearsTransparent = true
         w.minSize = NSSize(width: 640, height: 480)
         w.contentView = web

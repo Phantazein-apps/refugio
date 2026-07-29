@@ -927,12 +927,16 @@ function revealSource(name) {
   setTimeout(() => card.classList.remove("flash"), 900);
 }
 
+// The empty state is written once, in index.html, and captured here. It used to
+// be spelled out again in newChat(), so the two drifted the moment either
+// changed — the beta notice would have appeared on first load and vanished the
+// first time someone clicked "New chat".
+const EMPTY_HTML = els.thread.innerHTML;
+
 function newChat() {
   state.conversationId = null;
   resetSources();
-  els.thread.innerHTML =
-    `<div class="empty" id="empty"><h1>Your AI, on your machine</h1>` +
-    `<div class="sub">Nothing leaves this computer. Ask anything to begin.</div></div>`;
+  els.thread.innerHTML = EMPTY_HTML;
   els.empty = $("empty");
   loadConversations();
   els.input.focus();
