@@ -87,22 +87,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// The alternative is what shipped: the app runs perfectly, shows nothing,
     /// and there is no way to stop or restart REFUGIO — the one job it has.
-    private func verifyPlacement() {
+    private func verifyPlacement(attempt: Int = 1) {
         guard let item = statusItem else { return }
         let btn = item.button
         let win = btn?.window
         let width = win?.frame.width ?? 0
-        log("status item: button=\(btn != nil) window=\(win != nil) visible=\(item.isVisible) " +
-            "width=\(width) screens=\(NSScreen.screens.count)")
 
-        // Deliberately conservative. A missing button or window means AppKit
-        // never gave us a slot — unambiguous. A zero width does NOT trigger the
-        // fallback on its own: turning a perfectly good menu-bar icon into a
-        // Dock icon plus an alert would be a worse bug than the one being
-        // fixed, so a suspicious width is logged and left alone. If that turns
-        // out to be the real shape of the failure, the log says so in one line.
-        if btn != nil && win != nil && item.isVisible {
-            if width == 0 { log("WARNING: placed but zero-width — the icon may not be drawn") }
+        // macOS records where a status item sits, under the item's autosave
+        // name, once it has actually been placed. On a machine where the icon
+        // has never appeared this key is absent — the whole defaults domain is
+        // absent — which is the clearest available statement that no slot was
+        // ever granted. Logged rather than acted on: it is evidence, and the
+        // geometry below is the decision.
+        let posKey = "NSStatusItem Preferred Position \(item.autosaveName ?? "")"
+        let everPlaced = UserDefaults.standard.object(forKey: posKey) != nil
+
+        let placed = btn != nil && win != nil && item.isVisible && width > 0
+        log("placement check \(attempt): button=\(btn != nil) window=\(win != nil) " +
+            "visible=\(item.isVisible) width=\(width) everPlaced=\(everPlaced) " +
+            "screens=\(NSScreen.screens.count) placed=\(placed)")
+
+        if placed { return }
+
+        // Retry before giving up rather than deciding on one reading. A zero
+        // width is the real signature of "no room" on a notched Mac — the item
+        // exists, it just isn't drawn — but it is also what a check that ran
+        // too early would see, and turning a working icon into a Dock icon
+        // would be worse than the bug. Three readings over six seconds tells
+        // the two apart; an earlier version refused to act on width at all and
+        // would have sat there logging while the user still had no icon.
+        if attempt < 3 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.verifyPlacement(attempt: attempt + 1)
+            }
             return
         }
         fallBackToDock()
@@ -115,6 +132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let item = statusItem { NSStatusBar.system.removeStatusItem(item) }
         statusItem = nil                       // so setIcon() stops trying
         NSApp.setActivationPolicy(.regular)
+
+        // A Dock app with no icon gets the generic blank one, which reads as a
+        // crashed app rather than the thing the alert just described.
+        if let img = NSImage(systemSymbolName: "mountain.2.fill", accessibilityDescription: "REFUGIO") {
+            NSApp.applicationIconImage =
+                img.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 256, weight: .regular))
+        }
 
         // With .regular and no main menu the menu bar is empty and even ⌘Q is
         // gone — the app would be exactly as unreachable as it was before.
