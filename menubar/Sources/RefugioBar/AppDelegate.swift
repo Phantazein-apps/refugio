@@ -102,9 +102,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let posKey = "NSStatusItem Preferred Position \(item.autosaveName ?? "")"
         let everPlaced = UserDefaults.standard.object(forKey: posKey) != nil
 
-        let placed = btn != nil && win != nil && item.isVisible && width > 0
+        // Having a window is not the same as being where anyone can see it. On
+        // a notched Mac the menu bar continues UNDER the notch, and an item
+        // that lands there is placed, visible, non-zero width — and invisible.
+        // Geometry is the only thing that can tell those apart, so measure it
+        // against the two regions macOS exposes either side of the notch.
+        var notched = false
+        if let f = win?.frame, let screen = NSScreen.main,
+           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            let notch = NSRect(x: left.maxX, y: min(left.minY, right.minY),
+                               width: max(0, right.minX - left.maxX),
+                               height: max(left.height, right.height))
+            notched = notch.intersects(f)
+            log("geometry: item=\(f) notch=\(notch) screen=\(screen.frame)")
+        } else if let f = win?.frame {
+            log("geometry: item=\(f) (no notch on this screen)")
+        }
+
+        let placed = btn != nil && win != nil && item.isVisible && width > 0 && !notched
         log("placement check \(attempt): button=\(btn != nil) window=\(win != nil) " +
-            "visible=\(item.isVisible) width=\(width) everPlaced=\(everPlaced) " +
+            "visible=\(item.isVisible) width=\(width) image=\(btn?.image != nil) " +
+            "underNotch=\(notched) everPlaced=\(everPlaced) " +
             "screens=\(NSScreen.screens.count) placed=\(placed)")
 
         if placed { return }
