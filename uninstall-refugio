@@ -1,0 +1,198 @@
+#!/bin/bash
+# Remove REFUGIO from this machine.
+#
+# Written because "just delete the folder" is wrong in a way that costs people
+# things they didn't agree to lose. Three of REFUGIO's files are expensive:
+#
+#   ~/hermeneia/…/whatsmeow.db   Your WhatsApp link. Deleting it means getting
+#                                your phone out and scanning a QR code again.
+#   ~/refugio/data/chat.db       Every conversation you have had.
+#   Ollama models                Gigabytes, re-downloaded at your line speed.
+#
+# The first two live INSIDE the directories an uninstall would obviously
+# remove, so a plain `rm -rf ~/refugio ~/hermeneia` destroys them without ever
+# mentioning them. This asks. Default answers keep your data; --all takes
+# everything; --dry-run shows what would happen and touches nothing.
+#
+# Usage:
+#   ./uninstall-refugio              # asks about anything expensive
+#   ./uninstall-refugio --all        # remove everything, no questions
+#   ./uninstall-refugio --dry-run    # show what would be removed
+set -u
+
+ALL=0; DRY=0; YES=0
+for a in "$@"; do
+  case "$a" in
+    --all) ALL=1 ;;
+    --dry-run|-n) DRY=1 ;;
+    --yes|-y) YES=1 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $a" >&2; exit 2 ;;
+  esac
+done
+
+BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; RESET=$'\033[0m'
+say()  { printf '%s\n' "$*"; }
+step() { printf '▸ %s\n' "$*"; }
+gone=0; kept=0
+
+# Remove a path, or say it would be. Counts what actually happened so the
+# summary can't claim more than it did.
+rm_path() {
+  local p="$1"
+  [ -e "$p" ] || [ -L "$p" ] || return 0
+  if [ "$DRY" = 1 ]; then say "  would remove  $p"; else rm -rf "$p"; say "  removed  $p"; fi
+  gone=$((gone + 1))
+}
+keep_note() { say "  ${DIM}kept     $1${RESET}"; kept=$((kept + 1)); }
+
+# Ask about something expensive. Returns 0 to delete. Default is to KEEP —
+# every question here is about data the user cannot get back by reinstalling.
+confirm_destroy() {
+  local what="$1" cost="$2"
+  [ "$ALL" = 1 ] && return 0
+  [ "$YES" = 1 ] && return 1          # --yes means "don't ask", not "delete more"
+  printf '%s\n' "  ${BOLD}${what}${RESET}"
+  printf '%s\n' "  ${DIM}${cost}${RESET}"
+  # No terminal (piped, or run from a script) means nobody can answer. Keep
+  # the data and say so, rather than printing a prompt into the void and then
+  # acting on the silence.
+  # Test by opening it, not with -r: the device node can exist and still fail
+  # to open (containers, cron), and -r says yes to both.
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    printf '%s\n' "  ${DIM}no terminal to ask on — keeping it${RESET}"
+    return 1
+  fi
+  printf '  Delete it? [y/N] '
+  local ans=""; read -r ans </dev/tty || ans=""
+  case "$ans" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+[ "$DRY" = 1 ] && say "${BOLD}Dry run — nothing will be deleted.${RESET}" && say ""
+
+# ── 1. Stop everything first ───────────────────────────────────────────
+# Removing files under a running supervisor leaves it thrashing on paths that
+# no longer exist, and a live Hermeneia keeps a lock on the WhatsApp database.
+step "Stopping REFUGIO"
+if [ "$DRY" = 0 ]; then
+  [ -f "$HOME/.refugio-logs/supervisor.pid" ] &&
+    kill "$(cat "$HOME/.refugio-logs/supervisor.pid")" 2>/dev/null
+  pkill -f "start-refugio" 2>/dev/null
+  pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar" 2>/dev/null
+  pkill -f "refugio-tray" 2>/dev/null
+  launchctl unload "$HOME/Library/LaunchAgents/com.phantazein.refugio.plist" 2>/dev/null
+  systemctl --user stop refugio.service 2>/dev/null
+  sleep 2
+fi
+say "  done"
+
+# ── 2. Things a reinstall recreates — removed without asking ───────────
+step "Removing REFUGIO itself"
+rm_path "/Applications/REFUGIO.app"
+rm_path "$HOME/Library/LaunchAgents/com.phantazein.refugio.plist"
+rm_path "$HOME/.config/systemd/user/refugio.service"
+rm_path "$HOME/.config/autostart/refugio-tray.desktop"
+rm_path "$HOME/.local/share/applications/refugio.desktop"
+rm_path "$HOME/.local/bin/refugio"
+rm_path "$HOME/.refugio-logs"
+
+# The menu-bar app's own preferences, including the position macOS remembers
+# for its status item. Left behind, a hidden-item state survives a reinstall
+# and the icon stays invisible for reasons nothing on disk explains.
+if [ "$DRY" = 0 ]; then
+  defaults delete com.phantazein.refugio.menubar >/dev/null 2>&1 && say "  removed  menu-bar app preferences"
+else
+  say "  would remove  menu-bar app preferences (defaults domain)"
+fi
+
+# ── 3. Chat history and settings ───────────────────────────────────────
+# Inside ~/refugio, which is why this is asked BEFORE that directory goes.
+step "Chat history and settings"
+if [ -d "$HOME/refugio/data" ] || [ -d "$HOME/.refugio-data" ]; then
+  if confirm_destroy "Your conversations and connector settings" \
+       "~/refugio/data — every chat you have had with REFUGIO."; then
+    rm_path "$HOME/refugio/data"
+    rm_path "$HOME/.refugio-data"
+  else
+    # Move it aside so removing ~/refugio doesn't take it anyway.
+    if [ -d "$HOME/refugio/data" ]; then
+      if [ "$DRY" = 0 ]; then
+        mkdir -p "$HOME/.refugio-data-saved" && cp -R "$HOME/refugio/data/." "$HOME/.refugio-data-saved/" 2>/dev/null
+      fi
+      say "  ${DIM}saved to ~/.refugio-data-saved — copy it back into ~/refugio/data after reinstalling${RESET}"
+    fi
+    keep_note "chat history"
+  fi
+else
+  say "  ${DIM}none found${RESET}"
+fi
+
+step "Credentials and configuration"
+if [ -f "$HOME/.refugio.env" ]; then
+  if confirm_destroy "~/.refugio.env" \
+       "Connector URLs and tokens — your Epistole endpoint, Notion key, and the rest. The installer will ask for them all again."; then
+    rm_path "$HOME/.refugio.env"
+  else
+    keep_note "~/.refugio.env (the installer will reuse it)"
+  fi
+else
+  say "  ${DIM}none found${RESET}"
+fi
+
+# ── 4. The install directory ───────────────────────────────────────────
+step "Removing ~/refugio"
+rm_path "$HOME/refugio"
+
+# ── 5. WhatsApp ────────────────────────────────────────────────────────
+step "WhatsApp (Hermeneia)"
+if [ -d "$HOME/hermeneia" ] || [ -d "$HOME/.hermeneia" ]; then
+  if confirm_destroy "Your WhatsApp link and local message database" \
+       "You will have to scan the QR code with your phone again. Keeping it means a reinstall picks up where you left off."; then
+    rm_path "$HOME/hermeneia"
+    rm_path "$HOME/.hermeneia"
+  else
+    keep_note "~/hermeneia (still linked — reinstall will reuse it)"
+  fi
+else
+  say "  ${DIM}none found${RESET}"
+fi
+
+# ── 6. Ollama models ───────────────────────────────────────────────────
+# Not REFUGIO's to delete by default: Ollama may predate it and be used by
+# other things. But they are the biggest thing on disk, so they get offered.
+step "Ollama models"
+if command -v ollama >/dev/null 2>&1; then
+  models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+  if [ -n "$models" ]; then
+    size=$(du -sh "$HOME/.ollama/models" 2>/dev/null | cut -f1)
+    say "  ${DIM}installed: $(echo "$models" | tr '\n' ' ')${RESET}"
+    if confirm_destroy "Downloaded models${size:+ ($size)}" \
+         "Re-downloading takes gigabytes. Ollama itself is left installed either way — other apps may be using it."; then
+      for m in $models; do
+        if [ "$DRY" = 1 ]; then say "  would remove  model $m"; else ollama rm "$m" >/dev/null 2>&1 && say "  removed  model $m"; fi
+        gone=$((gone + 1))
+      done
+    else
+      keep_note "Ollama models"
+    fi
+  else
+    say "  ${DIM}none installed${RESET}"
+  fi
+else
+  say "  ${DIM}Ollama not installed${RESET}"
+fi
+
+# ── Summary ────────────────────────────────────────────────────────────
+say ""
+if [ "$DRY" = 1 ]; then
+  say "${BOLD}Dry run complete${RESET} — $gone item(s) would be removed. Nothing was changed."
+else
+  if [ "$kept" -gt 0 ]; then
+    say "${BOLD}REFUGIO removed${RESET} — $gone item(s) deleted, $kept kept."
+  else
+    say "${BOLD}REFUGIO removed${RESET} — $gone item(s) deleted."
+  fi
+fi
+say ""
+say "Reinstall with:"
+say "  ${DIM}curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash${RESET}"

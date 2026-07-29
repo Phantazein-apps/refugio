@@ -100,6 +100,16 @@ refugio --owui            # or REFUGIO_OWUI=1
 
 > **Reinstalling?** Run the same command again. Your settings in `~/.refugio.env` are preserved.
 
+### Uninstalling
+
+```bash
+~/refugio/uninstall-refugio              # asks before deleting anything expensive
+~/refugio/uninstall-refugio --dry-run    # show what would go, change nothing
+~/refugio/uninstall-refugio --all        # everything, no questions
+```
+
+Deleting `~/refugio` by hand is not the same thing: your **chat history lives inside it** (`~/refugio/data`), and your **WhatsApp link lives in `~/hermeneia`** — losing that means scanning the QR code again. The uninstaller asks about both, and about your Ollama models, before touching them. Everything else — the app, the login item, the tray, the `refugio` command — goes without asking, because a reinstall recreates it.
+
 ### After install
 
 On machines with comfortable RAM, REFUGIO **auto-starts on login**. On **low-RAM (≤ 8 GB)** machines it runs **on demand** instead — so it never holds memory when you're not using it (start with `refugio`, stop with `refugio stop`).
