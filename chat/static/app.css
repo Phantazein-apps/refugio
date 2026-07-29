@@ -299,6 +299,16 @@ textarea {
   font: 500 .75rem var(--font-sans); padding: 5px var(--s3); cursor: pointer;
 }
 .conn-btn:hover:not(:disabled) { border-color: var(--ink-faint); }
+/* Outcome of a fix. Must survive the panel redraw that follows one. */
+.conn-note {
+  margin: var(--s2) 0 0 15px; padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm); font-size: .75rem; line-height: 1.1rem;
+  border-left: 3px solid var(--ink-faint); background: var(--bg-surface-3);
+}
+.conn-note.good { border-left-color: #0dbd8b; }
+.conn-note.warn { border-left-color: #e8a33d; }
+.conn-note.bad  { border-left-color: var(--accent); }
+
 /* The fallback is a sentence, not a rival button. */
 .conn-next { margin: var(--s2) 0 0 15px; font-size: .75rem; color: var(--ink-faint); }
 .conn-next a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
