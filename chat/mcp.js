@@ -11,6 +11,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFileSync, existsSync } from "fs";
+import { execFile } from "child_process";
 
 const log = (m) => console.log(`[chat:mcp] ${m}`);
 
@@ -70,6 +71,45 @@ function firstCause(stderr) {
   return (named || lines[0] || "").slice(0, 300);
 }
 
+/**
+ * Identify a process that is blocking a connector, well enough to offer
+ * stopping it from the UI.
+ *
+ * Single-instance connectors (Hermeneia guards one WhatsApp session this way)
+ * report the holder's PID when they refuse to start. That PID is the whole fix
+ * — but acting on it needs care, so two things are checked before it is ever
+ * offered as a button:
+ *
+ *   1. The PID comes from the connector's OWN error text, never from a request.
+ *      Nothing a caller sends can select what gets killed.
+ *   2. The live process must actually look like this connector. PIDs are
+ *      recycled, and "stop PID 36263" landing on something unrelated would be
+ *      a genuinely bad outcome for a click in a chat window.
+ *
+ * The command line is returned so the UI can show what it is about to stop —
+ * that process may legitimately belong to Claude Desktop rather than being a
+ * leftover, and only the user can judge that.
+ */
+async function conflictingProcess(errorText, spec) {
+  if (process.platform === "win32") return null;      // no ps; offer plain retry
+  const m = /already running \(PID (\d+)\)/i.exec(errorText || "");
+  if (!m) return null;
+  const pid = parseInt(m[1], 10);
+  if (!(pid > 1) || pid === process.pid) return null;
+
+  const command = await new Promise((resolve) => {
+    execFile("ps", ["-p", String(pid), "-o", "command="], { timeout: 3000 },
+      (err, stdout) => resolve(err ? null : (stdout || "").trim()));
+  });
+  if (!command) return null;
+
+  // It must be running the same entry point this connector is configured with.
+  const marker = (spec?.args || []).find((a) => typeof a === "string" && a.includes("/"));
+  if (!marker || !command.includes(marker)) return null;
+
+  return { pid, command };
+}
+
 // A server saying "I don't have that tool" is a definite answer. Anything else
 // (timeout, closed connection) means we don't know yet and must not be cached.
 const UNSUPPORTED_TOOL =
@@ -109,8 +149,8 @@ export class McpPool {
     const servers = Object.entries(config.mcpServers || {})
       .filter(([name]) => !only || only.includes(name));
 
-    for (const [name] of servers) {
-      this.servers.set(name, { name, tools: 0, ok: false, error: null });
+    for (const [name, spec] of servers) {
+      this.servers.set(name, { name, tools: 0, ok: false, error: null, spec });
     }
 
     await Promise.all(servers.map(([name, spec]) =>
@@ -122,6 +162,59 @@ export class McpPool {
 
     log(`${this.tools.length} tools from ${this.clients.size}/${servers.length} server(s)`);
     return this;
+  }
+
+  /**
+   * Reconnect one connector, in place.
+   *
+   * The point is that a failure is recoverable without a terminal: whatever
+   * was in the way (a stale process holding a lock, a connector that hadn't
+   * finished installing) can be dealt with and the connector retried from the
+   * UI. Its old tools are dropped first so a partial previous connect can't
+   * leave duplicates behind.
+   */
+  async reconnect(name, { timeoutMs = 20000 } = {}) {
+    const entry = this.servers.get(name);
+    if (!entry) throw new Error(`unknown connector "${name}"`);
+
+    try { await this.clients.get(name)?.close(); } catch { /* already gone */ }
+    this.clients.delete(name);
+    const prefix = `${name}${SEP}`;
+    this.tools = this.tools.filter((t) => !t.function.name.startsWith(prefix));
+    for (const key of [...this.byName.keys()]) {
+      if (key.startsWith(prefix)) this.byName.delete(key);
+    }
+    Object.assign(entry, { tools: 0, ok: false, error: null });
+
+    try {
+      await this.#connectOne(name, entry.spec, timeoutMs);
+    } catch (e) {
+      entry.error = e.message;
+      log(`"${name}" retry failed: ${e.message}`);
+    }
+    return entry;
+  }
+
+  /**
+   * Stop whatever is blocking a connector, then retry it.
+   *
+   * The PID is re-derived from the connector's current error and re-verified
+   * here rather than taken from the caller — the check must sit next to the
+   * kill, or a later refactor could quietly separate them.
+   */
+  async resolveConflict(name) {
+    const entry = this.servers.get(name);
+    if (!entry) throw new Error(`unknown connector "${name}"`);
+    const conflict = await conflictingProcess(entry.error, entry.spec);
+    if (!conflict) throw new Error("nothing identifiable is blocking this connector");
+
+    try { process.kill(conflict.pid, "SIGTERM"); }
+    catch (e) { throw new Error(`could not stop PID ${conflict.pid}: ${e.message}`); }
+    log(`stopped PID ${conflict.pid} blocking "${name}"`);
+
+    // Give it a moment to release the lock before racing it for the same one.
+    await new Promise((r) => setTimeout(r, 1200));
+    return this.reconnect(name);
   }
 
   async #connectOne(name, spec, timeoutMs) {
@@ -205,8 +298,11 @@ export class McpPool {
       // configured") is a confident lie during the first ~15 seconds.
       const state = s.ok ? "ok" : s.error ? "failed" : "connecting";
       const row = { id: s.name, tools: s.tools, ok: s.ok, state, error: s.error,
-                    accounts: [], accountsUnknown: false };
-      if (!s.ok) return row;
+                    accounts: [], accountsUnknown: false, conflict: null };
+      if (!s.ok) {
+        if (state === "failed") row.conflict = await conflictingProcess(s.error, s.spec);
+        return row;
+      }
       let raw;
       try {
         raw = await withTimeout(
