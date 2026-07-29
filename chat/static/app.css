@@ -267,6 +267,22 @@ textarea {
   font: 400 .6875rem/1rem var(--font-mono); color: var(--ink-muted);
   overflow-wrap: anywhere;
 }
+/* Fixing a connector, without a terminal. */
+.conn-blocked {
+  margin: var(--s2) 0 0 15px; font-size: .6875rem; color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.conn-actions { display: flex; gap: var(--s2); margin: var(--s3) 0 0 15px; }
+.conn-btn {
+  border: 1px solid var(--border); background: var(--bg-surface-2);
+  color: var(--ink); border-radius: var(--radius-md);
+  font: 500 .75rem var(--font-sans); padding: 5px var(--s3); cursor: pointer;
+}
+.conn-btn:hover:not(:disabled) { border-color: var(--ink-faint); }
+.conn-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.conn-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.conn-btn:disabled { opacity: .55; cursor: default; }
+
 .conn-empty { padding: var(--s4) 0; text-align: center; color: var(--ink-muted); }
 .conn-empty .conn-sub { font-size: .75rem; color: var(--ink-faint); }
 

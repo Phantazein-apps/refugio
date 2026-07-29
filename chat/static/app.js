@@ -249,7 +249,64 @@ async function showConnectors() {
       err.textContent = c.error;   // textContent: this is a child process's stderr
       row.appendChild(err);
     }
+
+    // Fixing a connector must not require a terminal. That was the whole point
+    // of the native window, and it stops being true the moment something
+    // breaks — which is exactly when a non-technical user is least able to
+    // open one.
+    if (c.state === "failed") {
+      const actions = document.createElement("div");
+      actions.className = "conn-actions";
+
+      if (c.conflict) {
+        // Name the process. It may be a leftover, or it may be Claude Desktop
+        // legitimately holding the same account — only the user knows which,
+        // so show what is about to stop rather than just offering "Fix".
+        const what = document.createElement("div");
+        what.className = "conn-blocked";
+        what.textContent = `Blocked by PID ${c.conflict.pid}: ${c.conflict.command}`;
+        row.appendChild(what);
+
+        const stop = document.createElement("button");
+        stop.className = "conn-btn primary";
+        stop.textContent = `Stop it and retry`;
+        stop.onclick = () => runFix(stop, c.id, "resolve");
+        actions.appendChild(stop);
+      }
+
+      const retry = document.createElement("button");
+      retry.className = "conn-btn";
+      retry.textContent = "Retry";
+      retry.onclick = () => runFix(retry, c.id, "retry");
+      actions.appendChild(retry);
+
+      row.appendChild(actions);
+    }
     body.appendChild(row);
+  }
+}
+
+/** Run a connector fix and redraw the panel with the result.
+ *
+ *  Redraws from the server's response rather than optimistically: the point of
+ *  this panel is that it says what is actually true. */
+async function runFix(btn, id, action) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = action === "resolve" ? "Stopping\u2026" : "Retrying\u2026";
+  try {
+    const res = await fetch(`/api/chat/connectors/${encodeURIComponent(id)}/${action}`,
+      { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `failed (${res.status})`);
+    document.getElementById("connectors")?.remove();
+    await showConnectors();
+    refreshStatus();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = label;
+    const err = btn.closest(".conn")?.querySelector(".conn-err");
+    if (err) err.textContent = String(e.message || e);
   }
 }
 

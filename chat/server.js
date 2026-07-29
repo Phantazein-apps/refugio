@@ -319,6 +319,26 @@ async function streamTurn(res, { conversationId, message, model, persistUser }) 
 async function route(req, res, url) {
   const p = url.pathname;
 
+  // Retry one connector, or stop what's blocking it first. POST because both
+  // change state. The connector id comes from the path and must exist in the
+  // pool; nothing about which process gets stopped is caller-controlled.
+  const fix = /^\/api\/chat\/connectors\/([A-Za-z0-9_-]{1,64})\/(retry|resolve)$/.exec(p);
+  if (fix && req.method === "POST") {
+    if (!mcp) return sendJson(res, 503, { error: "connectors are still starting" });
+    const [, id, action] = fix;
+    if (!mcp.servers.has(id)) return sendJson(res, 404, { error: `unknown connector "${id}"` });
+    try {
+      await (action === "resolve" ? mcp.resolveConflict(id) : mcp.reconnect(id));
+    } catch (e) {
+      return sendJson(res, 409, { error: e.message });
+    }
+    connectorCache = { at: 0, rows: [] };          // force a fresh read
+    const rows = await connectorRows({ force: true });
+    return sendJson(res, 200, {
+      connectors: rows, starting: !connectorsSettled, ...countConnectors(rows),
+    });
+  }
+
   if (p === "/api/chat/connectors") {
     const rows = await connectorRows({ force: true });
     return sendJson(res, 200, {
