@@ -12,6 +12,8 @@ const els = {
   model: $("model-pick"), status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
   rail: $("rail"), railToggle: $("rail-toggle"),
+  gutter: $("gutter"), gutterRail: $("gutter-rail"), gutterX: $("gutter-x"),
+  gutterBody: $("gutter-body"), gutterCount: $("gutter-count"),
 };
 
 const state = {
@@ -766,6 +768,9 @@ function setRailCollapsed(on) {
 async function openConversation(id) {
   state.conversationId = id;
   highlightActive();                       // before the fetch, not after
+  // Sources aren't persisted, so a reopened conversation has none. Showing the
+  // previous chat's would be worse than showing nothing.
+  resetSources();
   showThreadLoading();
   let convo;
   try { convo = await (await fetch(`/api/chat/conversations/${id}`)).json(); }
@@ -776,8 +781,155 @@ async function openConversation(id) {
   loadConversations();
 }
 
+// ── Sources ─────────────────────────────────────────────────
+//
+// SHERPA's right-hand gutter, pointed at what REFUGIO actually has. There, a
+// source is a retrieved document the model cited by token. Here there are no
+// citation tokens and a 3B model would not emit them reliably if there were —
+// what exists is the tool calls the answer was built from: the chats read, the
+// reminders listed, the web results fetched.
+//
+// So this panel does not claim the model cited anything. It shows the evidence
+// the answer had in front of it, which is the honest form of the question
+// people actually ask — "where did this come from?" — and the one thing a
+// local assistant reading your own data owes you.
+//
+// Live for the session only. Persisting sources would mean writing every tool
+// result — other people's messages, in full — into the chat database to power
+// a side panel. The answer is stored; the raw dump behind it is not.
+
+let sources = [];
+
+const CONNECTOR_NAMES = {
+  whatsapp: "WhatsApp", reminders: "Apple Reminders", things: "Things 3",
+  notion: "Notion", memory: "Memory", email: "Email", web: "Web search",
+};
+function splitToolName(name) {
+  const [server, ...rest] = String(name).split("__");
+  return { server, tool: rest.join("__") || server,
+           label: CONNECTOR_NAMES[server] || server };
+}
+
+function resetSources() {
+  sources = [];
+  renderSources();
+}
+
+function addSource(entry) {
+  sources.push(entry);
+  renderSources();
+  // Never steals focus by opening itself. A panel that springs out mid-answer
+  // moves the text being read; the count on the tab is enough of an invitation.
+}
+
+function sourceCard(s, n) {
+  const { tool, label } = splitToolName(s.name);
+  const card = document.createElement("div");
+  card.className = "src" + (s.ok ? "" : " failed");
+  card.dataset.tool = s.name;
+
+  const head = document.createElement("div");
+  head.className = "src-head";
+  const num = document.createElement("span");
+  num.className = "src-n";
+  num.textContent = String(n);
+  const title = document.createElement("span");
+  title.className = "src-title";
+  title.textContent = `${label} · ${tool}`;
+  head.append(num, title);
+  card.appendChild(head);
+
+  // What was actually asked for. Without it two calls to the same tool are
+  // indistinguishable, which is exactly the case where it matters.
+  const argText = Object.entries(s.args || {})
+    .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join("  ·  ");
+  if (argText) {
+    const args = document.createElement("div");
+    args.className = "src-args";
+    args.textContent = argText;
+    card.appendChild(args);
+  }
+
+  // Web results are real links and deserve to be openable, not buried in the
+  // text blob the model was given.
+  if (s.links?.length) {
+    const list = document.createElement("div");
+    list.className = "src-links";
+    for (const l of s.links) {
+      const a = document.createElement("a");
+      a.href = /^https?:\/\//i.test(l.url) ? l.url : "#";   // the server filters; belt and braces
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = l.title || l.url;
+      a.title = l.url;
+      list.appendChild(a);
+    }
+    card.appendChild(list);
+  }
+
+  const body = document.createElement("pre");
+  body.className = "src-body";
+  body.textContent = s.text || (s.ok ? "(empty result)" : "(no detail)");
+  card.appendChild(body);
+
+  if (s.truncated) {
+    const more = document.createElement("div");
+    more.className = "src-trunc";
+    more.textContent = "Result truncated.";
+    card.appendChild(more);
+  }
+
+  // Long results collapse, with a toggle that only appears when there is
+  // something to reveal.
+  //
+  // Decided from the text, not from measuring the rendered element: cards are
+  // built while the panel is collapsed (display:none), where every height is
+  // zero — so a measurement said "nothing to reveal" about every card, and the
+  // toggle was never added to any of them.
+  const text = body.textContent;
+  if (text.length > 600 || text.split("\n").length > 12) {
+    const btn = document.createElement("button");
+    btn.className = "src-more";
+    btn.type = "button";
+    btn.textContent = "Show all";
+    btn.onclick = () => {
+      const open = card.classList.toggle("expanded");
+      btn.textContent = open ? "Show less" : "Show all";
+    };
+    // After the result, before the truncation note. insertBefore(null) appends.
+    card.insertBefore(btn, card.querySelector(".src-trunc"));
+  }
+
+  return card;
+}
+
+function renderSources() {
+  els.gutter.hidden = !sources.length;
+  els.gutterCount.textContent = String(sources.length);
+  els.gutterBody.innerHTML = "";
+  sources.forEach((s, i) => els.gutterBody.appendChild(sourceCard(s, i + 1)));
+  if (!sources.length) setGutter(false);
+}
+
+function setGutter(open) {
+  els.gutter.classList.toggle("is-collapsed", !open);
+}
+
+/** Open the panel at the newest card for one tool — what a tool chip means. */
+function revealSource(name) {
+  setGutter(true);
+  const cards = els.gutterBody.querySelectorAll(`.src[data-tool="${CSS.escape(name)}"]`);
+  const card = cards[cards.length - 1];
+  if (!card) return;
+  card.scrollIntoView({ block: "nearest" });
+  card.classList.add("flash");
+  setTimeout(() => card.classList.remove("flash"), 900);
+}
+
 function newChat() {
   state.conversationId = null;
+  resetSources();
   els.thread.innerHTML =
     `<div class="empty" id="empty"><h1>Your AI, on your machine</h1>` +
     `<div class="sub">Nothing leaves this computer. Ask anything to begin.</div></div>`;
@@ -797,6 +949,10 @@ async function send() {
   // without the user asking twice.
   const web = state.webArmed;
   setWebArmed(false);
+
+  // Sources belong to the answer on screen. Carrying the previous turn's into
+  // this one would attribute an answer to evidence it never saw.
+  resetSources();
 
   els.input.value = "";
   els.input.style.height = "auto";
@@ -849,7 +1005,10 @@ async function send() {
 
         if (ev === "start") { state.conversationId = data.conversation_id; highlightActive(); }
         else if (ev === "tool") showTool(bubble, data.name, "running");
-        else if (ev === "tool_result") showTool(bubble, data.name, data.ok ? "ok" : "failed");
+        else if (ev === "tool_result") {
+          showTool(bubble, data.name, data.ok ? "ok" : "failed");
+          addSource(data);
+        }
         else if (ev === "token") {
           if (!acc) setThinking(bubble, false);
           acc += data.t; bubble.innerHTML = renderContent(acc); scrollToEnd();
@@ -884,8 +1043,13 @@ function showTool(bubble, name, state) {
   const id = "t-" + name.replace(/[^a-z0-9]/gi, "-");
   let chip = strip.querySelector("#" + id);
   if (!chip) {
-    chip = document.createElement("span");
+    chip = document.createElement("button");
+    chip.type = "button";
     chip.className = "tool-chip"; chip.id = id;
+    // The chip is the way into the sources panel: it names the tool that ran,
+    // so it is the obvious thing to press to ask what that tool returned.
+    chip.title = "Show what this returned";
+    chip.onclick = () => revealSource(name);
     strip.appendChild(chip);
   }
   chip.dataset.state = state;
@@ -952,6 +1116,8 @@ els.newChat.addEventListener("click", newChat);
 els.model.addEventListener("change", () => { state.model = els.model.value; });
 
 els.railToggle.addEventListener("click", () => setRailCollapsed(!state.railCollapsed));
+els.gutterRail.addEventListener("click", () => setGutter(true));
+els.gutterX.addEventListener("click", () => setGutter(false));
 
 // Restore the rail before the first paint of the list, so it doesn't render
 // wide and then snap narrow.

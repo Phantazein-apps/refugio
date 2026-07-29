@@ -138,6 +138,10 @@ function describeModels(names) {
 // evenly across servers rather than truncating whichever connected last.
 const TOOL_LIMIT = parseInt(process.env.REFUGIO_TOOL_LIMIT || "40", 10);
 const MAX_TOOL_ROUNDS = parseInt(process.env.REFUGIO_MAX_TOOL_ROUNDS || "5", 10);
+// How much of a tool result is sent to the browser for the sources panel.
+// Generous — this is a local socket, and a truncated source is only half an
+// answer to "where did this come from?" — but not unbounded.
+const SOURCE_CHARS = parseInt(process.env.REFUGIO_SOURCE_CHARS || "8000", 10);
 const MCP_CONFIG = process.env.REFUGIO_MCPO_CONFIG ||
   join(dirname(__dirname), "mcpo-config.json");
 
@@ -350,13 +354,17 @@ async function maybeTitle(convoId, firstMessage, model) {
  *  the only place that actually sends anything. */
 async function runTool(call, webArmed) {
   if (call.name === WEB_TOOL.function.name) {
-    if (!webArmed) return "Error: web search is not enabled for this message.";
+    if (!webArmed) return { text: "Error: web search is not enabled for this message.", links: [] };
     const q = String(call.args?.query ?? "").trim();
     log(`web search: ${JSON.stringify(q.slice(0, 80))}`);
-    return formatResults(q, await webSearch(q));
+    const found = await webSearch(q);
+    // The links go to the UI as structured data as well as into the model's
+    // prompt as text. A web result is the one source here a person may
+    // genuinely want to open for themselves.
+    return { text: formatResults(q, found), links: found.results };
   }
-  if (!mcp) return `Error: no tool named ${call.name}`;
-  return mcp.call(call.name, call.args);
+  if (!mcp) return { text: `Error: no tool named ${call.name}`, links: [] };
+  return { text: await mcp.call(call.name, call.args), links: [] };
 }
 
 /**
@@ -428,9 +436,20 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
 
       for (const call of toolCalls) {
         send("tool", { name: call.name, args: call.args });
-        const result = await runTool(call, webArmed);
+        const { text: result, links } = await runTool(call, webArmed);
         toolsUsed.push(call.name);
-        send("tool_result", { name: call.name, ok: !result.startsWith("Error"), preview: result.slice(0, 160) });
+        // The full result, not a 160-character preview. "Which of my chats did
+        // this come from?" is the first question anyone asks of an answer built
+        // from their own data, and a preview cannot answer it. Capped so one
+        // enormous tool result can't wedge the stream.
+        send("tool_result", {
+          name: call.name,
+          ok: !result.startsWith("Error"),
+          args: call.args,
+          text: result.slice(0, SOURCE_CHARS),
+          truncated: result.length > SOURCE_CHARS,
+          links,
+        });
         messages.push({ role: "tool", content: result, tool_name: call.name });
       }
     }

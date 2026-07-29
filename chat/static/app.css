@@ -149,6 +149,85 @@ body {
    showed through as a row of dashes that read like a broken divider. */
 .rail.collapsed .cg-label, .rail.collapsed .cg-count { display: none; }
 
+/* ── Sources gutter ────────────────────────────────────────
+   Collapsed to a 44px tab by default so the thread keeps the width — the
+   answer is what people came for; the evidence is what they check. */
+.gutter {
+  flex: 0 0 320px; width: 320px;
+  background: var(--bg-surface); border-left: 1px solid var(--border-subtle);
+  display: flex; min-height: 0;
+}
+.gutter.is-collapsed { flex-basis: 44px; width: 44px; }
+/* An author `display` beats the UA stylesheet's [hidden] rule, so without this
+   the empty panel sits there before the first answer showing "0 Sources". */
+.gutter[hidden] { display: none; }
+.gutter-rail {
+  display: none; flex: 0 0 44px; width: 44px;
+  border: 0; border-left: 1px solid var(--border-subtle);
+  background: var(--bg-surface); color: var(--ink-muted); cursor: pointer;
+  flex-direction: column; align-items: center; gap: var(--s2); padding-top: var(--s4);
+}
+.gutter.is-collapsed .gutter-rail { display: flex; }
+.gutter.is-collapsed .gutter-panel { display: none; }
+.gutter-rail:hover { color: var(--ink); background: var(--bg-surface-2); }
+.gr-count {
+  min-width: 20px; height: 20px; border-radius: var(--radius-pill);
+  background: var(--accent); color: #fff; display: grid; place-items: center;
+  font: 600 .6875rem var(--font-sans);
+}
+/* Vertical, so the word reads down the tab instead of wrapping to nothing. */
+.gr-label {
+  writing-mode: vertical-rl; font: 500 .6875rem var(--font-sans);
+  letter-spacing: .08em; text-transform: uppercase;
+}
+
+.gutter-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.gutter-head {
+  display: flex; align-items: center; padding: var(--s4);
+  border-bottom: 1px solid var(--border-subtle); font-size: .8125rem;
+}
+.gutter-x {
+  margin-left: auto; border: 0; background: none; color: var(--ink-faint);
+  font-size: 1.25rem; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.gutter-x:hover { color: var(--accent); }
+.gutter-body { flex: 1; overflow-y: auto; padding: var(--s3) var(--s4) var(--s6); }
+
+.src {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  padding: var(--s3); margin-bottom: var(--s3); background: var(--bg-surface-2);
+}
+.src.failed { border-color: var(--accent); }
+.src.flash { border-color: var(--accent); background: var(--accent-soft); }
+.src-head { display: flex; align-items: center; gap: var(--s2); }
+.src-n {
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: var(--radius-pill);
+  background: var(--bg-surface-3); color: var(--ink-muted);
+  display: grid; place-items: center; font: 600 .625rem var(--font-sans);
+}
+.src-title { font: 500 .75rem var(--font-sans); overflow-wrap: anywhere; }
+.src-args {
+  margin-top: var(--s2); font: 400 .6875rem/1rem var(--font-mono);
+  color: var(--ink-faint); overflow-wrap: anywhere;
+}
+.src-links { display: flex; flex-direction: column; gap: 2px; margin-top: var(--s2); }
+.src-links a {
+  font-size: .75rem; color: var(--accent);
+  text-decoration: underline; text-underline-offset: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.src-body {
+  margin: var(--s2) 0 0; max-height: 9rem; overflow: hidden;
+  font: 400 .6875rem/1rem var(--font-mono); color: var(--ink-muted);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.src.expanded .src-body { max-height: 28rem; overflow-y: auto; }
+.src-more {
+  margin-top: var(--s2); border: 0; background: none; padding: 0; cursor: pointer;
+  font: 500 .6875rem var(--font-sans); color: var(--accent);
+}
+.src-trunc { margin-top: var(--s2); font-size: .625rem; color: var(--ink-faint); }
+
 /* ── Main ──────────────────────────────────────────────── */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .topbar {
@@ -283,16 +362,21 @@ textarea {
 @media (max-width: 720px) {
   .rail { display: none; }
   .thread, .composer-inner, .hint, .web-warn, .web-turn { max-width: none; }
+  /* Expanded, the panel would leave the thread about 60px wide. The tab stays
+     so the sources are still reachable. */
+  .gutter:not(.is-collapsed) { position: fixed; inset: 0 0 0 auto; width: 88vw; z-index: 40; }
 }
 
 /* Tool activity — which connectors a turn actually used. */
 .tools { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s2); }
+/* A button, not a label: it is the way into the sources panel. */
 .tool-chip {
   font: 500 .6875rem/1rem var(--font-mono);
   padding: 3px var(--s2); border-radius: var(--radius-pill);
   background: var(--bg-surface-3); color: var(--ink-muted);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle); cursor: pointer;
 }
+.tool-chip:hover { color: var(--ink); border-color: var(--ink-faint); }
 .tool-chip[data-state="running"] { border-color: var(--accent); color: var(--ink); }
 .tool-chip[data-state="ok"]      { border-color: #0dbd8b; }
 .tool-chip[data-state="failed"]  { border-color: var(--accent); color: var(--accent); }

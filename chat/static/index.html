@@ -48,6 +48,22 @@
       <div class="hint">Enter to send · Shift+Enter for a new line</div>
     </div>
   </main>
+
+  <!-- Sources: what the answer was built from. Collapsed to a rail tab until
+       there is something in it. -->
+  <aside class="gutter is-collapsed" id="gutter" hidden>
+    <button class="gutter-rail" id="gutter-rail" type="button" title="Show sources">
+      <span class="gr-count" id="gutter-count">0</span>
+      <span class="gr-label">Sources</span>
+    </button>
+    <div class="gutter-panel">
+      <div class="gutter-head">
+        <strong>Sources</strong>
+        <button class="gutter-x" id="gutter-x" type="button" title="Hide sources">&times;</button>
+      </div>
+      <div class="gutter-body" id="gutter-body"></div>
+    </div>
+  </aside>
 </div>
 <script type="module" src="app.js"></script>
 </body>
