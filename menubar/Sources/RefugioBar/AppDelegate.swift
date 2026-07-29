@@ -108,7 +108,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Everything reads healthy and nothing is drawn. Only the position knows.
     private func isPlaced() -> Bool {
         guard let item = statusItem, item.isVisible,
-              let f = item.button?.window?.frame, f.width > 0 else { return false }
+              let win = item.button?.window, win.frame.width > 0 else { return false }
+        let f = win.frame
+
+        // `window.screen == nil` is the giveaway. On macOS 26 a status item the
+        // system has blocked is created completely normally — visible, with a
+        // button, with a window of sensible width — and its window is parked
+        // off-screen with no screen attached. Nothing about the item itself
+        // says "blocked"; only the window's relationship to a display does.
+        if win.screen == nil { return false }
 
         let onMenuBar = NSScreen.screens.contains { s in
             NSRect(x: s.frame.minX, y: s.frame.maxY - 44,
@@ -210,9 +218,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let waited = Date().timeIntervalSince(placementStarted)
         if waited < 60 {
             if Int(waited) % 15 == 0 {
-                log("not placed after \(Int(waited))s: " +
-                    "frame=\(statusItem?.button?.window?.frame ?? .zero) " +
-                    "screens=\(NSScreen.screens.count)")
+                let win = statusItem?.button?.window
+                log("not placed after \(Int(waited))s: frame=\(win?.frame ?? .zero) " +
+                    "screen=\(win?.screen != nil) screens=\(NSScreen.screens.count)")
+                if win != nil && win?.screen == nil {
+                    // Name the cause and where it lives, so this is one grep
+                    // next time instead of eleven rounds of guessing.
+                    log("signature of a system-blocked item (window off-screen, no screen). " +
+                        "Check isAllowed for \(Bundle.main.bundleIdentifier ?? "?") in " +
+                        "~/Library/Group Containers/group.com.apple.controlcenter/Library/" +
+                        "Preferences/group.com.apple.controlcenter.plist ▸ trackedApplications, " +
+                        "or System Settings ▸ Control Center.")
+                }
             }
             return
         }
@@ -256,15 +273,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
-        a.messageText = "REFUGIO couldn’t fit in the menu bar"
+        a.messageText = "macOS is blocking REFUGIO’s menu bar icon"
         a.informativeText =
-            "Your menu bar is full. On a Mac with a notch there is less room than it looks, " +
-            "and anything that doesn’t fit is simply not drawn.\n\n" +
-            "REFUGIO is in the Dock instead — right-click its icon to start, stop or open it.\n\n" +
-            "Quit a couple of other menu-bar apps and the icon will come back on its own; " +
-            "REFUGIO keeps checking and moves back the moment there is room."
-        a.addButton(withTitle: "OK")
-        _ = a.runModal()
+            "macOS keeps a per-app list of which menu bar icons may appear, and REFUGIO " +
+            "is switched off in it. The icon is created correctly — the system just " +
+            "won’t display it.\n\n" +
+            "To fix it: System Settings ▸ Control Center, find REFUGIO in the menu bar " +
+            "items, and turn it on. The icon appears immediately; no restart needed.\n\n" +
+            "Until then REFUGIO is in the Dock — right-click its icon to start, stop or open it."
+        a.addButton(withTitle: "Open Control Center Settings")
+        a.addButton(withTitle: "Later")
+        if a.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     /// Room appeared: go back to the menu bar and drop the Dock icon.
