@@ -22,8 +22,13 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
 
     /// Show the window, creating it on first use. Reuses the existing window on
     /// later calls so the conversation isn't reloaded out from under the user.
-    func show(url: URL? = nil) {
-        if let url { self.url = url }
+    ///
+    /// The parameter is deliberately named apart from the `url` property. As
+    /// `url:` it shadowed it, and the first-load path below then passed the
+    /// OPTIONAL parameter where a URL was required — a compile error, but only
+    /// on the one line of two that got it wrong, which is easy to read past.
+    func show(url newURL: URL? = nil) {
+        if let newURL { self.url = newURL }
 
         if let window {
             if let web, web.url == nil { web.load(URLRequest(url: self.url)) }
@@ -39,7 +44,7 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
         web.navigationDelegate = self
         web.uiDelegate = self
         web.setValue(false, forKey: "drawsBackground")  // avoid a white flash before CSS paints
-        web.load(URLRequest(url: url))
+        web.load(URLRequest(url: self.url))
         self.web = web
 
         let w = NSWindow(

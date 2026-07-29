@@ -268,8 +268,13 @@ function installMenuBarApp(targetDir) {
     console.log(`    ${C.dim}Use “Stop REFUGIO” there to free the memory it uses.${C.reset}`)
   } catch (e) {
     warn(`Menu-bar app build failed — REFUGIO still works from the terminal.`)
-    const why = String(e.stderr || e.stdout || e.message || "")
-      .split("\n").filter(Boolean).slice(-4).join("\n      ")
+    // The informative lines, not the last ones. swift build ends a failure with
+    // "note:" hints and a source excerpt, so the tail is the least useful part
+    // of it — the `error:` line was reliably the one cut off.
+    const lines = String(e.stderr || e.stdout || e.message || "").split("\n").filter(Boolean)
+    const errs = lines.filter((l) => /\berror:/.test(l))
+    const why = (errs.length ? errs : lines).slice(0, 4)
+      .map((l) => l.trim()).join("\n      ")
     if (why) console.log(`      ${C.dim}${why}${C.reset}`)
     console.log(`    ${C.dim}Retry with: cd "${menubarDir}" && ./install.sh${C.reset}`)
   }
