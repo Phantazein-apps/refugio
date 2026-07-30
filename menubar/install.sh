@@ -59,7 +59,11 @@ if [ "$BUILD_STATUS" -ne 0 ]; then
   echo "  Full output: $LOG"
   exit 1
 fi
-echo "▸ Assembling $APP…"
+# Braced. macOS ships bash 3.2, whose identifier scan is not multibyte-aware:
+# in `$APP…` it swallows the first byte of the ellipsis into the NAME, leaving
+# an unset variable and two orphaned continuation bytes — which is why this
+# line printed "Assembling <?><?>" and hid the one thing it was there to say.
+echo "▸ Assembling ${APP}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/RefugioBar"
@@ -121,7 +125,7 @@ if ! codesign --force --deep --sign - "$APP" 2>/tmp/refugio-codesign.log; then
 fi
 
 # DEST is set at the top, beside the build-failure message that reports it.
-echo "▸ Installing to $DEST…"
+echo "▸ Installing to ${DEST}…"
 pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar" 2>/dev/null || true
 sleep 1
 rm -rf "$DEST"
@@ -157,16 +161,39 @@ echo
 # there is nothing left to wait for. Ten seconds of silence directly under
 # "Menu-bar app installed" made the installer look hung at the one step whose
 # message tells you to go and look at something.
+# Did it actually come up? `open` returning 0 only means Launch Services
+# accepted the request. The decisive facts are whether the process exists and
+# whether it logged from THIS launch — an install whose log's newest line is
+# hours old is an app that did not start.
 sleep 2
+PID="$(pgrep -f "REFUGIO.app/Contents/MacOS/RefugioBar" | head -1)"
+if [ -n "$PID" ]; then
+  echo "▸ Running: pid $PID"
+else
+  echo "✗ The app is NOT running. It was installed but did not start."
+  echo "  Try: open $DEST"
+  echo "  If it exits immediately, macOS may have quarantined it — check"
+  echo "  Console.app for a crash report naming RefugioBar."
+fi
+
+MB_LOG="$HOME/.refugio-logs/menubar.log"
 echo "▸ Menu bar placement:"
-if [ -f "$HOME/.refugio-logs/menubar.log" ]; then
-  tail -n 2 "$HOME/.refugio-logs/menubar.log" | sed 's/^/  /'
+if [ -f "$MB_LOG" ]; then
+  tail -n 2 "$MB_LOG" | sed 's/^/  /'
+  # The log is UTC; compare against the file's own mtime rather than parsing
+  # the timestamps, which is portable and enough to answer "is this line new".
+  AGE=$(( $(date +%s) - $(stat -f %m "$MB_LOG" 2>/dev/null || echo 0) ))
+  if [ "$AGE" -gt 60 ]; then
+    echo
+    echo "  ⚠ That log has not been written for $((AGE / 60)) minutes, so those"
+    echo "    lines are from an EARLIER launch — this one did not reach the"
+    echo "    point where it creates the status item."
+  fi
 else
   echo "  (no log yet)"
 fi
 echo
-echo "  No icon yet? REFUGIO keeps asking for a slot for a minute before falling"
-echo "  back to a Dock icon — and keeps checking after that, so the icon returns"
-echo "  by itself once you close another menu-bar app. 'refugio restart' and"
-echo "  'refugio stop' work from a terminal either way, and 'refugio menubar'"
-echo "  relaunches this app and prints that log."
+echo "  No icon? System Settings ▸ Control Center keeps a per-app list of which"
+echo "  menu-bar icons may show; REFUGIO has to be enabled there. 'refugio menubar'"
+echo "  relaunches this app and prints that log. 'refugio restart' and"
+echo "  'refugio stop' work from a terminal regardless of the icon."
