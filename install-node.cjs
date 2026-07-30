@@ -1593,8 +1593,21 @@ async function ensureOllamaServing() {
 
   // Report readiness only once pulling can actually work.
   if (!(await ollamaKeyReady())) {
-    warn(`Ollama started but never wrote ${OLLAMA_KEY} — model downloads will fail.`)
-    warn("Try: pkill -f ollama; open -a Ollama    (then re-run the installer)")
+    // Make it ourselves. The file is an ordinary OpenSSH ed25519 private key —
+    // Ollama reads it with Go's ssh package — so ssh-keygen produces exactly
+    // what it expects. Waiting for a server that has already declined to write
+    // one just fails later, in the middle of a multi-gigabyte download, with an
+    // error that reads like a network problem.
+    warn("Ollama has no signing key — generating one so downloads can work")
+    try {
+      run(`ssh-keygen -t ed25519 -N "" -C "" -f "${OLLAMA_KEY}"`, { shell: true, stdio: "ignore" })
+    } catch {}
+    if (fs.existsSync(OLLAMA_KEY)) {
+      ok("Signing key created")
+    } else {
+      warn(`Could not create ${OLLAMA_KEY} — model downloads will fail.`)
+      warn(`Try by hand: ssh-keygen -t ed25519 -N "" -C "" -f ~/.ollama/id_ed25519`)
+    }
   }
   return true
 }

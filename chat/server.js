@@ -535,6 +535,11 @@ async function route(req, res, url) {
     return sendJson(res, 200, {
       connectors: countConnectors(rows),
       available: up && !!model,
+      // Reported separately from `available`, which is false for two different
+      // reasons — Ollama down, or Ollama up with nothing installed — that need
+      // opposite advice. Collapsing them meant the UI could only say "no
+      // model" and stop.
+      ollamaUp: up,
       model,
       models: describeModels(models.map((m) => m.name)),
       freeGb: memFit() ? Math.round(memFit().availableMemGb() * 10) / 10 : null,

@@ -171,18 +171,30 @@ async function refreshStatus() {
  *  Only on an explicit false. A model we haven't rated is unknown, and warning
  *  about it would train people to ignore this bar. */
 function showModelWarning(s) {
-  const bad = s.modelTools === false && s.model;
+  // Three distinct problems, in the order they block you. "No model at all" is
+  // where a fresh install lands when the download fails, and the UI used to
+  // say "no models" in the picker and stop — naming the situation without
+  // saying the one command that resolves it.
+  let text = null;
+  if (!s.ollamaUp) {
+    text = "Ollama isn't running — REFUGIO can't answer anything. Start it: open -a Ollama";
+  } else if (!s.model || !(s.models || []).length) {
+    text = "No model installed. Download one: ollama pull qwen2.5:3b  " +
+           "(2.6 GB — the smallest that can use your connectors)";
+  } else if (s.modelTools === false) {
+    text = `${s.model} can't use connectors — it will answer from memory and ` +
+           `never read your data. Run: ollama pull qwen2.5:3b`;
+  }
+
   let bar = document.getElementById("model-warn");
-  if (!bad) { bar?.remove(); return; }
+  if (!text) { bar?.remove(); return; }
   if (!bar) {
     bar = document.createElement("div");
     bar.id = "model-warn";
     bar.className = "model-warn";
     els.scroll.parentElement.insertBefore(bar, els.scroll);
   }
-  bar.textContent =
-    `${s.model} can't use connectors — it will answer from memory and never ` +
-    `read your data. Run: ollama pull qwen2.5:3b`;
+  bar.textContent = text;
 }
 
 // ── Web search ──────────────────────────────────────────────
