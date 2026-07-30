@@ -70,6 +70,17 @@ confirm_destroy() {
 
 [ "$DRY" = 1 ] && say "${BOLD}Dry run — nothing will be deleted.${RESET}" && say ""
 
+# Say what is coming. Five yes/no questions in sequence, each about something
+# different, reads as being asked the same thing repeatedly unless the shape of
+# it is stated first.
+if [ "$ALL" = 0 ] && [ "$YES" = 0 ]; then
+  say "${DIM}REFUGIO itself is removed without asking — a reinstall recreates it."
+  say "You will be asked about four things that a reinstall cannot bring back:"
+  say "your conversations, your setup credentials, your WhatsApp link, and Ollama."
+  say "Every one of them defaults to KEEP.${RESET}"
+  say ""
+fi
+
 # ── 1. Stop everything first ───────────────────────────────────────────
 # Removing files under a running supervisor leaves it thrashing on paths that
 # no longer exist, and a live Hermeneia keeps a lock on the WhatsApp database.
@@ -111,8 +122,8 @@ fi
 # Inside ~/refugio, which is why this is asked BEFORE that directory goes.
 step "Chat history and settings"
 if [ -d "$HOME/refugio/data" ] || [ -d "$HOME/.refugio-data" ]; then
-  if confirm_destroy "Your conversations and connector settings" \
-       "~/refugio/data — every chat you have had with REFUGIO."; then
+  if confirm_destroy "Your conversations" \
+       "Every chat you have had with REFUGIO, and the per-connector scope toggles. Nothing you typed during setup is here — that is the next question."; then
     rm_path "$HOME/refugio/data"
     rm_path "$HOME/.refugio-data"
   else
@@ -131,8 +142,8 @@ fi
 
 step "Credentials and configuration"
 if [ -f "$HOME/.refugio.env" ]; then
-  if confirm_destroy "~/.refugio.env" \
-       "Connector URLs and tokens — your Epistole endpoint, Notion key, and the rest. The installer will ask for them all again."; then
+  if confirm_destroy "The credentials you typed during setup" \
+       "~/.refugio.env — your Epistole endpoint, Notion key, Slack token and the rest. Keep it and the installer reuses them; delete it and you enter them all again."; then
     rm_path "$HOME/.refugio.env"
   else
     keep_note "~/.refugio.env (the installer will reuse it)"

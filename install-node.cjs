@@ -1534,8 +1534,43 @@ function installOllama() {
   return false
 }
 
+// Ollama signs registry requests with a keypair in ~/.ollama, written by the
+// server on its first start. `ollama pull` reads that key ITSELF, so a live
+// server is not sufficient — a machine where ~/.ollama was just removed (by
+// our own uninstaller, which deletes it along with the models) gets a running
+// server and a pull that dies with:
+//
+//   Error: pull model manifest: open ~/.ollama/id_ed25519: no such file or directory
+//
+// Making the directory before the server starts gives it somewhere to write,
+// and waiting for the key afterwards is the precondition that actually matters.
+const OLLAMA_KEY = path.join(home, ".ollama", "id_ed25519")
+
+async function ollamaKeyReady(waitMs = 15000) {
+  const until = Date.now() + waitMs
+  while (Date.now() < until) {
+    if (fs.existsSync(OLLAMA_KEY)) return true
+    await new Promise(r => setTimeout(r, 1000))
+  }
+  return fs.existsSync(OLLAMA_KEY)
+}
+
 async function ensureOllamaServing() {
-  if (await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)) return true
+  // Before any probe: the server can only create the keypair if the directory
+  // is reachable, and this costs nothing when it already exists.
+  try { fs.mkdirSync(path.dirname(OLLAMA_KEY), { recursive: true }) } catch {}
+
+  if (await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)) {
+    // Answering does not mean ready to pull. A server that came up before the
+    // directory existed will never have written the key.
+    if (!(await ollamaKeyReady(3000))) {
+      warn("Ollama is running but has no signing key yet — restarting it so it writes one")
+      try { execSync("pkill -f 'ollama serve'", { stdio: "ignore" }) } catch {}
+      await new Promise(r => setTimeout(r, 2000))
+    } else {
+      return true
+    }
+  }
   // Server not up — start it. Prefer the macOS app binary and force arm64 on
   // Apple Silicon so the install-time server (and model pull) uses the GPU build.
   const ollamaBin = fs.existsSync(APP_OLLAMA) ? APP_OLLAMA : (has("ollama") ? "ollama" : null)
@@ -1548,11 +1583,20 @@ async function ensureOllamaServing() {
     } catch {}
   }
   // Wait up to ~30s for the server to come up
+  let up = false
   for (let i = 0; i < 15; i++) {
-    if (await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)) return true
+    if (await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)) { up = true; break }
     await new Promise(r => setTimeout(r, 2000))
   }
-  return await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)
+  if (!up) up = await probeHttp(`${OLLAMA_URL}/api/tags`, 1500)
+  if (!up) return false
+
+  // Report readiness only once pulling can actually work.
+  if (!(await ollamaKeyReady())) {
+    warn(`Ollama started but never wrote ${OLLAMA_KEY} — model downloads will fail.`)
+    warn("Try: pkill -f ollama; open -a Ollama    (then re-run the installer)")
+  }
+  return true
 }
 
 async function setupLLMEngine(env, targetDir) {
