@@ -1411,12 +1411,16 @@ async function setupLocalDomain(targetDir, port, fallbackUrl) {
     } catch {}
   }
 
-  // Default: use refugio.localhost (zero-config, works in Chrome/Firefox/Edge)
+  // https://refugio is set up automatically. It used to be a question, and a
+  // question is the wrong shape for this: everything it needs can be attempted
+  // and every failure has a working fallback, so the only thing asking bought
+  // was the chance to say no to something you wanted.
+  //
+  // REFUGIO_DOMAIN=0 opts out — for a headless box, or anyone who would rather
+  // not have a hosts entry.
   ok(`Available at ${localhostUrl}`)
-
-  // Optionally upgrade to https://refugio
-  const setupHttps = await confirm("Also set up https://refugio? (requires admin password, mkcert, caddy)", true)
-  if (!setupHttps) return localhostUrl
+  if (process.env.REFUGIO_DOMAIN === "0") return localhostUrl
+  console.log(`  ${C.dim}Setting up https://refugio — this needs your admin password once.${C.reset}`)
 
   // Install mkcert and caddy
   if (os.platform() === "darwin" && has("brew")) {
@@ -1614,7 +1618,14 @@ async function setupMemPalace(env) {
 async function startREFUGIO(targetDir, env, autoStarted) {
   console.log(`${C.bold}Starting REFUGIO...${C.reset}\n`)
 
-  const PORT = 8080
+  // Which surface owns the UI decides everything below. This block used to be
+  // hard-wired to Open WebUI on 8080 — so on a v2 install it waited FIVE
+  // MINUTES for a server nothing had started, printing "Waiting for Open WebUI"
+  // the whole time, and then never reached the domain setup at all. That is why
+  // https://refugio stopped appearing.
+  const usingOwui = process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1"
+  const CHAT_PORT = parseInt(env.REFUGIO_CHAT_PORT || "8090", 10)
+  const PORT = usingOwui ? 8080 : CHAT_PORT
 
   if (autoStarted) {
     // The supervisor (start-refugio.cjs) is already running via launchd/systemd
@@ -1640,23 +1651,38 @@ async function startREFUGIO(targetDir, env, autoStarted) {
   // longer than the terminal width with \r leaves wrapped residue behind.
   // \x1b[K clears from the cursor to end of line after each rewrite.
   const waitStart = Date.now()
-  console.log(`  ${C.dim}First launch downloads a model — this can take a few minutes.${C.reset}`)
-  process.stdout.write("  Waiting for Open WebUI to be ready... ")
+  const surface = usingOwui ? "Open WebUI" : "REFUGIO"
+  // The chat server binds immediately; only Open WebUI needs minutes. Waiting
+  // five minutes either way meant a failure looked identical to a slow start.
+  const readyPath = usingOwui ? "/api/config" : "/api/chat/status"
+  const readyTimeout = usingOwui ? 300000 : 60000
+  if (usingOwui) console.log(`  ${C.dim}First launch downloads a model — this can take a few minutes.${C.reset}`)
+  process.stdout.write(`  Waiting for ${surface} to be ready... `)
   const timer = setInterval(() => {
     const elapsed = Math.round((Date.now() - waitStart) / 1000)
-    process.stdout.write(`\r  Waiting for Open WebUI to be ready... (${elapsed}s)\x1b[K`)
+    process.stdout.write(`\r  Waiting for ${surface} to be ready... (${elapsed}s)\x1b[K`)
   }, 1000)
-  const ready = await waitForServer(`http://127.0.0.1:${PORT}/api/config`, 300000)
+  const ready = await waitForServer(`http://127.0.0.1:${PORT}${readyPath}`, readyTimeout)
   clearInterval(timer)
 
   if (ready) {
     const elapsed = Math.round((Date.now() - waitStart) / 1000)
-    process.stdout.write(`\r  Waiting for Open WebUI to be ready... done (${elapsed}s)\x1b[K\n`)
-    ok(`Open WebUI → http://127.0.0.1:${PORT}`)
+    process.stdout.write(`\r  Waiting for ${surface} to be ready... done (${elapsed}s)\x1b[K\n`)
+    ok(`${surface} → http://127.0.0.1:${PORT}`)
 
     // Set up https://refugio local domain
     let refugioUrl = `http://127.0.0.1:${PORT}`
     refugioUrl = await setupLocalDomain(targetDir, PORT, refugioUrl)
+
+    // Everything from here is Open WebUI's: MCPO, an account, and a sign-in
+    // trampoline. The chat window has none of those — it is already serving,
+    // it speaks MCP itself, and it has no login — so on the default path the
+    // browser opens and that is the whole of it.
+    if (!usingOwui) {
+      ok("Opening REFUGIO...")
+      openBrowser(refugioUrl)
+      return refugioUrl
+    }
 
     // Wait for MCPO to be ready before opening browser
     // (start-refugio.cjs starts MCPO with a 3s delay, configure runs after OWUI is ready)

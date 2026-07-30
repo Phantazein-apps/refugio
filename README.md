@@ -95,7 +95,7 @@ Only that path installs `uv`, the Python virtual environment and PyTorch, and on
 2. Clones REFUGIO to `~/refugio`
 3. Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM (or connects to **[LM Studio](https://lmstudio.ai/)** if you set `REFUGIO_ENGINE=lmstudio`)
 4. Walks you through optional connectors: **personal** first (WhatsApp — with a QR scan in the browser — email, Apple Reminders, Things 3, Notion, and a memory backend), then **business** (Slack, Jira, ServiceNow, Salesforce) if you opt in
-5. Optionally sets up **https://refugio** as a local domain (mkcert + Caddy)
+5. Sets up **https://refugio** as a local domain (mkcert + Caddy — asks for your admin password once)
 6. Starts everything and opens REFUGIO — a native window on macOS, your browser elsewhere
 
 > **Reinstalling?** Run the same command again. Your settings in `~/.refugio.env` are preserved.
@@ -240,11 +240,15 @@ Requires the Swift toolchain (`xcode-select --install`). Look for the **mountain
 
 ## Custom Domain
 
-During install you can set up **https://refugio** as a local shortcut:
+The installer sets up **https://refugio** for you — no question asked, because every part of it can be attempted and every failure falls back to something that works.
+
 - Uses [mkcert](https://github.com/FiloSottile/mkcert) for locally-trusted TLS + [Caddy](https://caddyserver.com/) as a reverse proxy
-- Requires the admin password once (for the certificate and `/etc/hosts` entry)
+- Asks for your admin password once, for the certificate and the `/etc/hosts` entry
 - Restored automatically on reinstall
-- Without it, REFUGIO is available at **http://127.0.0.1:8090** (Open WebUI, if installed, stays on **:8080**)
+- If any of it fails, REFUGIO stays reachable at **http://127.0.0.1:8090** — the domain is a shortcut, never a dependency
+- `REFUGIO_DOMAIN=0` skips it, for a headless box or anyone who'd rather not have a hosts entry
+
+Open WebUI, if you installed it, keeps **:8080**.
 
 ## How It Works
 
@@ -253,7 +257,7 @@ During install you can set up **https://refugio** as a local shortcut:
 ```
 curl | bash
   → install-refugio (bash)    Installs Node.js + Git
-  → install-node.cjs (node)   Installs uv, clones repo, sets up the LLM engine,
+  → install-node.cjs (node)   Clones the repo, sets up the LLM engine,
                               credentials, and starts everything
   → configure-owui.cjs        Legacy: configures Open WebUI when that path is chosen
 ```
