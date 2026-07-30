@@ -4,7 +4,13 @@
 <dict>
   <key>CFBundleName</key><string>REFUGIO</string>
   <key>CFBundleDisplayName</key><string>REFUGIO</string>
-  <key>CFBundleIdentifier</key><string>com.phantazein.refugio.menubar</string>
+  <!-- macOS 26 keeps a per-app allow-list of menu bar icons, keyed by BUNDLE ID,
+       in Control Center's group container. A blocked identifier can stay blocked
+       even after the user re-enables it in System Settings, because another
+       app's stale entry can list this one and apply its own isAllowed = false.
+       The only reliable escape is a bundle ID the system has never seen — hence
+       this one, and hence REFUGIO_BUNDLE_ID in install.sh for the next time. -->
+  <key>CFBundleIdentifier</key><string>com.phantazein.refugio.app</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>CFBundleExecutable</key><string>RefugioBar</string>

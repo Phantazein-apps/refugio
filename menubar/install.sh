@@ -25,6 +25,17 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/RefugioBar"
 cp Info.plist "$APP/Contents/Info.plist"
 
+# macOS 26 can block a menu bar icon by bundle ID, and the block survives being
+# re-enabled in System Settings when another app's stale entry references this
+# one. A fresh identifier is the only reliable way out, so make it overridable
+# rather than something only a source edit can change:
+#
+#   REFUGIO_BUNDLE_ID=com.phantazein.refugio.app2 ./install.sh
+if [ -n "${REFUGIO_BUNDLE_ID:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $REFUGIO_BUNDLE_ID" "$APP/Contents/Info.plist"
+  echo "  using bundle id $REFUGIO_BUNDLE_ID"
+fi
+
 # Ad-hoc sign: enough for a local menu-bar agent + SMAppService login item.
 echo "▸ Signing (ad-hoc)…"
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true

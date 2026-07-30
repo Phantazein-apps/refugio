@@ -55,7 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // macOS persists that against the item's autosave name — every later
         // launch then faithfully restores "hidden". Naming the item and forcing
         // it visible at launch is what undoes that.
-        item.autosaveName = "com.phantazein.refugio.menubar.status"
+        // Derived, not hardcoded: the bundle ID can change (see Info.plist —
+        // it is the only way out of a macOS 26 block), and an autosave name
+        // left pointing at the old one would restore the old identity's
+        // remembered visibility onto the new item.
+        item.autosaveName = "\(Bundle.main.bundleIdentifier ?? "refugio").status"
         item.isVisible = true
         statusItem = item
 
@@ -362,7 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let btn = statusItem?.button else { return }
 
         // A word instead of the symbol, on request:
-        //   defaults write com.phantazein.refugio.menubar showTextLabel -bool true
+        //   defaults write com.phantazein.refugio.app showTextLabel -bool true
         //
         // "No icon" has two shapes that look identical from outside — the item
         // was never placed, or it was placed and the symbol renders blank. A

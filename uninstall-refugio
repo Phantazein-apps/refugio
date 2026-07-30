@@ -100,7 +100,9 @@ rm_path "$HOME/.refugio-logs"
 # for its status item. Left behind, a hidden-item state survives a reinstall
 # and the icon stays invisible for reasons nothing on disk explains.
 if [ "$DRY" = 0 ]; then
-  defaults delete com.phantazein.refugio.menubar >/dev/null 2>&1 && say "  removed  menu-bar app preferences"
+  for d in com.phantazein.refugio.app com.phantazein.refugio.menubar; do
+    defaults delete "$d" >/dev/null 2>&1 && say "  removed  menu-bar preferences ($d)"
+  done
 else
   say "  would remove  menu-bar app preferences (defaults domain)"
 fi
