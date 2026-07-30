@@ -54,6 +54,20 @@
       </button>
       <div class="model-panel" id="model-panel" role="dialog" aria-label="Choose a model" hidden></div>
       <div class="status" id="status" role="button" tabindex="0"><span class="led"></span><span id="status-text">checking…</span></div>
+      <!-- Light/dark, one click. The three-way control including "follow the
+           system" lives in Settings — this is the switch you reach for when
+           the room changes, not when your preferences do. -->
+      <button class="theme-btn" id="theme-btn" type="button" aria-label="Switch theme">
+        <svg class="t-sun" width="15" height="15" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2"/>
+          <path d="M12 2.4v2.4M12 19.2v2.4M2.4 12h2.4M19.2 12h2.4M5.2 5.2l1.7 1.7M17.1 17.1l1.7 1.7M18.8 5.2l-1.7 1.7M6.9 17.1l-1.7 1.7"/>
+        </svg>
+        <svg class="t-moon" width="15" height="15" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z"/>
+        </svg>
+      </button>
       <a class="settings-link" href="/settings" title="Settings">Settings</a>
     </div>
 

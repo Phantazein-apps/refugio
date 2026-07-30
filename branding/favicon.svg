@@ -1,14 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect x="0" y="0" width="512" height="512" rx="92" fill="#1a262f"/>
-  <!-- back mountain -->
-  <polygon points="20.5,430 174,205 307,430" fill="#6e818c"/>
-  <!-- main mountain -->
-  <polygon points="61.4,430 266.2,102.4 460.8,430" fill="#dde5e9"/>
-  <!-- snow cap -->
-  <polygon points="266.2,102.4 222.7,204.8 309.8,204.8" fill="#ffffff"/>
-  <!-- refuge: glow, body, roof, lit window -->
-  <rect x="230.4" y="358.4" width="64" height="76.8" fill="#ff9646" opacity="0.27"/>
-  <rect x="233.0" y="350.7" width="56.3" height="79.4" fill="#212f39"/>
-  <polygon points="222.7,353.3 261.1,307.2 299.5,353.3" fill="#121b21"/>
-  <rect x="249.3" y="371.2" width="23.6" height="58.9" fill="#ffb25c"/>
+  <!-- REFUGIO — the Enclosure mark, from the Phantazein identity.
+
+       Three walls open at the bottom: a refuge you can walk into and out of,
+       not a locked box. The red inside is what it holds.
+
+       Square and hard-edged, matching the rest of the identity. The mark it
+       replaces was a rounded-rect mountain scene with a lit hut — legible at
+       512px, an indistinct grey smudge at the 16px a browser tab actually
+       renders, and reading as an outdoors app at every size in between. -->
+  <rect width="512" height="512" fill="#000000"/>
+  <path d="M196 424 L120 424 L120 120 L392 120 L392 424 L316 424"
+        fill="none" stroke="#f4f2ee" stroke-width="34"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke="#ff0018" stroke-width="32" stroke-linecap="round">
+    <line x1="176" y1="192" x2="236" y2="252"/>
+    <line x1="336" y1="192" x2="276" y2="252"/>
+    <line x1="176" y1="352" x2="236" y2="292"/>
+    <line x1="336" y1="352" x2="276" y2="292"/>
+    <line x1="256" y1="176" x2="256" y2="214"/>
+    <line x1="256" y1="368" x2="256" y2="330"/>
+    <line x1="160" y1="272" x2="198" y2="272"/>
+    <line x1="352" y1="272" x2="314" y2="272"/>
+  </g>
 </svg>

@@ -10,7 +10,7 @@ const els = {
   convos: $("convos"), thread: $("thread"), scroll: $("scroll"), empty: $("empty"),
   input: $("input"), send: $("send"), newChat: $("new-chat"),
   modelBtn: $("model-btn"), modelPanel: $("model-panel"), modelDot: $("model-dot"),
-  modelName: $("model-name"), modelSize: $("model-size"),
+  modelName: $("model-name"), modelSize: $("model-size"), themeBtn: $("theme-btn"),
   status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
   rail: $("rail"), railToggle: $("rail-toggle"),
@@ -39,10 +39,10 @@ const state = {
 
 import { renderMarkdown } from "./md.js";
 import { preferredModel, setPreferredModel, activeModel } from "./model-store.js";
-// Imported for its side effects: the head script sets the theme for first
+// Also imported for its side effects: the head script sets the theme for first
 // paint, and this keeps it current afterwards — when macOS switches at sunset,
 // and when the setting is changed in a Settings window open elsewhere.
-import "./theme.js";
+import { resolvedTheme, setThemePreference } from "./theme.js";
 
 /** Model output is untrusted text; md.js escapes before adding any markup. */
 const renderContent = (text) => renderMarkdown(text);
@@ -1089,6 +1089,23 @@ els.status.addEventListener("click", () => openSettings("connectors"));
 els.status.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSettings("connectors"); }
 });
+
+// One click, light ↔ dark. It sets an EXPLICIT preference, which means it
+// leaves "follow the system" behind — that is the trade for a one-click
+// switch, and Settings ▸ Appearance is where you get System back.
+function syncThemeButton() {
+  const now = resolvedTheme();
+  els.themeBtn.title = now === "dark" ? "Dark — switch to light" : "Light — switch to dark";
+}
+els.themeBtn.addEventListener("click", () => {
+  setThemePreference(resolvedTheme() === "dark" ? "light" : "dark");
+  syncThemeButton();
+});
+// The system can move under us while the window is open, and so can another
+// window's Settings page; both end up changing the attribute on <html>.
+new MutationObserver(syncThemeButton)
+  .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+syncThemeButton();
 
 els.modelBtn.addEventListener("click", () => setModelPanel(els.modelPanel.hidden));
 // Dismiss on an outside click or Escape, like any other popover. Without this

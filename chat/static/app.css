@@ -306,6 +306,21 @@ body {
 .status .led { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
 .status.ok .led { background: var(--ok); }
 .status.down .led { background: var(--accent); }
+/* Shows the theme you are IN, not the one you would get. A control labelled
+   with its destination reads as a statement about the current state to about
+   half of people, and there is no way to tell which half you are — so the
+   glyph is the fact and the tooltip is the action. */
+.theme-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 24px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid transparent; color: var(--ink-faint);
+}
+.theme-btn:hover { color: var(--ink); border-color: var(--border); }
+.theme-btn .t-sun { display: none; }
+.theme-btn .t-moon { display: block; }
+:root[data-theme="light"] .theme-btn .t-sun { display: block; }
+:root[data-theme="light"] .theme-btn .t-moon { display: none; }
+
 .settings-link {
   font-size: .75rem; color: var(--ink-faint); text-decoration: none;
   border-bottom: 1px solid var(--border);

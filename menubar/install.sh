@@ -87,13 +87,16 @@ echo "  Re-run ./install.sh to update."
 echo
 
 # The failure this app is prone to is invisible: it runs, and nothing appears.
-# Print what it decided, rather than leaving "look for the mountain" as the only
-# feedback when there is no mountain to look for.
+# Print what it decided, rather than leaving "look for the icon" as the only
+# feedback when there is no icon to look for.
 #
-# Long enough to outlast the app's own retries. At 3s this printed "(no log
-# yet)" — the placement check reads up to three times over six seconds, so the
-# script was asking before there was anything to say.
-sleep 10
+# Two seconds, not ten. Ten was sized to outlast the placement watch's own
+# retries — and that watch has been deleted, because it was the bug. What
+# remains is a single line logged the moment the status item is created, so
+# there is nothing left to wait for. Ten seconds of silence directly under
+# "Menu-bar app installed" made the installer look hung at the one step whose
+# message tells you to go and look at something.
+sleep 2
 echo "▸ Menu bar placement:"
 if [ -f "$HOME/.refugio-logs/menubar.log" ]; then
   tail -n 2 "$HOME/.refugio-logs/menubar.log" | sed 's/^/  /'
