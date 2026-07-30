@@ -884,7 +884,7 @@ function revealSource(name) {
 
 // The empty state is written once, in index.html, and captured here. It used to
 // be spelled out again in newChat(), so the two drifted the moment either
-// changed — the beta notice would have appeared on first load and vanished the
+// changed — the stage notice would have appeared on first load and vanished the
 // first time someone clicked "New chat".
 const EMPTY_HTML = els.thread.innerHTML;
 

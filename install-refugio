@@ -116,14 +116,19 @@ echo ""
 # and may carry half-finished work, so installing from it is now opt-in. This
 # ref is used by BOTH this bootstrap and the repo clone in install-node.cjs,
 # so a pinned install is pinned end to end.
-#   v2 beta (default):  curl … | bash
+#   v2 alpha (default): curl … | bash
 #   bleeding edge:      REFUGIO_VERSION=main curl … | bash
 #   last Open WebUI:    REFUGIO_VERSION=v1.0.3 curl … | bash
 #
-# The default is a BETA. That is a deliberate choice: v1.0.3 is the last Open
+# The default is an ALPHA. That is a deliberate choice: v1.0.3 is the last Open
 # WebUI build and is being retired, so pointing new installs at it would be
-# sending people to a dead end. The README says plainly that the default is a
-# beta, and v1.0.3 stays one environment variable away.
+# sending people to a dead end. The README says plainly that the default is an
+# early prototype, and v1.0.3 stays one environment variable away.
+#
+# The branch is still named v2.0.0-beta.2 and is NOT being renamed. Every
+# existing install tracks that branch by name; renaming it would break their
+# `git pull` and the update check with it. The name is a distribution channel,
+# not a maturity claim — the claim is the one in the UI and the README.
 # Use </dev/tty so interactive prompts read from the terminal, not the pipe
 export REFUGIO_VERSION="${REFUGIO_VERSION:-v2.0.0-beta.2}"
 TMPFILE=$(mktemp /tmp/refugio-install.XXXXXX)

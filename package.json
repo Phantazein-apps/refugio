@@ -1,6 +1,6 @@
 {
   "name": "refugio",
-  "version": "2.0.0-beta.2",
+  "version": "2.0.0-alpha.1",
   "description": "REFUGIO — a self-hosted refuge for your AI. One command installs a local LLM (Ollama or LM Studio) and REFUGIO's own chat window, with optional personal connectors (WhatsApp via Hermeneia, email via Epistole, Apple Reminders, Things 3, Notion, memory) and business connectors (Slack, Jira, ServiceNow, Salesforce) via MCP. Open WebUI remains available as a legacy option.",
   "type": "module",
   "main": "server.js",

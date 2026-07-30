@@ -3,7 +3,7 @@
 <img src="assets/banner.svg" alt="REFUGIO — a self-hosted refuge for your AI" width="100%">
 
 <p>
-  <img src="https://img.shields.io/badge/v2-BETA-ff0018?style=flat-square&labelColor=000000" alt="v2 beta">
+  <img src="https://img.shields.io/badge/v2-ALPHA-ff0018?style=flat-square&labelColor=000000" alt="v2 alpha">
   <img src="https://img.shields.io/badge/macOS%20·%20Linux%20·%20Windows-f4f2ee?style=flat-square&labelColor=000000" alt="Cross-platform">
   <img src="https://img.shields.io/badge/local%20LLM-Ollama%20%2F%20LM%20Studio-ff0018?style=flat-square&labelColor=000000" alt="Local LLM">
   <img src="https://img.shields.io/badge/connectors-MCP-ff0018?style=flat-square&labelColor=000000" alt="MCP connectors">
@@ -32,12 +32,13 @@ One command installs a **local LLM** (Ollama or LM Studio) and REFUGIO's own cha
 
 Works on **macOS, Linux, and Windows**. No prerequisites — the installer handles everything (Node.js, Git, the LLM engine, and the model).
 
-> ## ⚠️ This is a beta
+> ## ⚠️ This is an early prototype
 >
-> **REFUGIO v2 is in beta.** The chat window, the settings page, web search and the
-> native macOS window are all new and will have rough edges. Things will break and
-> change. [Tell us what breaks](https://github.com/Phantazein-apps/refugio/issues) —
-> that is what a beta is for.
+> **REFUGIO v2 is alpha.** The chat window, the settings page, web search and the
+> native macOS window are all new and lightly exercised. Things will break and
+> change, and some of them will break in ways nobody has seen yet.
+> [Tell us what breaks](https://github.com/Phantazein-apps/refugio/issues) — that is
+> what an alpha is for.
 >
 > The older Open WebUI build (v1.0.3) is still installable and is documented below, but
 > it is **being retired** — new work goes into v2 only.
@@ -56,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/instal
 irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio.ps1 | iex
 ```
 
-This installs **v2 beta** — REFUGIO's own chat window. It replaces Open WebUI and talks to your connectors over MCP directly, instead of proxying them through MCPO:
+This installs the **v2 alpha** — REFUGIO's own chat window. It replaces Open WebUI and talks to your connectors over MCP directly, instead of proxying them through MCPO:
 
 - **No Python.** Open WebUI needs `uv`, a virtual environment, and loads PyTorch (~1–1.5 GB) just to boot. The built-in UI is Node and holds ~50 MB. That reclaimed memory is what lets an 8 GB machine run a model big enough to call tools.
 - **A real window.** On macOS the menu-bar app opens REFUGIO in its own window — no browser, no address bar. Linux and Windows get tray icons.
@@ -66,7 +67,7 @@ This installs **v2 beta** — REFUGIO's own chat window. It replaces Open WebUI 
 
 ### Known rough edges
 
-Honest list, because this is a beta:
+Honest list, because this is an early prototype:
 
 - The **Windows tray script has never been run on Windows**. It is written and its syntax checks, nothing more.
 - The **native macOS window** is new and lightly exercised.

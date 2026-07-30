@@ -93,9 +93,9 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
             backing: .buffered,
             defer: false
         )
-        w.title = "REFUGIO (beta)"
+        w.title = "REFUGIO (alpha)"
         // The title is drawn OVER the web content with .fullSizeContentView, so
-        // "REFUGIO (beta)" landed on top of REFUGIO's own wordmark and the model
+        // "REFUGIO (alpha)" landed on top of REFUGIO's own wordmark and the model
         // button — two overlapping pieces of text in the corner. The window
         // still has a title (it shows in Mission Control and the Window menu);
         // it just isn't painted across the app.
