@@ -222,14 +222,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// action that makes it available.
     @objc private func openSettings() {
         guard running, portOpen(8090) else {
+            // Spelled out rather than folded into a ternary with string
+            // concatenation in one branch. That form type-checks slowly and is
+            // exactly the kind of expression that fails to build on a machine
+            // this code cannot be compiled on before shipping.
+            let title: String
+            let detail: String
+            if running {
+                title = "Settings needs REFUGIO's own chat window."
+                detail = "This copy is serving the legacy Open WebUI interface, which has no settings page. Re-run the installer to switch to REFUGIO's own window."
+            } else {
+                title = "REFUGIO isn't running."
+                detail = "Start REFUGIO from this menu, then open Settings."
+            }
             let a = NSAlert()
-            a.messageText = running
-                ? "Settings needs REFUGIO's own chat window."
-                : "REFUGIO isn't running."
-            a.informativeText = running
-                ? "This copy is serving the legacy Open WebUI interface, which has no settings page. "
-                + "Re-run the installer to switch to REFUGIO's own window."
-                : "Start REFUGIO from this menu, then open Settings."
+            a.messageText = title
+            a.informativeText = detail
             a.addButton(withTitle: "OK")
             a.runModal()
             return
