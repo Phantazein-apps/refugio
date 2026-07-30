@@ -53,6 +53,7 @@ const state = {
    *  default — it is evidence, not the explanation. */
   showOutput: new Set(),
   pulling: new Map(),
+  update: null,
 };
 
 // ── Navigation ──────────────────────────────────────────────
@@ -780,6 +781,153 @@ function renderAppearance() {
   );
 }
 
+// ── Updates ─────────────────────────────────────────────────
+//
+// Deliberately shaped like the web-search pane: this is a network request, so
+// it says what it sends before it says what it found.
+
+function renderUpdates() {
+  const box = $("updates-body");
+  const u = state.update;
+  if (!u) { box.replaceChildren(el("div.waiting", { text: "Checking what's installed…" })); return; }
+
+  const kids = [];
+
+  if (!u.supported) {
+    kids.push(el("div.card", {},
+      el("h3", { text: "Not available for this install" }),
+      el("div.prose", { text: "REFUGIO can only tell you about updates when it was installed with git — " +
+        "this copy wasn't, or its checkout has moved. Re-running the installer restores it." }),
+      el("div.path", { text: u.dir || "" }),
+    ));
+    box.replaceChildren(...kids);
+    return;
+  }
+
+  // The state card. What you have, and whether there is more.
+  const head = u.updateAvailable
+    ? el("div.card.warn", {},
+        el("h3", { text: "An update is available" }),
+        el("div.prose", {},
+          "Your copy is at ", el("strong", { text: u.sha }),
+          ". The ", el("strong", { text: u.channel }), " branch has moved to ",
+          el("strong", { text: u.latestSha }), "."),
+        el("div.prose", { text: "REFUGIO does not update itself. Applying one means a code update, a rebuild " +
+          "of the menu-bar app and a restart of the stack — and this window is part of what restarts, so it is " +
+          "not a thing to run from inside itself. Run this in a terminal:" }),
+        commandBlock(u.command),
+      )
+    : el("div.card", {},
+        el("h3", { text: "Up to date" }),
+        el("div.prose", {}, "Your copy matches the ", el("strong", { text: u.channel }), " branch."),
+      );
+  kids.push(head);
+
+  kids.push(el("div.card", {},
+    el("h3", { text: "This copy" }),
+    el("div.kv", {},
+      el("span.k", { text: "version" }), el("span", { text: u.version || "—" }),
+      el("span.k", { text: "commit" }), el("span", { text: u.sha || "—" }),
+      el("span.k", { text: "channel" }), el("span", { text: u.channel || "—" }),
+      u.date ? el("span.k", { text: "dated" }) : null,
+      u.date ? el("span", { text: new Date(u.date).toLocaleDateString() }) : null,
+    ),
+    el("div.field", {},
+      el("button.btn", {
+        type: "button",
+        text: "Check now",
+        disabled: !u.enabled,
+        title: u.enabled ? "" : "Update checks are switched off.",
+        on: { click: (e) => checkForUpdate(e.currentTarget) },
+      }),
+      el("span.aside", {
+        text: u.offline ? "Last check couldn't reach the network."
+          : u.error ? `Last check failed: ${u.error}`
+          : u.checkedAt ? `Last checked ${new Date(u.checkedAt).toLocaleString()}`
+          : "Not checked yet.",
+      }),
+    ),
+  ));
+
+  kids.push(el("div.card.warn", {},
+    el("h3", { text: "What a check sends" }),
+    el("div.prose", {}, "A connection to github.com asking what commit a public branch points at. ",
+      el("strong", { text: "No data of yours is sent" }),
+      " — not your messages, not your version, not an identifier. GitHub learns that an IP address asked."),
+    el("label.check", {},
+      el("input", {
+        type: "checkbox",
+        checked: !!u.enabled,
+        on: { change: (e) => setUpdatesEnabled(e.currentTarget.checked, e.currentTarget) },
+      }),
+      el("span.box"),
+      "Check for updates automatically",
+    ),
+    el("div.aside", { text: "At most once a day, never in the first minute after launch. Switched off, " +
+      "REFUGIO makes no update requests at all — including the Check now button above." }),
+  ));
+
+  box.replaceChildren(...kids);
+}
+
+function commandBlock(command) {
+  const pre = el("div.verbatim", {},
+    el("div.vline", {}, el("span.vt", { text: command })));
+  return el("div", {},
+    el("div.quote-head", {},
+      el("span.t-label", { text: "Run this" }),
+      el("button.btn.link", { type: "button", text: "Copy", on: { click: (e) => copyText(command, e.currentTarget) } }),
+    ),
+    pre,
+  );
+}
+
+async function checkForUpdate(btn) {
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const res = await fetch("/api/chat/update/check", { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || `failed (${res.status})`);
+    markWrite();
+    state.update = d;
+    renderUpdates();
+    updateBadge();
+    if (!d.updateAvailable && !d.offline && !d.error) toast("You're on the latest version.");
+    if (d.offline) toast("Couldn't reach the network.");
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = was;
+    toast(`Check failed: ${e.message}`);
+  }
+}
+
+async function setUpdatesEnabled(enabled, box) {
+  box.disabled = true;
+  try {
+    const res = await fetch("/api/chat/update/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error("failed");
+    markWrite();
+    state.update = await res.json();
+    renderUpdates();
+    updateBadge();
+  } catch {
+    box.checked = !enabled;
+    box.disabled = false;
+    toast("That didn't save.");
+  }
+}
+
+/** A dot on the nav item, so an update is visible without opening the pane. */
+function updateBadge() {
+  $("update-dot").hidden = !state.update?.updateAvailable;
+}
+
 // ── Data & reset ────────────────────────────────────────────
 
 async function renderData() {
@@ -890,11 +1038,14 @@ const markWrite = () => { lastWriteAt = Date.now(); };
 
 async function refresh() {
   const issuedAt = Date.now();
-  const [status, connectors] = await Promise.all([
+  const [status, connectors, update] = await Promise.all([
     fetch("/api/chat/status").then((r) => r.json()).catch(() => null),
     fetch("/api/chat/connectors").then((r) => r.json()).catch(() => null),
+    // Reads the cached answer only — this never opens a socket to github.com.
+    fetch("/api/chat/update").then((r) => r.json()).catch(() => null),
   ]);
   if (issuedAt < lastWriteAt) return;   // answered a question we've since changed
+  if (update) state.update = update;
   if (status) {
     state.status = status;
     $("version").textContent = status.version ? `v${status.version}` : "";
@@ -903,13 +1054,15 @@ async function refresh() {
   renderConnectors();
   renderModels();
   renderWeb();
+  renderUpdates();
+  updateBadge();
 }
 
 applyAppearance();
 if (localStorage.getItem(MOTION_KEY) === "1") document.documentElement.classList.add("reduce-motion");
 renderAppearance();
 
-const PANES = ["connectors", "models", "web", "appearance", "data"];
+const PANES = ["connectors", "models", "web", "appearance", "updates", "data"];
 showPane(PANES.includes(location.hash.slice(1)) ? location.hash.slice(1) : "connectors");
 
 // A link to /settings#models has to work when this window is ALREADY open —

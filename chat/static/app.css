@@ -570,3 +570,21 @@ textarea {
 /* Send button becomes Stop while streaming */
 .send.stopping { background: var(--bg-surface-3); color: var(--ink); }
 .send.stopping:hover { background: var(--accent); color: var(--on-accent); }
+
+/* One line above the thread when a newer REFUGIO exists. Not a modal, not a
+   toast: it is information, not an interruption, and it must be dismissible
+   per-version — a notice that reappears tomorrow is one people stop reading. */
+.update-bar {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) var(--s5);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent);
+  color: var(--ink); font-size: .75rem; line-height: 1.15rem;
+}
+.update-bar a { color: var(--ink); border-bottom: 1px solid var(--border); text-decoration: none; }
+.update-bar a:hover { border-bottom-color: var(--ink); }
+.update-bar .ub-x {
+  margin-left: auto; border: 0; background: none; cursor: pointer;
+  color: var(--ink-faint); font-size: 1rem; line-height: 1; padding: 0 var(--s1);
+}
+.update-bar .ub-x:hover { color: var(--ink); }

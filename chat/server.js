@@ -23,6 +23,7 @@ import * as store from "./store.js";
 import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
 import { explain, outputLines } from "./connector-errors.js";
+import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import { listModels, isUp, chatStream, complete, pullModel, OLLAMA_BASE } from "./ollama.js";
 
@@ -155,6 +156,75 @@ function describeModels(names, activeModel) {
   });
 }
 
+// ── Updates ─────────────────────────────────────────────────
+//
+// See chat/updates.js for what a check sends and why it is `git ls-remote`.
+// The parts that live here are the ones that need the server's paths and
+// settings file.
+
+const REPO_DIR = dirname(__dirname);
+const UPDATE_CACHE = join(DATA_DIR, "update-check.json");
+
+/** On by default.
+ *
+ *  This is a judgement, and it cuts against "nothing leaves this computer" —
+ *  so it is worth stating plainly rather than burying. An update check sends
+ *  no data of yours; it asks a public repository for a public commit hash, and
+ *  GitHub learns an IP address asked. Set against that: this is beta software
+ *  whose bugs get fixed weekly, and a user who is never told is a user running
+ *  a known-broken build for months. Defaulting to silence protects the slogan
+ *  and not the person. Settings ▸ Updates turns it off, permanently, in one
+ *  click, and off genuinely means no requests. */
+function updateSettings() {
+  return { enabled: connectorSettings.updates?.enabled !== false };
+}
+
+/** The cached answer plus the live local state. Never touches the network. */
+async function updateState() {
+  const cache = updates.readCache(UPDATE_CACHE);
+  const local = await updates.localState(REPO_DIR);
+  const state = updates.describe({
+    local,
+    // A remote hash from a previous check. Compared against the CURRENT local
+    // hash, so an update applied by hand clears the notice on the next poll
+    // without needing another request.
+    remote: { sha: cache.latestSha || null, error: null },
+    checkedAt: cache.checkedAt || null,
+    enabled: updateSettings().enabled,
+  });
+  return { ...state, dir: REPO_DIR, command: updates.updateCommand(REPO_DIR) };
+}
+
+async function runUpdateCheck() {
+  const local = await updates.localState(REPO_DIR);
+  if (!local.supported) {
+    return { ...(await updateState()), supported: false };
+  }
+  const remote = await updates.remoteHead(REPO_DIR, local.branch);
+  const checkedAt = new Date().toISOString();
+  // Only a successful answer is cached. Caching a failure would make the next
+  // poll report "no update" with confidence we do not have.
+  if (remote.sha) updates.writeCache(UPDATE_CACHE, { checkedAt, latestSha: remote.sha, branch: local.branch });
+  const state = updates.describe({ local, remote, checkedAt, enabled: true });
+  if (state.updateAvailable) log(`update available on ${local.branch}: ${state.latestSha}`);
+  return { ...state, dir: REPO_DIR, command: updates.updateCommand(REPO_DIR) };
+}
+
+/** Check at most once a day, and never within the first minute of launch —
+ *  starting REFUGIO should not put a request on the wire before the window has
+ *  even painted. */
+function scheduleUpdateChecks() {
+  const maybeCheck = async () => {
+    if (!updateSettings().enabled) return;
+    if (!updates.isDue(updates.readCache(UPDATE_CACHE))) return;
+    try { await runUpdateCheck(); } catch (e) { log(`update check failed: ${e.message}`); }
+  };
+  setTimeout(maybeCheck, 60_000).unref?.();
+  // Hourly wake-up, daily request: the interval only fires a check when a day
+  // has passed, which is what makes this survive a machine that sleeps.
+  setInterval(maybeCheck, 60 * 60_000).unref?.();
+}
+
 /** Where this machine's memory has gone, for the bar on the models page.
  *
  *  Three numbers and only three, because only three are honestly knowable:
@@ -247,7 +317,10 @@ function loadSettings() {
   // Web search rides in the same file: it is one boolean, it belongs with the
   // other "what may REFUGIO reach" answers, and a user who opens this file
   // should see every one of them in one place.
-  const defaults = { ...defaultSettings(), web: { ...WEB_DEFAULTS } };
+  // `updates` rides here for the same reason `web` does: this file is the one
+  // place a person can read to answer "what may REFUGIO reach?", and an update
+  // check reaches the network. Both belong in the same list.
+  const defaults = { ...defaultSettings(), web: { ...WEB_DEFAULTS }, updates: { enabled: true } };
   try {
     const saved = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
     // Merge over defaults so an option added in a later version starts off,
@@ -740,6 +813,43 @@ async function route(req, res, url) {
     return sendJson(res, 200, store.listConversations());
   }
 
+  // ── Updates ───────────────────────────────────────────────
+  //
+  // Reads the cached answer; never reaches the network. The UI polls this, and
+  // a poll that could open a socket to github.com would turn "leave the window
+  // open" into a stream of requests.
+  if (p === "/api/chat/update" && req.method === "GET") {
+    return sendJson(res, 200, await updateState());
+  }
+
+  // Check now. POST because it does something — it opens a connection to
+  // github.com — and that is exactly the sort of thing that must not happen on
+  // a GET someone can be led into making.
+  //
+  // There is no "apply" endpoint. Updating means a git pull, a Swift rebuild
+  // and a supervisor restart, and the chat server is a CHILD of that
+  // supervisor: it would be killing itself half way through. Worse, a failed
+  // self-update leaves no working surface to report the failure in. So the UI
+  // shows the command and the user runs it.
+  if (p === "/api/chat/update/check" && req.method === "POST") {
+    if (!updateSettings().enabled) {
+      return sendJson(res, 403, { error: "update checks are switched off" });
+    }
+    return sendJson(res, 200, await runUpdateCheck());
+  }
+
+  // Turn checking on or off. Off means no background timer and no manual
+  // check — the switch has to mean "this app makes no network requests",
+  // or it means nothing.
+  if (p === "/api/chat/update/settings" && req.method === "POST") {
+    const body = await readBody(req);
+    connectorSettings.updates = { ...connectorSettings.updates, enabled: !!body.enabled };
+    saveSettings(connectorSettings);
+    log(`update checks ${connectorSettings.updates.enabled ? "enabled" : "disabled"}`);
+    if (connectorSettings.updates.enabled) return sendJson(res, 200, await runUpdateCheck());
+    return sendJson(res, 200, await updateState());
+  }
+
   // What the "Data & reset" page needs to state before it offers to destroy
   // anything: how much there is, and where it lives. The path matters — it is
   // the answer to "where is my data?", which on a local-first app is a
@@ -846,6 +956,8 @@ server.listen(PORT, "127.0.0.1", async () => {
     await pool.connectAll(MCP_CONFIG);
   }
   connectorsSettled = true;
+
+  scheduleUpdateChecks();
 });
 
 for (const sig of ["SIGINT", "SIGTERM"]) {

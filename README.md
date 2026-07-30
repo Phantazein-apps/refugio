@@ -129,7 +129,20 @@ Everything that used to be a terminal prompt is a page now: **http://127.0.0.1:8
 | **Models** | What's installed, what's selected, and what fits in the memory free right now. A model that can't call tools is marked as such — that failure is otherwise invisible, because the model answers fluently and simply never reads your data. Downloads run from here. |
 | **Web search** | The one thing in REFUGIO that leaves your machine. Off by default, and switching it on still doesn't start searching — each message has to be armed on its own, in the chat, with the warning shown at the time. |
 | **Appearance** | Light, dark, or follow the system — which is the default, and switches with your Mac as it does. Plus text size and motion. |
+| **Updates** | Whether a newer REFUGIO exists, and the command to apply it. The second thing here that reaches the network — see below. |
 | **Data & reset** | How many conversations exist, where the database is on disk, and an erase that requires typing the word `delete`. Nothing is synced anywhere, so that file is the only copy. |
+
+### Updates
+
+REFUGIO checks whether the release branch it was installed from has moved, at most **once a day** and never in the first minute after launch. If it has, a line appears above the chat and a dot appears on Settings ▸ Updates. Dismissing the line is remembered against that specific commit, so it stays gone until there is a genuinely different update.
+
+**What a check sends:** one `git ls-remote` to github.com, asking what commit a public branch points at. No data of yours goes with it — not your messages, not your version, not an identifier. GitHub learns that an IP address asked. It is off in one click in Settings ▸ Updates, and off means REFUGIO makes no update requests at all, including the manual "Check now".
+
+**REFUGIO does not update itself.** Applying an update means a code update, a rebuild of the menu-bar app and a restart of the supervisor — and the chat server is a child of that supervisor, so a self-update would be killing itself half way through, with no working surface left to report a failure in. The page shows the command instead:
+
+```
+cd ~/refugio && git pull --ff-only && ./menubar/install.sh && refugio restart
+```
 
 If you pick a model that can't call tools, the chat holds the message rather than answering: it would reply from general knowledge and quietly invent the contents of your own data. It offers the installed models that can, and an explicit way through if you meant it.
 

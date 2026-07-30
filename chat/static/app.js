@@ -1093,6 +1093,54 @@ els.status.addEventListener("keydown", (e) => {
 // One click, light ↔ dark. It sets an EXPLICIT preference, which means it
 // leaves "follow the system" behind — that is the trade for a one-click
 // switch, and Settings ▸ Appearance is where you get System back.
+// ── Update notice ───────────────────────────────────────────
+//
+// One line, above the thread, and only when there is genuinely something
+// newer. Dismissal is remembered against the specific commit, so saying "not
+// now" is honoured until there is a DIFFERENT update — an update notice that
+// comes back tomorrow is how people learn to stop reading them.
+
+const UPDATE_DISMISSED = "refugio.update.dismissed";
+
+async function checkUpdateNotice() {
+  let u;
+  // Reads the cached answer; the server does the network part on its own
+  // schedule. A poll that could reach github.com would turn an open window
+  // into a stream of requests.
+  try { u = await (await fetch("/api/chat/update")).json(); } catch { return; }
+
+  const bar = document.getElementById("update-bar");
+  let dismissed = null;
+  try { dismissed = localStorage.getItem(UPDATE_DISMISSED); } catch { /* ignore */ }
+  if (!u?.updateAvailable || dismissed === u.latestSha) { bar?.remove(); return; }
+  if (bar) return;                                  // already showing this one
+
+  const node = document.createElement("div");
+  node.id = "update-bar";
+  node.className = "update-bar";
+
+  const text = document.createElement("span");
+  text.textContent = "A newer REFUGIO is available.";
+
+  const how = document.createElement("a");
+  how.href = "/settings#updates";
+  how.textContent = "How to update";
+
+  const later = document.createElement("button");
+  later.type = "button";
+  later.className = "ub-x";
+  later.title = "Not now";
+  later.setAttribute("aria-label", "Dismiss this update notice");
+  later.textContent = "×";
+  later.addEventListener("click", () => {
+    try { localStorage.setItem(UPDATE_DISMISSED, u.latestSha); } catch { /* ignore */ }
+    node.remove();
+  });
+
+  node.append(text, how, later);
+  els.scroll.parentElement.insertBefore(node, els.scroll);
+}
+
 function syncThemeButton() {
   const now = resolvedTheme();
   els.themeBtn.title = now === "dark" ? "Dark — switch to light" : "Light — switch to dark";
@@ -1132,3 +1180,9 @@ try { setRailCollapsed(localStorage.getItem(RAIL_KEY) === "1"); } catch { setRai
 refreshStatus();
 loadConversations();
 setInterval(refreshStatus, 15000);
+
+// Separate from the status poll, and far slower: this reads a cached answer
+// that changes at most once a day, so asking every fifteen seconds would be
+// fifteen seconds of work for a value that is nearly always identical.
+checkUpdateNotice();
+setInterval(checkUpdateNotice, 30 * 60_000);
