@@ -69,7 +69,8 @@ This installs **v2 beta** — REFUGIO's own chat window. It replaces Open WebUI 
 Honest list, because this is a beta:
 
 - The **Windows tray script has never been run on Windows**. It is written and its syntax checks, nothing more.
-- The **native macOS window** is new and lightly exercised. On macOS 26 the menu-bar icon can be blocked by the system's per-app allow-list — REFUGIO detects that and points you at System Settings ▸ Control Center.
+- The **native macOS window** is new and lightly exercised.
+- If the **menu-bar icon doesn't appear** on macOS 26: REFUGIO detects that and falls back to a Dock icon, and `~/.refugio-logs/menubar.log` says what it saw. A status item the system has blocked reports completely healthy — visible, with a button, with a window — and is parked off-screen with no screen attached, so the log's `screen=false` is the tell. Check System Settings ▸ Control Center first; if the icon is enabled there and still missing, rebuild with a fresh identity: `REFUGIO_BUNDLE_ID=com.phantazein.refugio.app2 menubar/install.sh`.
 - **Small models are weak at choosing tools.** REFUGIO refuses to install one that can't call tools at all, but a 3B model still picks wrong sometimes.
 - Sources are kept **for the session only** — reopening a conversation shows the answers, not the raw tool output behind them.
 
