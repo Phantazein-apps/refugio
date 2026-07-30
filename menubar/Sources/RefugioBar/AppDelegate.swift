@@ -34,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let healthURL = URL(string: "http://127.0.0.1:8080/api/config")!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Here, not before app.run(). Both working reference apps set this
+        // inside didFinishLaunching and create their status item immediately
+        // after; the old main.swift set it before the app had launched at all.
+        NSApp.setActivationPolicy(.accessory)
+
         createStatusItem()
         refreshStatus()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in

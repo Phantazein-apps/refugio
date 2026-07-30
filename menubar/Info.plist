@@ -28,7 +28,6 @@
   <key>CFBundleExecutable</key><string>RefugioBar</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <!-- Menu-bar agent: no Dock icon, lives in the status bar. -->
   <key>LSUIElement</key><true/>
