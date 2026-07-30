@@ -106,13 +106,24 @@ function modelSupportsTools(tag) {
  *  WebUI labelled models this way and it was genuinely useful; the built-in UI
  *  should not be a downgrade. `needGb` is what the model wants; `fits` answers
  *  the actual question — can I run this without closing anything first. */
-function describeModels(names) {
+function describeModels(names, activeModel) {
   const mf = memFit();
   const freeGb = mf ? mf.availableMemGb() : null;
-  const budget = freeGb == null ? null : freeGb - 0.05 - 1.0;  // chat UI + headroom
+  let budget = freeGb == null ? null : freeGb - 0.05 - 1.0;  // chat UI + headroom
+
+  // A loaded model occupies the very RAM this check measures, so the running
+  // model made ITSELF look too big: load qwen2.5:3b and free RAM drops by
+  // 2.6 GB, after which the label says "free 2.6 GB more" about the model you
+  // are successfully using. Switching away returns that memory, so it belongs
+  // in the budget for every other model too.
+  const activeGb = activeModel && mf ? mf.modelRamGb(activeModel.split("@")[0]) : 0;
+  if (budget != null && activeGb) budget += activeGb;
+
   return names.map((name) => {
     const needGb = mf ? mf.modelRamGb(name.split("@")[0]) : 0;
-    const fits = needGb && budget != null ? needGb <= budget : null;
+    // The running model demonstrably fits — it is running.
+    const isActive = !!activeModel && name === activeModel;
+    const fits = isActive ? true : (needGb && budget != null ? needGb <= budget : null);
     return {
       name,
       needGb: needGb || null,                    // null = not on the ladder, unknown
@@ -541,7 +552,7 @@ async function route(req, res, url) {
       // model" and stop.
       ollamaUp: up,
       model,
-      models: describeModels(models.map((m) => m.name)),
+      models: describeModels(models.map((m) => m.name), model),
       freeGb: memFit() ? Math.round(memFit().availableMemGb() * 10) / 10 : null,
       ollama: OLLAMA_BASE,
       tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],

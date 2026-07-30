@@ -142,7 +142,9 @@ async function refreshStatus() {
       const parts = [];
       if (m.needGb) parts.push(`${m.needGb} GB`);
       if (m.fits === false) {
-        parts.push(m.freeUpGb ? `\u26a0 free ${m.freeUpGb} GB more` : "\u26a0 won't fit");
+        // "2.6 GB · free 2.6 GB more" read as a sum, as though 5.2 GB were
+        // needed. The shortfall says the same thing without the arithmetic.
+        parts.push(m.freeUpGb ? `\u26a0 ${m.freeUpGb} GB short` : "\u26a0 won't fit");
       }
       o.textContent = m.name + (parts.length ? `  \u00b7 ${parts.join("  \u00b7 ")}` : "");
       if (m.fits === false) o.dataset.tight = "1";
