@@ -259,7 +259,7 @@ A tiny native menu-bar app gives non-technical users a one-click **Start / Stop 
 cd ~/refugio/menubar && ./install.sh      # builds REFUGIO.app → /Applications, launches it
 ```
 
-Requires the Swift toolchain (`xcode-select --install`). Look for the **mountain** icon in the menu bar.
+Requires the Swift toolchain (`xcode-select --install`). Look for REFUGIO's mark — three walls open at the bottom — in the menu bar.
 
 **Auto-start details (> 8 GB):**
 - **macOS**: launchd (`~/Library/LaunchAgents/com.phantazein.refugio.plist`)

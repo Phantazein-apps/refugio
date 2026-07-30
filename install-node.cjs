@@ -264,18 +264,21 @@ function installMenuBarApp(targetDir) {
     // with no menu bar and no idea why, which is exactly the state this app
     // exists to avoid being in.
     execSync(`"${script}"`, { cwd: menubarDir, stdio: "pipe" })
-    ok("Menu-bar app installed — look for the mountain icon in your menu bar")
+    ok("Menu-bar app installed — look for REFUGIO's mark in your menu bar")
     console.log(`    ${C.dim}Use “Stop REFUGIO” there to free the memory it uses.${C.reset}`)
   } catch (e) {
-    warn(`Menu-bar app build failed — REFUGIO still works from the terminal.`)
-    // The informative lines, not the last ones. swift build ends a failure with
-    // "note:" hints and a source excerpt, so the tail is the least useful part
-    // of it — the `error:` line was reliably the one cut off.
-    const lines = String(e.stderr || e.stdout || e.message || "").split("\n").filter(Boolean)
-    const errs = lines.filter((l) => /\berror:/.test(l))
-    const why = (errs.length ? errs : lines).slice(0, 4)
-      .map((l) => l.trim()).join("\n      ")
-    if (why) console.log(`      ${C.dim}${why}${C.reset}`)
+    // Print install.sh's OWN output, whole. It already says the important
+    // thing — that /Applications still holds the previous build, and when it
+    // was made — and this used to filter for lines matching `error:`, which
+    // dropped exactly that message. A build failure here is not a footnote:
+    // the app keeps running with the old behaviour, and the symptoms
+    // (an icon that doesn't change, a window that won't drag) look like
+    // separate bugs for as long as nobody sees this.
+    warn("Menu-bar app build FAILED — /Applications/REFUGIO.app was NOT replaced.")
+    const out = `${e.stdout || ""}\n${e.stderr || ""}`.trim() || String(e.message || "")
+    for (const line of out.split("\n").slice(-30)) {
+      if (line.trim()) console.log(`      ${line}`)
+    }
     console.log(`    ${C.dim}Retry with: cd "${menubarDir}" && ./install.sh${C.reset}`)
   }
 }
