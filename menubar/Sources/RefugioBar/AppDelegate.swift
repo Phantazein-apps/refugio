@@ -239,15 +239,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let name = running ? "mountain.2.fill" : "mountain.2"
-        if let img = NSImage(systemSymbolName: name, accessibilityDescription: "REFUGIO") {
-            img.isTemplate = true
-            btn.image = img
-            btn.title = ""
-        } else {
-            btn.image = nil
-            btn.title = "⛰"   // fallback for older SF Symbols sets
+        btn.image = enclosureImage(running: running)
+        btn.title = ""
+    }
+
+    /// The Enclosure mark, drawn rather than loaded.
+    ///
+    /// This used to be `mountain.2` — an Apple system symbol, which is why the
+    /// favicon could change and the menu bar could not: they were never the
+    /// same asset. Drawing it here keeps the mark in one place per surface
+    /// with no image file to fall out of sync, and a template image is a mask
+    /// anyway, so a red-and-cream SVG would lose its colours regardless.
+    ///
+    /// isTemplate means macOS recolours it for a light or dark menu bar, for
+    /// selection, and for reduced-transparency. Only the alpha matters — the
+    /// black below is never what appears.
+    ///
+    /// Running adds the four inner strokes; stopped is the empty enclosure.
+    /// The design's own small logo (17px, in the settings frames) drops the
+    /// axis ticks and keeps only these four, so this follows it — eight
+    /// strokes inside an 18-point square is mush.
+    private func enclosureImage(running: Bool) -> NSImage {
+        let side: CGFloat = 18
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            // Fit the MARK, not the 512 canvas it is authored on. The walls
+            // span x 120–392 and y 120–424 of that canvas, so scaling by the
+            // canvas leaves the drawing about half the width of the image and
+            // the icon reads as too small next to every other menu extra.
+            // Half a stroke (17) is added on each side so the round caps are
+            // not clipped.
+            let inset: CGFloat = 1
+            let markW: CGFloat = 306          // (392 + 17) − (120 − 17)
+            let markH: CGFloat = 338          // (424 + 17) − (120 − 17)
+            let s = (side - inset * 2) / markH
+            let dx = (side - markW * s) / 2   // centred horizontally
+
+            // The mark is authored on a y-down grid (SVG); AppKit draws y-up.
+            func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+                NSPoint(x: rect.minX + dx + (x - 103) * s,
+                        y: rect.minY + side - inset - (y - 103) * s)
+            }
+            NSColor.black.setStroke()
+
+            let walls = NSBezierPath()
+            walls.lineWidth = 34 * s
+            walls.lineCapStyle = .round
+            walls.lineJoinStyle = .round
+            walls.move(to: p(196, 424))
+            walls.line(to: p(120, 424))
+            walls.line(to: p(120, 120))
+            walls.line(to: p(392, 120))
+            walls.line(to: p(392, 424))
+            walls.line(to: p(316, 424))
+            walls.stroke()
+
+            if running {
+                let strokes: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+                    (176, 192, 236, 252),
+                    (336, 192, 276, 252),
+                    (176, 352, 236, 292),
+                    (336, 352, 276, 292),
+                ]
+                let inner = NSBezierPath()
+                inner.lineWidth = 32 * s
+                inner.lineCapStyle = .round
+                for (x1, y1, x2, y2) in strokes {
+                    inner.move(to: p(x1, y1))
+                    inner.line(to: p(x2, y2))
+                }
+                inner.stroke()
+            }
+            return true
         }
+        image.isTemplate = true
+        image.accessibilityDescription = running ? "REFUGIO, running" : "REFUGIO, stopped"
+        return image
     }
 
     // ── Actions ─────────────────────────────────────────────

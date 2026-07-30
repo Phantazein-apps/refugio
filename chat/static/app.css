@@ -72,8 +72,11 @@ body {
   display: flex; align-items: center; gap: var(--s2);
   padding: var(--s4); border-bottom: 1px solid var(--border-subtle);
 }
-.brand { font-weight: 600; letter-spacing: .04em; font-size: .8125rem; }
-.brand .dot { color: var(--accent); }
+.brand-mark { flex: 0 0 auto; color: var(--ink); }
+.brand { font-family: var(--display); font-weight: 400; letter-spacing: .01em; font-size: .8125rem; }
+/* Collapsed to 56px there is room for the mark or the word, not both — and
+   the mark is the one that still means something at that size. */
+.rail.collapsed .brand-mark { margin: 0 auto; }
 /* Beta, stated where the product names itself. Not a dismissible banner: this
    is true for as long as it is true, and someone who dismissed it on day one
    would spend the whole beta not knowing they were in one. */

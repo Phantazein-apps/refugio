@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>REFUGIO</title>
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="alternate icon" href="favicon.ico">
+<link rel="icon" href="favicon.svg?v=2" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico?v=2">
 <!-- Before the stylesheets, deliberately. Deciding the theme after first paint
      means a frame of black on a light Mac, which is not a subtlety when the
      two palettes are this far apart. Kept inline and duplicated in
@@ -40,7 +40,17 @@
 <div class="app">
   <aside class="rail" id="rail">
     <div class="rail-head">
-      <span class="brand">REFUGIO<span class="dot">.</span></span>
+      <!-- The mark beside the wordmark, as in design frame 4d. The wordmark
+           used to carry a red full stop standing in for it. -->
+      <svg class="brand-mark" width="17" height="17" viewBox="103 103 306 338" aria-hidden="true">
+        <path d="M196 424 L120 424 L120 120 L392 120 L392 424 L316 424" fill="none"
+              stroke="currentColor" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+        <g stroke="#ff0018" stroke-width="40" stroke-linecap="round">
+          <line x1="176" y1="192" x2="236" y2="252"/><line x1="336" y1="192" x2="276" y2="252"/>
+          <line x1="176" y1="352" x2="236" y2="292"/><line x1="336" y1="352" x2="276" y2="292"/>
+        </g>
+      </svg>
+      <span class="brand">REFUGIO</span>
       <span class="beta" title="REFUGIO v2 is in beta — expect rough edges, and please report them">beta</span>
       <button class="rail-toggle" id="rail-toggle" type="button"
               title="Collapse history" aria-label="Collapse history">«</button>
@@ -50,9 +60,6 @@
   </aside>
 
   <main class="main">
-    <!-- Also the window's drag handle in the native app: the title bar there is
-         transparent and the web view runs under it, so this strip is where a
-         person instinctively grabs the window. -->
     <div class="topbar">
       <!-- A button and a panel, not a <select>. A native select cannot show
            what a model costs against the memory free right now, which is the

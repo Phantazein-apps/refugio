@@ -417,6 +417,15 @@ async function serveStatic(res, urlPath) {
   res.writeHead(200, {
     "Content-Type": MIME[extname(full)] || "application/octet-stream",
     "Content-Length": body.length,
+    // Revalidate everything. This server sends its own files over a loopback
+    // socket, so a cache saves nothing measurable — while a stale one costs
+    // real time: after `git pull` the window kept serving the previous CSS
+    // and the previous favicon, which reads as "the update didn't work".
+    // Fonts are the one exception; they are content-addressed by filename and
+    // never change under the same name.
+    "Cache-Control": extname(full) === ".woff2"
+      ? "public, max-age=31536000, immutable"
+      : "no-cache",
   });
   res.end(body);
 }
