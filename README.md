@@ -70,7 +70,7 @@ Honest list, because this is a beta:
 
 - The **Windows tray script has never been run on Windows**. It is written and its syntax checks, nothing more.
 - The **native macOS window** is new and lightly exercised.
-- If the **menu-bar icon doesn't appear** on macOS 26: REFUGIO detects that and falls back to a Dock icon, and `~/.refugio-logs/menubar.log` says what it saw. A status item the system has blocked reports completely healthy — visible, with a button, with a window — and is parked off-screen with no screen attached, so the log's `screen=false` is the tell. Check System Settings ▸ Control Center first; if the icon is enabled there and still missing, rebuild with a fresh identity: `REFUGIO_BUNDLE_ID=com.phantazein.refugio.app2 menubar/install.sh`.
+- If the **menu-bar icon doesn't appear**: check System Settings ▸ Control Center, where macOS 26 keeps a per-app list of which menu bar icons may show. `~/.refugio-logs/menubar.log` records the item's frame at launch. Note that on macOS 26 a healthy status item's window reports **no screen**, because Control Center hosts it in its own process — so that is not a sign of anything being wrong. `menubar/probe/build.sh` builds a 40-line menu-bar app that does nothing but show the word PROBE; if that appears and REFUGIO doesn't, the difference is in REFUGIO.
 - **Small models are weak at choosing tools.** REFUGIO refuses to install one that can't call tools at all, but a 3B model still picks wrong sometimes.
 - Sources are kept **for the session only** — reopening a conversation shows the answers, not the raw tool output behind them.
 
