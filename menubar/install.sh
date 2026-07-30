@@ -7,7 +7,18 @@
 # REFUGIO.app is a tiny native app (~few hundred KB) that just starts/stops the
 # existing ~/refugio supervisor.
 set -e
-cd "$(dirname "$0")"
+
+# Resolve both directories ONCE, to absolute paths, BEFORE changing directory.
+#
+# `$0` was used again further down, after this cd had already happened — so
+# `dirname "$0"` no longer meant what it did on line one. Invoked as
+# `cd menubar && ./install.sh` it worked ("." resolves either way); invoked as
+# `./menubar/install.sh` from the repo root it resolved to
+# menubar/menubar/.., which does not exist. That is the form the README and I
+# have been telling people to run.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+cd "$HERE"
 
 if ! command -v swift >/dev/null 2>&1; then
   echo "✗ Swift toolchain not found. Install it with: xcode-select --install" >&2
@@ -71,21 +82,30 @@ fi
 # This is not decoration. System Settings ▸ Control Center lists menu bar apps
 # by their icon, and two menu-bar apps that work on the same machine
 # (SmackMyMacUp, ItsGOATtime) both ship one where this bundle shipped none.
-ICON_SRC="$(cd "$(dirname "$0")/.." && pwd)/branding/web-app-manifest-512x512.png"
-if [ -f "$ICON_SRC" ] && command -v iconutil >/dev/null 2>&1; then
+#
+# The WHOLE block is `|| true`-guarded, not just the sips calls. The individual
+# guards were there and were not enough: the failure was in the command
+# substitution computing ICON_SRC itself, which aborted the script under
+# `set -e` — after a clean build, but BEFORE the copy to /Applications. So the
+# build succeeded, nothing was installed, the old binary kept running, and the
+# only symptom was an icon that never changed. A cosmetic step must never be
+# able to stop the app from being installed.
+ICON_SRC="$ROOT/branding/web-app-manifest-512x512.png"
+build_icon() {
+  [ -f "$ICON_SRC" ] || return 0
+  command -v iconutil >/dev/null 2>&1 || return 0
   echo "▸ Building app icon…"
   ICONSET="$(mktemp -d)/AppIcon.iconset"
   mkdir -p "$ICONSET"
   for sz in 16 32 64 128 256 512; do
-    # `|| true` matters: this script runs under `set -e`, so one sips hiccup
-    # would abort the entire menu-bar install over a missing icon size.
     sips -z $sz $sz "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null 2>&1 || true
     sips -z $((sz*2)) $((sz*2)) "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1 || true
   done
   iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null \
     && echo "  icon built" || echo "  icon build failed — continuing without one"
   rm -rf "$(dirname "$ICONSET")"
-fi
+}
+build_icon || echo "  icon step failed — continuing; the app matters, the icon doesn't"
 
 # PkgInfo — the classic four-plus-four type/creator stamp. Both working apps
 # write one; this bundle did not.
@@ -108,9 +128,21 @@ rm -rf "$DEST"
 cp -R "$APP" "$DEST"
 xattr -cr "$DEST" 2>/dev/null || true
 
+# Prove it. Every failure this script has had ends the same way — the app in
+# /Applications is not the one just built — and none of them said so. Compare
+# what was installed against what was compiled, and refuse to claim success on
+# a mismatch.
+BUILT_AT=$(stat -f %m "$BIN" 2>/dev/null || echo 0)
+DEST_AT=$(stat -f %m "$DEST/Contents/MacOS/RefugioBar" 2>/dev/null || echo 0)
+if [ "$DEST_AT" -lt "$BUILT_AT" ]; then
+  echo "✗ $DEST is NOT the binary just built. Nothing below is reliable."
+  exit 1
+fi
+
 echo "▸ Launching…"
 open "$DEST"
 echo "✓ Installed to /Applications and launched."
+echo "  Installed binary: $(date -r "$DEST/Contents/MacOS/RefugioBar" '+%Y-%m-%d %H:%M')"
 echo "  Menu: Open / Start / Stop REFUGIO · Launch at Login · Quit."
 echo "  Re-run ./install.sh to update."
 echo
