@@ -350,7 +350,7 @@ let connectorSettings = loadSettings();
 // without a code change here.
 const CONNECTOR_LABELS = {
   whatsapp: "WhatsApp", email: "Email", reminders: "Apple Reminders",
-  things: "Things 3", notion: "Notion", memory: "Memory",
+  things: "Things 3", notes: "Apple Notes", notion: "Notion", memory: "Memory",
 };
 const labelFor = (id) => CONNECTOR_LABELS[id] || id.charAt(0).toUpperCase() + id.slice(1);
 

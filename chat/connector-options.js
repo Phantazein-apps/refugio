@@ -57,6 +57,27 @@ export const CONNECTOR_OPTIONS = {
     { key: "include_logbook", label: "Include Logbook (completed)", enumAdd: ["logbook"] },
   ],
 
+  notes: [
+    {
+      key: "titles_only",
+      label: "Search titles only",
+      hint: "Stops REFUGIO reading note bodies while searching. Opening one note still shows its text.",
+      // Full-text search has to open every note it scans, so this is the one
+      // option here that changes what gets READ rather than what gets
+      // returned. Enforced by removing the tool, not by filtering results —
+      // a body already read is already read.
+      onlyWhenOn: true,
+      dropTools: ["notes_search_text"],
+    },
+    {
+      key: "read_only",
+      label: "Never create notes",
+      hint: "Removes the only tool that writes. REFUGIO can still read and search.",
+      onlyWhenOn: true,
+      dropTools: ["notes_create"],
+    },
+  ],
+
   reminders: [
     {
       key: "today_only",
@@ -106,6 +127,28 @@ export function forcedArgs(server, bareTool, settings = {}) {
     // value while unchecked and get out of the way once the user opts in.
     if (o.onlyWhenOn ? !on : on) continue;
     if (o.force.tools.includes(bareTool)) Object.assign(out, o.force.args);
+  }
+  return out;
+}
+
+/**
+ * Tools this connector's settings remove entirely.
+ *
+ * A third kind of narrowing, alongside forcing an argument and filtering a
+ * result. Some scopes cannot be expressed as either: "never create notes" is
+ * not an argument to a create tool, and "don't read note bodies" cannot be a
+ * result filter because by the time there is a result the body has been read.
+ *
+ * Removing the tool is the only honest enforcement for those — the model is
+ * never offered it, and a call to it is refused if one arrives anyway.
+ */
+export function droppedTools(server, settings = {}) {
+  const out = [];
+  for (const o of optionsFor(server)) {
+    if (!o.dropTools) continue;
+    const on = !!settings[o.key];
+    if (o.onlyWhenOn ? !on : on) continue;
+    out.push(...o.dropTools);
   }
   return out;
 }

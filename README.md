@@ -193,6 +193,7 @@ All connectors are **optional** — configure only the ones you want, or none at
 | **Email** ([Epistole](https://github.com/Phantazein-apps/epistole)) | your own Cloudflare Worker, via [mcp-remote](https://github.com/geelen/mcp-remote) | `read_inbox`, `search_messages`, `semantic_search`, `send_message`, `reply_to_message` — 19 tools |
 | **Apple Reminders** ([just-claude-reminders](https://github.com/Phantazein-apps/just-claude-reminders)) | bundled with REFUGIO, stdio (MCP) | `reminders_get_reminders`, `reminders_create_reminder`, `reminders_complete_reminder` — 7 tools |
 | **Things 3** ([just-claude-things](https://github.com/Phantazein-apps/just-claude-things)) | bundled with REFUGIO, stdio (MCP) | `things3_get_todos`, `things3_create_todo`, `things3_complete_todo` — 10 tools |
+| **Apple Notes** | in-repo (`servers/notes.js`), stdio (MCP) | `notes_search`, `notes_search_text`, `notes_recent`, `notes_read`, `notes_folders`, `notes_create` — 6 tools |
 | **Notion** | local server, port 3002 | `search`, `get_page`, `get_block_children`, `query_database` |
 | **Memory** | local server, port 3004 | see below |
 
@@ -213,6 +214,23 @@ Already have your own Hermeneia checkout? Point `HERMENEIA_DIR` at it in `~/.ref
 #### Apple Reminders & Things 3
 
 Both ship **bundled with REFUGIO** as npm dependencies ([just-claude-reminders](https://github.com/Phantazein-apps/just-claude-reminders), [just-claude-things](https://github.com/Phantazein-apps/just-claude-things)) — no credentials, no extra install; the installer just asks whether to enable them (`REFUGIO_REMINDERS=1` / `REFUGIO_THINGS=1` in `~/.refugio.env`). macOS only: they drive the apps via JXA/AppleScript, so the **first tool call** triggers the standard macOS Automation permission prompt (System Settings → Privacy & Security → Automation). Things 3 additionally requires [the app](https://culturedcode.com/things/) to be installed — the installer skips it if it isn't.
+
+#### Apple Notes
+
+Reads and searches your notes and can create new ones. **It never edits, moves or deletes an existing note** — there is no tool that can, deliberately: a model misreading "clear my notes about the flat" would otherwise be able to act on it, and a note lost that way has no undo and no copy.
+
+macOS only, and enabled by the installer (`REFUGIO_NOTES=1` in `~/.refugio.env`). Like Reminders and Things 3, it drives Notes.app through JXA, so the **first tool call raises the standard macOS Automation prompt**.
+
+It talks to Notes.app rather than reading `NoteStore.sqlite` directly. The database is much faster, and wrong twice over: note bodies are gzipped protobuf blobs in an undocumented format that changes between releases — getting it subtly wrong means silently returning truncated notes — and the container is TCC-protected, so reading it needs **Full Disk Access**, a far broader grant than this connector deserves.
+
+Two scope options in Settings ▸ Connectors, both of which remove a tool rather than filter its results:
+
+| Option | What it does |
+|---|---|
+| **Search titles only** | Removes `notes_search_text`. Full-text search has to open every note it scans, so filtering afterwards would be enforcing a rule after breaking it. Opening a note you named still works. |
+| **Never create notes** | Removes `notes_create`, the only tool that writes anything. |
+
+Full-text search stops at a cap (400 notes by default, `REFUGIO_NOTES_SCAN_CAP`) because Notes offers no way to filter on body text. When it stops early it **says so** rather than reporting "no matches" — those are different facts and the second one is a lie.
 
 ### Business connectors
 

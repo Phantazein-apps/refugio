@@ -1,16 +1,17 @@
 // Connector scope options.
 //
-// Three enforcement mechanisms with very different guarantees (forced
-// arguments, narrowed enums, result filtering) is exactly where a wrong default
-// hides quietly: the UI would show a checkbox that reads correctly while the
-// tool call ignores it. These assert the mapping in both directions — that off
-// really narrows, and that on really widens.
+// Four enforcement mechanisms with very different guarantees (forced
+// arguments, narrowed enums, result filtering, and removing a tool outright)
+// is exactly where a wrong default hides quietly: the UI would show a checkbox
+// that reads correctly while the tool call ignores it. These assert the
+// mapping in both directions — that off really narrows, and that on really
+// widens.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CONNECTOR_OPTIONS, defaultSettings, optionsFor,
-  forcedArgs, activeFilters, allowedStatuses, THINGS_BASE_STATUSES,
+  forcedArgs, activeFilters, allowedStatuses, THINGS_BASE_STATUSES, droppedTools,
 } from "../chat/connector-options.js";
 
 test("every option is off by default", () => {
@@ -27,8 +28,8 @@ test("every option declares how it is enforced", () => {
   // worse than not offering it, because the user believes the scope changed.
   for (const [server, opts] of Object.entries(CONNECTOR_OPTIONS)) {
     for (const o of opts) {
-      assert.ok(o.force || o.filter || o.enumAdd,
-        `${server}.${o.key} has no force/filter/enumAdd`);
+      assert.ok(o.force || o.filter || o.enumAdd || o.dropTools,
+        `${server}.${o.key} has no force/filter/enumAdd/dropTools`);
     }
   }
 });
@@ -92,4 +93,43 @@ test("a connector with no declared options is left alone", () => {
   assert.deepEqual(optionsFor("notion"), []);
   assert.deepEqual(forcedArgs("notion", "search", {}), {});
   assert.deepEqual(activeFilters("notion", {}), []);
+});
+
+// ── Apple Notes ─────────────────────────────────────────────
+//
+// Notes introduced the fourth mechanism: some scopes cannot be an argument or
+// a result filter. "Never create notes" is not a parameter of a create tool,
+// and "don't read note bodies" cannot be enforced on results — by the time
+// there is a result, the body has been read.
+
+test("Notes: nothing is dropped by default", () => {
+  // Default is every option OFF, and these are onlyWhenOn — so a fresh install
+  // has the full tool set. The narrowing is opt-in, like every other option.
+  assert.deepEqual(droppedTools("notes", defaultSettings().notes), []);
+});
+
+test("Notes: titles-only removes the tool that reads bodies", () => {
+  const dropped = droppedTools("notes", { titles_only: true });
+  assert.ok(dropped.includes("notes_search_text"),
+    "full-text search must be gone, not merely filtered — filtering happens after the read");
+  assert.ok(!dropped.includes("notes_search"), "title search must survive");
+  assert.ok(!dropped.includes("notes_read"), "opening a named note is still allowed");
+});
+
+test("Notes: read-only removes the only tool that writes", () => {
+  const dropped = droppedTools("notes", { read_only: true });
+  assert.deepEqual(dropped, ["notes_create"]);
+});
+
+test("Notes: both options compose", () => {
+  const dropped = droppedTools("notes", { titles_only: true, read_only: true });
+  assert.ok(dropped.includes("notes_search_text"));
+  assert.ok(dropped.includes("notes_create"));
+});
+
+test("droppedTools is empty for connectors that declare none", () => {
+  for (const server of ["whatsapp", "things", "reminders"]) {
+    assert.deepEqual(droppedTools(server, {}), [], `${server} should drop nothing`);
+  }
+  assert.deepEqual(droppedTools("nonexistent", {}), []);
 });

@@ -12,7 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFileSync, existsSync } from "fs";
 import { execFile } from "child_process";
-import { forcedArgs, activeFilters, allowedStatuses, optionsFor } from "./connector-options.js";
+import { forcedArgs, activeFilters, allowedStatuses, optionsFor, droppedTools } from "./connector-options.js";
 
 const log = (m) => console.log(`[chat:mcp] ${m}`);
 
@@ -385,10 +385,23 @@ export class McpPool {
    *  may ask for "someday" and then refused is a wasted round trip on a machine
    *  where every round trip is seconds. Tell it the truth up front. */
   #scoped(tools) {
+    // Removal first, and it applies to every connector — a scope that takes a
+    // tool away cannot be expressed by rewriting that tool's schema. Apple
+    // Notes needs both kinds: "never create notes" removes the write tool, and
+    // "search titles only" removes the one that opens bodies, because a result
+    // filter runs after the reading it was meant to prevent.
+    let out = tools;
+    for (const [server, settings] of Object.entries(this.settings || {})) {
+      const drop = droppedTools(server, settings);
+      if (!drop.length) continue;
+      const gone = new Set(drop.map((name) => `${server}${SEP}${name}`));
+      out = out.filter((t) => !gone.has(t.function.name));
+    }
+
     const things = this.settings.things;
-    if (!things) return tools;
+    if (!things) return out;
     const allowed = allowedStatuses(things);
-    return tools.map((t) => {
+    return out.map((t) => {
       if (!t.function.name.endsWith(`${SEP}things3_get_todos`)) return t;
       const status = t.function.parameters?.properties?.status;
       if (!status) return t;
@@ -461,6 +474,16 @@ export class McpPool {
     if (!client) return `Error: server "${entry.server}" is not connected`;
 
     const settings = this.settings[entry.server] || {};
+
+    // Re-checked here, not only when the tool list is built. #scoped removes
+    // the tool from what the model is OFFERED; this refuses it if a call
+    // arrives anyway — from a stale tool list earlier in the conversation, or
+    // a model inventing a name it saw once. "Never create notes" has to mean
+    // no note is created, not that asking was discouraged.
+    if (droppedTools(entry.server, settings).includes(entry.tool)) {
+      return `Error: "${entry.tool}" is switched off in this connector's settings.`;
+    }
+
     const filters = activeFilters(entry.server, settings);
 
     // The user's scope wins over the model's arguments. Merging the other way

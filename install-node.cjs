@@ -692,6 +692,17 @@ async function setupThings(env, existing) {
   console.log("")
 }
 
+async function setupNotes(env, existing) {
+  if (os.platform() !== "darwin") return
+  const on = existing.REFUGIO_NOTES === "1"
+  // No installed-check, unlike Things 3: Notes.app ships with macOS.
+  console.log(`  ${C.bold}Apple Notes${C.reset}${on ? ` ${C.green}(enabled)${C.reset}` : ""}`)
+  console.log(`    ${C.dim}Search and read your notes, and create new ones. Automation permission on first use.${C.reset}`)
+  console.log(`    ${C.dim}Never edits or deletes an existing note — it only ever adds.${C.reset}`)
+  env.REFUGIO_NOTES = (await confirm("Connect Apple Notes?", true)) ? "1" : ""
+  console.log("")
+}
+
 // ── LLM engine ───────────────────────────────────────────────
 
 const OLLAMA_URL = "http://localhost:11434"
@@ -1076,7 +1087,7 @@ function writeEnvFile(envPath, env) {
     { header: "Your Account", keys: ["OWUI_NAME", "OWUI_EMAIL", "OWUI_PASSWORD"] },
     { header: "WhatsApp (Hermeneia)", keys: ["HERMENEIA_DIR"] },
     { header: "Email (Epistole)", keys: ["EPISTOLE_URL"] },
-    { header: "Apple Reminders / Things 3", keys: ["REFUGIO_REMINDERS", "REFUGIO_THINGS"] },
+    { header: "Apple Reminders / Things 3 / Notes", keys: ["REFUGIO_REMINDERS", "REFUGIO_THINGS", "REFUGIO_NOTES"] },
     { header: "Notion", keys: ["NOTION_TOKEN"] },
     { header: "Memory", keys: ["REFUGIO_MEMORY", "GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_MEMORY_PATH"] },
     { header: "Slack", keys: ["SLACK_TOKEN"] },
@@ -1222,6 +1233,7 @@ async function promptCredentials(envPath, targetDir) {
   await setupEpistole(env, existing, targetDir)
   await setupAppleReminders(env, existing)
   await setupThings(env, existing)
+  await setupNotes(env, existing)
   for (const conn of PERSONAL_CONNECTORS) {
     await promptConnector(conn)
   }
