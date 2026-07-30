@@ -81,9 +81,11 @@ Open WebUI was REFUGIO's interface through v1. It still works and is still insta
 # The last Open WebUI release
 REFUGIO_VERSION=v1.0.3 curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
 
-# Or run it alongside v2's chat window
-refugio --owui            # or REFUGIO_OWUI=1
+# Or add it to a v2 install — it is not installed unless you ask
+curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash -s -- --owui
 ```
+
+Only that path installs `uv`, the Python virtual environment and PyTorch, and only that path asks you for an account — the chat window binds to loopback and has no logins.
 
 `REFUGIO_CHAT=0` hands the connectors back to Open WebUI, since only one of the two can own them.
 

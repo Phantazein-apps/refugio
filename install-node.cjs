@@ -1182,7 +1182,14 @@ async function promptCredentials(envPath, targetDir) {
   }
   console.log("")
 
-  await promptConnector(ACCOUNT_CONNECTOR)
+  // Open WebUI's login, and nothing else — the chat window binds to loopback
+  // and has no accounts. Asking everyone to invent a password for a product
+  // they are not installing is a question with no consequence, which teaches
+  // people to answer the rest of the installer without reading it.
+  if (process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1") {
+    console.log(`  ${C.dim}Open WebUI needs a login — the chat window does not.${C.reset}`)
+    await promptConnector(ACCOUNT_CONNECTOR)
+  }
 
   // ── Personal connectors — your own messages, mail, and notes ──
   console.log(`  ${C.bold}── Personal connectors ──${C.reset} ${C.dim}your messages, mail, and notes${C.reset}\n`)
@@ -1995,7 +2002,8 @@ async function main() {
   Options:
     --no-start         Don't launch REFUGIO after install
     --non-interactive  Skip credential prompts (create template only)
-    --skip-owui        Skip Open WebUI installation
+    --owui             Also install Open WebUI (legacy interface, being retired)
+    --skip-owui        No-op, kept for compatibility — Open WebUI is now opt-in
     --help             Show this help
 
   Examples:
@@ -2044,7 +2052,15 @@ async function main() {
     env = await promptCredentials(envPath, targetDir)
   }
 
-  if (!flags.has("--skip-owui")) {
+  // Open WebUI is OPT-IN. It used to install unless --skip-owui was passed,
+  // which meant the default install still pulled uv, built a Python virtual
+  // environment and downloaded PyTorch — for an interface it no longer starts.
+  // The README already described the current behaviour ("No Python"); this is
+  // the code catching up with it.
+  //
+  // --skip-owui is kept as a no-op so anyone scripting against it still works.
+  const wantsOwui = flags.has("--owui") || process.env.REFUGIO_OWUI === "1"
+  if (wantsOwui) {
     await setupOpenWebUI(targetDir)
   }
 
