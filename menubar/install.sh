@@ -48,8 +48,10 @@ if [ -f "$ICON_SRC" ] && command -v iconutil >/dev/null 2>&1; then
   ICONSET="$(mktemp -d)/AppIcon.iconset"
   mkdir -p "$ICONSET"
   for sz in 16 32 64 128 256 512; do
-    sips -z $sz $sz "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null 2>&1
-    sips -z $((sz*2)) $((sz*2)) "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1
+    # `|| true` matters: this script runs under `set -e`, so one sips hiccup
+    # would abort the entire menu-bar install over a missing icon size.
+    sips -z $sz $sz "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null 2>&1 || true
+    sips -z $((sz*2)) $((sz*2)) "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1 || true
   done
   iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null \
     && echo "  icon built" || echo "  icon build failed — continuing without one"
