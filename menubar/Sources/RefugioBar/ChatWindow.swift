@@ -55,6 +55,12 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
         )
         w.title = "REFUGIO (beta)"
         w.titlebarAppearsTransparent = true
+        // Drag the window by its background, not only the title bar. The title
+        // bar is transparent and thin here, so the obvious place to grab —
+        // REFUGIO's own top strip — was not a handle at all. WKWebView consumes
+        // clicks on its own controls, so this adds a drag surface without
+        // taking one away.
+        w.isMovableByWindowBackground = true
         w.minSize = NSSize(width: 640, height: 480)
         w.contentView = web
         w.delegate = self

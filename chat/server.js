@@ -23,7 +23,7 @@ import * as store from "./store.js";
 import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
-import { listModels, isUp, chatStream, complete, OLLAMA_BASE } from "./ollama.js";
+import { listModels, isUp, chatStream, complete, pullModel, OLLAMA_BASE } from "./ollama.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, "static");
@@ -143,6 +143,25 @@ function describeModels(names, activeModel) {
       tools: modelSupportsTools(name),
     };
   });
+}
+
+/** Models this Mac could run but hasn't downloaded.
+ *
+ *  The picker used to list only what Ollama already had — which after a fresh
+ *  install is exactly one model, and the only way to get another was
+ *  `ollama pull` in a terminal. That is the thing this app exists to avoid.
+ *
+ *  Only models that fit the machine at all are offered. Suggesting a 13.5 GB
+ *  download to someone with 8 GB of RAM wastes twenty minutes to arrive at a
+ *  model they cannot run. */
+function downloadableModels(installed) {
+  const mf = memFit();
+  if (!mf) return [];
+  const have = new Set(installed.map((n) => n.split("@")[0]));
+  const totalGb = totalmem() / 1024 ** 3;
+  return mf.MODEL_LADDER
+    .filter((m) => !have.has(m.tag) && m.ramGb <= totalGb - 1.5 && m.tools)
+    .map((m) => ({ name: m.tag, needGb: m.ramGb, tools: true }));
 }
 
 // Tool limits. A large tool surface degrades model accuracy — they pick wrong
@@ -560,6 +579,7 @@ async function route(req, res, url) {
       ollamaUp: up,
       model,
       models: describeModels(models.map((m) => m.name), model),
+      downloadable: downloadableModels(models.map((m) => m.name)),
       freeGb: memFit() ? Math.round(memFit().availableMemGb() * 10) / 10 : null,
       ollama: OLLAMA_BASE,
       tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],
@@ -570,6 +590,40 @@ async function route(req, res, url) {
       // the per-message control must disappear, not sit there doing nothing.
       web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
     });
+  }
+
+  // Download a model, streaming Ollama's byte counts through to the browser.
+  // SSE rather than a request that returns when it's done: this takes minutes,
+  // and a spinner with no numbers is indistinguishable from a hang.
+  if (p === "/api/chat/models/pull" && req.method === "POST") {
+    const body = await readBody(req);
+    const name = String(body.name || "").trim();
+    // Only tags this build offers. Nothing arbitrary gets handed to Ollama.
+    const offered = downloadableModels((await listModels()).map((m) => m.name));
+    if (!offered.some((m) => m.name === name)) {
+      return sendJson(res, 400, { error: `won't download "${name}"` });
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const ac = new AbortController();
+    res.on("close", () => ac.abort());
+    log(`downloading ${name}`);
+    try {
+      await pullModel(name, (m) => send("progress", {
+        status: m.status || "", completed: m.completed || 0, total: m.total || 0,
+      }), ac.signal);
+      log(`downloaded ${name}`);
+      send("done", { name });
+    } catch (e) {
+      if (!ac.signal.aborted) send("error", { error: e.message });
+    }
+    try { res.end(); } catch {}
+    return;
   }
 
   if (p === "/api/chat/ask" && req.method === "POST") {

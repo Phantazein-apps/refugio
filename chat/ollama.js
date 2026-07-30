@@ -120,3 +120,39 @@ export async function complete({ model, messages, signal }) {
 }
 
 export const OLLAMA_BASE = BASE;
+
+/**
+ * Download a model, reporting progress.
+ *
+ * Ollama streams NDJSON here with `completed`/`total` byte counts. A model is
+ * gigabytes, so a UI that only says "downloading" for ten minutes is
+ * indistinguishable from a hang — the counts are the point, not a nicety.
+ */
+export async function pullModel(name, onProgress, signal) {
+  const res = await fetch(`${BASE}/api/pull`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: name, stream: true }),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`Ollama refused the download (${res.status})`);
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      // Ollama reports failures in-band, as a field on a 200 response.
+      if (msg.error) throw new Error(msg.error);
+      onProgress(msg);
+    }
+  }
+}

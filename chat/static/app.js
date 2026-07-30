@@ -157,7 +157,27 @@ async function refreshStatus() {
       if (m.name === s.model) o.selected = true;
       els.model.appendChild(o);
     }
-    if (!s.models?.length) els.model.innerHTML = "<option>no models</option>";
+
+    // Models you could have. Before this the picker listed only what Ollama had
+    // already downloaded — exactly one after a fresh install — and the only way
+    // to get another was `ollama pull` in a terminal, which is the thing this
+    // app exists to avoid. Kept in a separate group so choosing one is
+    // obviously a download, not a switch.
+    if (s.downloadable?.length) {
+      const g = document.createElement("optgroup");
+      g.label = "Download";
+      for (const m of s.downloadable) {
+        const o = document.createElement("option");
+        o.value = `pull:${m.name}`;
+        o.textContent = `${m.name}  \u00b7 ${m.needGb} GB download`;
+        o.title = `Downloads ${m.needGb} GB from Ollama. You can keep using ${s.model || "the current model"} meanwhile.`;
+        g.appendChild(o);
+      }
+      els.model.appendChild(g);
+    }
+    if (!s.models?.length && !s.downloadable?.length) {
+      els.model.innerHTML = "<option>no models</option>";
+    }
     // Explains the labels rather than restating a number nobody asked for.
     els.model.title = s.freeGb != null
       ? `${s.freeGb} GB of memory free right now. A model marked "too big right ` +
@@ -1139,7 +1159,70 @@ els.thread.addEventListener("click", (e) => {
 els.webArm.addEventListener("click", () => setWebArmed(!state.webArmed));
 els.status.addEventListener("click", showConnectors);
 els.newChat.addEventListener("click", newChat);
-els.model.addEventListener("change", () => { state.model = els.model.value; });
+els.model.addEventListener("change", () => {
+  const v = els.model.value;
+  if (v.startsWith("pull:")) { downloadModel(v.slice(5)); return; }
+  state.model = v;
+});
+
+/** Download a model, showing bytes as they arrive.
+ *
+ *  A model is gigabytes over a home connection. A spinner for ten minutes is
+ *  indistinguishable from a hang, so this reports the actual counts — and puts
+ *  the picker back where it was, since the download is not a switch. */
+async function downloadModel(name) {
+  // Don't leave the picker showing a model that isn't installed yet.
+  els.model.value = state.model || els.model.options[0]?.value || "";
+
+  let bar = document.getElementById("model-warn");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "model-warn";
+    bar.className = "model-warn";
+    els.scroll.parentElement.insertBefore(bar, els.scroll);
+  }
+  bar.textContent = `Downloading ${name}\u2026`;
+
+  try {
+    const res = await fetch("/api/chat/models/pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok || !res.body) {
+      throw new Error((await res.json().catch(() => ({}))).error || `failed (${res.status})`);
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const frames = buf.split("\n\n");
+      buf = frames.pop() ?? "";
+      for (const frame of frames) {
+        const ev = /^event: (.+)$/m.exec(frame)?.[1];
+        const raw = /^data: (.+)$/m.exec(frame)?.[1];
+        if (!ev || !raw) continue;
+        let d; try { d = JSON.parse(raw); } catch { continue; }
+        if (ev === "progress") {
+          const gb = (n) => (n / 1024 ** 3).toFixed(1);
+          bar.textContent = d.total
+            ? `Downloading ${name} \u2014 ${gb(d.completed)} of ${gb(d.total)} GB`
+            : `${name}: ${d.status || "working"}\u2026`;
+        } else if (ev === "error") {
+          throw new Error(d.error);
+        } else if (ev === "done") {
+          bar.textContent = `${name} downloaded \u2014 choose it in the model list to use it.`;
+          setTimeout(refreshStatus, 500);
+        }
+      }
+    }
+  } catch (e) {
+    bar.textContent = `Couldn\u2019t download ${name}: ${e.message}`;
+  }
+}
 
 els.railToggle.addEventListener("click", () => setRailCollapsed(!state.railCollapsed));
 els.gutterRail.addEventListener("click", () => setGutter(true));
