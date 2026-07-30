@@ -157,29 +157,79 @@ else
   say "  ${DIM}none found${RESET}"
 fi
 
-# ── 6. Ollama models ───────────────────────────────────────────────────
-# Not REFUGIO's to delete by default: Ollama may predate it and be used by
-# other things. But they are the biggest thing on disk, so they get offered.
-step "Ollama models"
-if command -v ollama >/dev/null 2>&1; then
+# ── 6. Ollama ──────────────────────────────────────────────────────────
+# Two separate questions, asked in the right order. Removing Ollama takes its
+# models with it, so offering "delete the models?" first and "delete Ollama?"
+# second would ask people to answer the same thing twice.
+#
+# Neither is REFUGIO's by default: Ollama may predate this install and other
+# things may be using it. But REFUGIO is usually what put it there, and leaving
+# a multi-gigabyte service behind after an uninstall is its own kind of rude.
+step "Ollama"
+ollama_present=0
+[ -x /usr/local/bin/ollama ] && ollama_present=1
+[ -d /Applications/Ollama.app ] && ollama_present=1
+command -v ollama >/dev/null 2>&1 && ollama_present=1
+
+if [ "$ollama_present" = 0 ]; then
+  say "  ${DIM}not installed${RESET}"
+else
   models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
-  if [ -n "$models" ]; then
-    size=$(du -sh "$HOME/.ollama/models" 2>/dev/null | cut -f1)
-    say "  ${DIM}installed: $(echo "$models" | tr '\n' ' ')${RESET}"
+  size=$(du -sh "$HOME/.ollama/models" 2>/dev/null | cut -f1)
+  [ -n "$models" ] && say "  ${DIM}models: $(echo "$models" | tr '\n' ' ')${RESET}"
+
+  if confirm_destroy "Ollama itself${size:+, and its models ($size)}" \
+       "The engine that runs your local model. Say no to keep Ollama and be asked about the models separately — other apps may be using it."; then
+    # Stop the server before removing the files under it.
+    if [ "$DRY" = 0 ]; then
+      pkill -f "ollama serve" 2>/dev/null
+      sudo systemctl stop ollama 2>/dev/null
+      sudo systemctl disable ollama 2>/dev/null
+      sleep 1
+    fi
+
+    # macOS — brew, or the app bundle the installer unzips into /Applications.
+    if command -v brew >/dev/null 2>&1 && brew list ollama >/dev/null 2>&1; then
+      if [ "$DRY" = 1 ]; then say "  would run  brew uninstall ollama"
+      else brew uninstall ollama >/dev/null 2>&1 && say "  removed  ollama (Homebrew)"; fi
+      gone=$((gone + 1))
+    fi
+    rm_path "/Applications/Ollama.app"
+
+    # Linux — the official install script's binary, service and data directory.
+    # These need root, so they are announced rather than run silently; the
+    # password prompt is the second confirmation.
+    for p in /usr/local/bin/ollama /etc/systemd/system/ollama.service /usr/share/ollama; do
+      [ -e "$p" ] || continue
+      if [ "$DRY" = 1 ]; then say "  would remove  $p ${DIM}(needs sudo)${RESET}"
+      else say "  ${DIM}removing $p (sudo)${RESET}"; sudo rm -rf "$p" && say "  removed  $p"; fi
+      gone=$((gone + 1))
+    done
+    if [ "$DRY" = 0 ] && [ -f /etc/systemd/system/ollama.service ]; then :; fi
+    if [ "$DRY" = 0 ] && id ollama >/dev/null 2>&1; then
+      sudo userdel ollama 2>/dev/null && say "  removed  the ollama service user"
+      sudo groupdel ollama 2>/dev/null
+    fi
+
+    # ~/.ollama holds the downloaded models and the keypair Ollama identifies
+    # itself with. It survives every install method, so it is removed last and
+    # unconditionally once Ollama is going.
+    rm_path "$HOME/.ollama"
+
+  elif [ -n "$models" ]; then
+    # Kept Ollama — the models are still worth offering, they are the big thing.
     if confirm_destroy "Downloaded models${size:+ ($size)}" \
-         "Re-downloading takes gigabytes. Ollama itself is left installed either way — other apps may be using it."; then
+         "Re-downloading takes gigabytes. Ollama itself stays installed."; then
       for m in $models; do
         if [ "$DRY" = 1 ]; then say "  would remove  model $m"; else ollama rm "$m" >/dev/null 2>&1 && say "  removed  model $m"; fi
         gone=$((gone + 1))
       done
     else
-      keep_note "Ollama models"
+      keep_note "Ollama and its models"
     fi
   else
-    say "  ${DIM}none installed${RESET}"
+    keep_note "Ollama (no models downloaded)"
   fi
-else
-  say "  ${DIM}Ollama not installed${RESET}"
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────
