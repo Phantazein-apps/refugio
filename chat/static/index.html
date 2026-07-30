@@ -20,12 +20,23 @@
       }
       document.documentElement.dataset.theme = p;
     } catch (e) { document.documentElement.dataset.theme = "dark"; }
+    // In the native window, reserve the top 38px: macOS draws the traffic
+    // lights there, and an AppKit strip sits over it so the window can be
+    // dragged by its top bar. In a browser neither exists and the space would
+    // be dead margin, so this is a class rather than a constant.
+    if (navigator.userAgent.indexOf("REFUGIO-Native") !== -1) {
+      document.documentElement.classList.add("native");
+    }
   })();
 </script>
 <link rel="stylesheet" href="phantazein.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<!-- Empty on purpose. It is under the AppKit drag strip, so anything here
+     would be unclickable; it exists to keep the rail head and the top bar out
+     from under the traffic lights. -->
+<div class="titlebar" aria-hidden="true"></div>
 <div class="app">
   <aside class="rail" id="rail">
     <div class="rail-head">

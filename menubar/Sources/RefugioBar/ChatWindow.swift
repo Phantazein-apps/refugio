@@ -1,6 +1,27 @@
 import AppKit
 import WebKit
 
+/// The band across the top of the window that drags it.
+///
+/// `isMovableByWindowBackground` alone does not work here: WKWebView handles
+/// mouse-down itself, so AppKit never sees a background click and the window
+/// cannot be moved by its top bar — the exact place everyone reaches for. A
+/// view that answers `mouseDownCanMoveWindow` sits ABOVE the web view and
+/// gives the window server a real handle.
+///
+/// It is deliberately empty. Anything interactive underneath it would be
+/// unclickable, so the web UI reserves the same 38 points (`.native .titlebar`)
+/// and puts nothing there. That is also where macOS draws the traffic lights.
+/// The traffic lights are NOT underneath this. With `.fullSizeContentView`
+/// they live in the window's frame view, which is the content view's
+/// superview — so they sit above this strip in z-order and keep their clicks.
+/// Overriding `hitTest` to pass through would defeat the whole thing: AppKit
+/// asks `mouseDownCanMoveWindow` of whatever view the hit test lands on, and
+/// passing through lands it on the web view, which says no.
+final class DragStrip: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+}
+
 /// A native window hosting REFUGIO's chat UI.
 ///
 /// The chat UI is a local web app, so the "native app" is a WKWebView pointed
@@ -10,6 +31,11 @@ import WebKit
 /// Deliberately minimal: REFUGIO's own UI supplies all the chrome, so this is
 /// a window, a web view, and the few behaviours a webview doesn't give free.
 final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
+
+    /// Height of the chrome band at the top of the window. Matches
+    /// `.titlebar` in the web UI and the 38px strip in every design frame; the
+    /// two must agree or the drag surface covers real controls.
+    static let stripHeight: CGFloat = 38
 
     private var window: NSWindow?
     private var web: WKWebView?
@@ -48,6 +74,11 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()          // persist localStorage across launches
+        // Appended to the default user agent, not a replacement for it. The web
+        // UI keys off this to reserve the top 38 points for the traffic lights
+        // and the drag strip — space that would be dead margin in a browser,
+        // where neither exists.
+        config.applicationNameForUserAgent = "REFUGIO-Native"
 
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
@@ -63,15 +94,32 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
             defer: false
         )
         w.title = "REFUGIO (beta)"
+        // The title is drawn OVER the web content with .fullSizeContentView, so
+        // "REFUGIO (beta)" landed on top of REFUGIO's own wordmark and the model
+        // button — two overlapping pieces of text in the corner. The window
+        // still has a title (it shows in Mission Control and the Window menu);
+        // it just isn't painted across the app.
+        w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
-        // Drag the window by its background, not only the title bar. The title
-        // bar is transparent and thin here, so the obvious place to grab —
-        // REFUGIO's own top strip — was not a handle at all. WKWebView consumes
-        // clicks on its own controls, so this adds a drag surface without
-        // taking one away.
         w.isMovableByWindowBackground = true
         w.minSize = NSSize(width: 640, height: 480)
-        w.contentView = web
+
+        // Container: web view underneath, drag strip on top.
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 1080, height: 760))
+        container.autoresizingMask = [.width, .height]
+        web.frame = container.bounds
+        web.autoresizingMask = [.width, .height]
+        container.addSubview(web)
+
+        let strip = DragStrip(frame: NSRect(x: 0, y: container.bounds.height - Self.stripHeight,
+                                            width: container.bounds.width, height: Self.stripHeight))
+        // Pinned to the top and full width as the window resizes: flexible
+        // width, and a flexible BOTTOM margin so it stays at the top rather
+        // than floating in the middle.
+        strip.autoresizingMask = [.width, .minYMargin]
+        container.addSubview(strip, positioned: .above, relativeTo: web)
+
+        w.contentView = container
         w.delegate = self
         w.center()
         // Remember size/position between launches.

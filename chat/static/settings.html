@@ -16,6 +16,9 @@
       }
       document.documentElement.dataset.theme = p;
     } catch (e) { document.documentElement.dataset.theme = "dark"; }
+    if (navigator.userAgent.indexOf("REFUGIO-Native") !== -1) {
+      document.documentElement.classList.add("native");
+    }
   })();
 </script>
 <link rel="stylesheet" href="phantazein.css">
@@ -23,11 +26,10 @@
 </head>
 <body>
 
-<!-- The strip is also the window's drag handle in the native app: the title
-     bar there is transparent and full-height content sits under it, so
-     without a deliberate grab surface there is nowhere to pick the window up.
-     -webkit-app-region has no effect in WKWebView, so this pairs with
-     isMovableByWindowBackground on the AppKit side. -->
+<!-- Under the AppKit drag strip in the native app, so deliberately empty; see
+     the note in index.html. -->
+<div class="titlebar" aria-hidden="true"></div>
+
 <header class="topstrip">
   <a class="back" href="/" title="Back to chat">
     <svg width="17" height="17" viewBox="0 0 512 512" aria-hidden="true">

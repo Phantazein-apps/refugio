@@ -24,6 +24,14 @@ body {
   overflow: hidden;
 }
 
+/* The window's chrome band — traffic lights and the AppKit drag strip. Only
+   in the native app; a browser has neither. See index.html. */
+.titlebar { display: none; }
+:root.native .titlebar {
+  display: block; flex: 0 0 38px; height: 38px;
+  border-bottom: 1px solid var(--rule);
+}
+
 /* ── Top strip ─────────────────────────────────────────── */
 .topstrip {
   height: 38px;

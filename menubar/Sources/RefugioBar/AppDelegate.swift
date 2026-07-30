@@ -9,6 +9,8 @@ import AppKit
 /// removes the icon and asks what to do about the stack.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    /// Built once, attached only for the duration of a right-click. See popMenu().
+    private var menu: NSMenu?
     private var headerItem: NSMenuItem!
     private var toggleItem: NSMenuItem!
     private var openItem: NSMenuItem!
@@ -48,12 +50,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         setIcon(running: running)
-        statusItem.menu = makeMenu()
+
+        // Left click opens REFUGIO; right click (or control-click) opens the
+        // menu. The menu is built now but NOT attached — assigning
+        // `statusItem.menu` makes AppKit swallow every click to show it, which
+        // is why the icon had no primary action at all.
+        //
+        // On the convention: Apple's own extras (Wi-Fi, Volume) show a menu on
+        // click, because they have nothing to open. Extras that front an app —
+        // Dropbox, 1Password, Bartender — open the app on left click and keep
+        // the menu on right click, because "show me the thing" is what people
+        // want nine times in ten. REFUGIO has a window, so it follows the
+        // second convention. The cost is discoverability: nothing advertises
+        // the right-click, which is what the tooltip is for.
+        menu = makeMenu()
+        if let btn = statusItem.button {
+            btn.target = self
+            btn.action = #selector(statusItemClicked)
+            _ = btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            btn.toolTip = "REFUGIO — click to open · right-click for the menu"
+        }
 
         // One observational line. Not a decision — see the comment on the
         // removed placement watch.
         let f = statusItem.button?.window?.frame ?? .zero
         log("status item created: frame=\(f) screen=\(statusItem.button?.window?.screen != nil)")
+    }
+
+    @objc private func statusItemClicked() {
+        let event = NSApp.currentEvent
+        let wantsMenu = event?.type == .rightMouseUp
+            || (event?.modifierFlags.contains(.control) ?? false)
+        if wantsMenu { popMenu() } else { openApp() }
+    }
+
+    /// Show the menu for one click, then detach it again.
+    ///
+    /// Attaching permanently would take the left click back. Attach, click it
+    /// ourselves so it drops from the right place with the right highlight,
+    /// then clear it.
+    private func popMenu() {
+        guard let m = menu else { return }
+        statusItem.menu = m
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -113,6 +153,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         running || (startedAt != nil) ? "Stop REFUGIO (frees memory)" : "Start REFUGIO"
     }
 
+    /// "Open" creates something; "Show" brings back something that exists. The
+    /// window is only hidden when closed, never destroyed, so offering to open
+    /// an already-open window misdescribes what the click does — and reads as
+    /// though it might discard the conversation on screen.
+    private func openTitle() -> String {
+        windowIsUp ? "Show REFUGIO" : "Open REFUGIO"
+    }
+
+    /// Whether the chat window exists AND is on screen. Reads the optional
+    /// directly rather than going through `chatWindow`, which would build one
+    /// — running appURL() and its socket probe on every three-second poll, for
+    /// a window nobody has asked for yet.
+    private var windowIsUp: Bool {
+        chatWindowInstance?.isVisible ?? false
+    }
+
     /// Build the menu, keeping references so status polling can update it.
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
@@ -122,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(header)
         menu.addItem(.separator())
 
-        let open = NSMenuItem(title: "Open REFUGIO", action: #selector(openApp), keyEquivalent: "o")
+        let open = NSMenuItem(title: openTitle(), action: #selector(openApp), keyEquivalent: "o")
         open.target = self
         menu.addItem(open)
 
@@ -195,7 +251,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // ── Actions ─────────────────────────────────────────────
-    private lazy var chatWindow = ChatWindow(url: appURL())
+    /// Built on first use and kept. Not `lazy`, because the poll below has to
+    /// ask "is there a window, and is it up?" without building one as a side
+    /// effect — and a lazy var cannot be asked that question.
+    private var chatWindowInstance: ChatWindow?
+    private var chatWindow: ChatWindow {
+        if let existing = chatWindowInstance { return existing }
+        let created = ChatWindow(url: appURL())
+        chatWindowInstance = created
+        return created
+    }
 
     @objc private func openApp() {
         if running {
@@ -443,6 +508,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             headerItem?.title = "REFUGIO — stopped"
             toggleItem?.title = "Start REFUGIO"
         }
+        openItem?.title = openTitle()
         setIcon(running: up || starting)
     }
 }

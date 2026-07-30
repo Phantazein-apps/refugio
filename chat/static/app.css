@@ -42,9 +42,21 @@ body {
   margin: 0; background: var(--bg-app); color: var(--ink);
   font: 400 0.875rem/1.375rem var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
 }
 
-.app { display: flex; height: 100vh; overflow: hidden; }
+/* The window's chrome band. Present only in the native app: macOS draws the
+   traffic lights across the top 38px, and with .fullSizeContentView the web
+   content runs underneath them — which is how REFUGIO's own wordmark ended up
+   sitting on top of the close button. Also the drag handle, so it must stay
+   empty. */
+.titlebar { display: none; }
+:root.native .titlebar {
+  display: block; flex: 0 0 38px; height: 38px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.app { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
 /* ── Rail ──────────────────────────────────────────────── */
 .rail {
@@ -312,10 +324,15 @@ body {
    glyph is the fact and the tooltip is the action. */
 .theme-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 24px; padding: 0; cursor: pointer;
-  background: none; border: 1px solid transparent; color: var(--ink-faint);
+  width: 30px; height: 26px; padding: 0; cursor: pointer;
+  background: none;
+  /* A permanent border, not one that appears on hover. Borderless, it read as
+     decoration rather than a control — reported as "no light/dark toggle"
+     while sitting in plain sight two centimetres from the pointer. */
+  border: 1px solid var(--border);
+  color: var(--ink-muted);
 }
-.theme-btn:hover { color: var(--ink); border-color: var(--border); }
+.theme-btn:hover { color: var(--ink); border-color: var(--ink-faint); background: var(--bg-surface-3); }
 .theme-btn .t-sun { display: none; }
 .theme-btn .t-moon { display: block; }
 :root[data-theme="light"] .theme-btn .t-sun { display: block; }
