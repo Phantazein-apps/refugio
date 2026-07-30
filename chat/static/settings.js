@@ -930,6 +930,11 @@ function updateBadge() {
 
 // ── Data & reset ────────────────────────────────────────────
 
+const dataBytes = (n) =>
+  n < 1024 ? `${n} B`
+  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
+  : `${(n / (1024 * 1024)).toFixed(1)} MB`;
+
 async function renderData() {
   const box = $("data-body");
   box.replaceChildren(el("div.waiting", { text: "Counting…" }));
@@ -951,9 +956,17 @@ async function renderData() {
         el("span.k", { text: "messages" }), el("span", { text: String(d.messages) }),
         d.oldest ? el("span.k", { text: "since" }) : null,
         d.oldest ? el("span", { text: new Date(d.oldest).toLocaleDateString() }) : null,
+        // Listed apart from messages because it is a different kind of thing:
+        // copies of the user's own documents, made when they attached them,
+        // which is the part of "what is stored" people least expect.
+        d.attachments?.files ? el("span.k", { text: "attached files" }) : null,
+        d.attachments?.files
+          ? el("span", { text: `${d.attachments.files} · ${dataBytes(d.attachments.bytes)}` })
+          : null,
       ),
       el("div.t-label", { text: "On disk" }),
       el("div.path", { text: d.dbPath }),
+      d.attachments?.files ? el("div.path", { text: `${d.dataDir}/attachments` }) : null,
       el("div.aside", { text: "Nothing here is synced anywhere. This file is the only copy — copy the folder before erasing if you want to keep it." }),
     ),
     eraseCard(d),
@@ -975,7 +988,9 @@ function eraseCard(d) {
   return el("div.card.danger", {},
     el("h3", { text: "Erase chat history" }),
     el("div.prose", {},
-      "Deletes every conversation and message, including pinned ones. ",
+      "Deletes every conversation and message, including pinned ones",
+      d.attachments?.files ? ", and REFUGIO's copies of the files you attached" : "",
+      ". ",
       el("strong", { text: "This cannot be undone" }),
       " and there is no copy anywhere else.",
     ),
@@ -999,7 +1014,8 @@ async function eraseHistory(btn) {
     });
     const d = await res.json();
     if (!res.ok) throw new Error(d.error || "failed");
-    toast(`Erased ${d.deleted} conversation${d.deleted === 1 ? "" : "s"}.`);
+    toast(`Erased ${d.deleted} conversation${d.deleted === 1 ? "" : "s"}` +
+      (d.attachments ? ` and ${d.attachments} attached file${d.attachments === 1 ? "" : "s"}` : "") + ".");
     renderData();
   } catch (e) {
     btn.disabled = false;

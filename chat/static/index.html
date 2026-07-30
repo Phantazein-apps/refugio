@@ -113,16 +113,33 @@
     <div class="composer">
       <!-- Shown only while web search is armed, and only for the next message. -->
       <div class="web-warn" id="web-warn" hidden></div>
+      <!-- Attached files, above the box, as chips. Hidden until there is one. -->
+      <div class="attach-tray" id="attach-tray" hidden></div>
       <div class="composer-inner">
+        <button class="attach-btn" id="attach-btn" type="button" title="Attach a file" aria-label="Attach a file">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21.4 11.05 12.2 20.2a5.5 5.5 0 0 1-7.8-7.8l9.2-9.15a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.16a1.8 1.8 0 0 1-2.6-2.6l8.5-8.45"/>
+          </svg>
+        </button>
+        <!-- The browser will not say where this file came from — every engine
+             reports `C:\fakepath\` for the value, deliberately. The bytes go
+             over loopback instead, and REFUGIO's own copy is the real path the
+             model is given. -->
+        <input type="file" id="attach-input" multiple hidden>
         <button class="web-arm" id="web-arm" type="button" hidden aria-pressed="false">
           <span aria-hidden="true">🌐</span> Web
         </button>
         <textarea id="input" rows="1" placeholder="Message REFUGIO…" autofocus></textarea>
         <button class="send" id="send" title="Send" disabled>↑</button>
       </div>
-      <div class="hint">Enter to send · Shift+Enter for a new line</div>
+      <div class="hint">Enter to send · Shift+Enter for a new line · drag a file in to attach it</div>
     </div>
   </main>
+
+  <!-- Covers the window while a file is dragged over it. Outside .composer, so
+       a drop anywhere counts: people aim at the conversation, not at the box. -->
+  <div class="drop-veil" id="drop-veil" hidden><div>Drop to attach</div></div>
 
   <!-- Sources: what the answer was built from. Collapsed to a rail tab until
        there is something in it. -->

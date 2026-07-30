@@ -131,7 +131,17 @@ Everything that used to be a terminal prompt is a page now: **http://127.0.0.1:8
 | **Web search** | The one thing in REFUGIO that leaves your machine. Off by default, and switching it on still doesn't start searching — each message has to be armed on its own, in the chat, with the warning shown at the time. |
 | **Appearance** | Light, dark, or follow the system — which is the default, and switches with your Mac as it does. Plus text size and motion. |
 | **Updates** | Whether a newer REFUGIO exists, and the command to apply it. The second thing here that reaches the network — see below. |
-| **Data & reset** | How many conversations exist, where the database is on disk, and an erase that requires typing the word `delete`. Nothing is synced anywhere, so that file is the only copy. |
+| **Data & reset** | How many conversations exist, how many files you've attached and what they weigh, where both live on disk, and an erase that requires typing the word `delete`. Nothing is synced anywhere, so that file is the only copy. |
+
+### Attaching files
+
+Click the paperclip, drag a file onto the window, or paste one. Up to five per message; a file on its own, with nothing typed, is a message.
+
+Text files — notes, CSVs, code, configuration, Markdown — are read and sent to the model along with your question, up to 20,000 characters each. Past that the model is told plainly where it was cut off, so it can say the answer might be further in rather than answering from half a document.
+
+**Formats REFUGIO cannot read say so — on the chip, and in the prompt.** A PDF is mostly binary, a `.docx` is a zip, and an image is an image; a local model like `llama3.1:8b` cannot see any of them. Attaching one gives the model the file's name, size and path, plus an explicit instruction not to guess at the contents. That instruction is the whole point: handed nothing but the name `lease.pdf`, a small model will confidently describe a lease.
+
+A note on what *attached* means here. Browsers refuse to tell a web page where a chosen file lives — `input.value` is `C:\fakepath\lease.pdf` in every engine, on purpose — so REFUGIO takes the bytes over loopback, writes its own copy under `~/.refugio-data/attachments/`, and hands the model *that* path, which is real and opens in Finder. Nothing leaves the machine either way. Removing a chip before sending deletes the copy; copies whose message was never sent are swept a day later; **Data & reset** erases the rest.
 
 ### Updates
 

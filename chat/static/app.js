@@ -13,6 +13,8 @@ const els = {
   modelName: $("model-name"), modelSize: $("model-size"), themeBtn: $("theme-btn"),
   status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
+  attachBtn: $("attach-btn"), attachInput: $("attach-input"),
+  attachTray: $("attach-tray"), dropVeil: $("drop-veil"),
   rail: $("rail"), railToggle: $("rail-toggle"),
   gutter: $("gutter"), gutterRail: $("gutter-rail"), gutterX: $("gutter-x"),
   gutterBody: $("gutter-body"), gutterCount: $("gutter-count"),
@@ -33,7 +35,14 @@ const state = {
   // tools. Cleared on every model change: the override is for the model that
   // was selected when it was given, not for the next one.
   toolWarningOverridden: false,
+  // Files attached to the message being composed. Each is already on disk by
+  // the time it appears here — the upload happens on choosing, not on sending,
+  // so a slow 20 MB file is waited for while still typing rather than after
+  // pressing send.
+  attachments: [],
 };
+
+const HINT_DEFAULT = "Enter to send · Shift+Enter for a new line · drag a file in to attach it";
 
 // ── Rendering ───────────────────────────────────────────────
 
@@ -47,7 +56,7 @@ import { resolvedTheme, setThemePreference } from "./theme.js";
 /** Model output is untrusted text; md.js escapes before adding any markup. */
 const renderContent = (text) => renderMarkdown(text);
 
-function addMessage(role, text) {
+function addMessage(role, text, files = []) {
   els.empty?.remove();
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
@@ -58,6 +67,12 @@ function addMessage(role, text) {
     `<div class="content"><div class="bubble"></div></div>`;
   const bubble = wrap.querySelector(".bubble");
   bubble.innerHTML = renderContent(text);
+  if (files.length) {
+    const list = document.createElement("div");
+    list.className = "attach-list";
+    for (const f of files) list.appendChild(chipNode(f));
+    wrap.querySelector(".content").appendChild(list);
+  }
   els.thread.appendChild(wrap);
   scrollToEnd();
   return bubble;
@@ -353,13 +368,16 @@ function toolGuard() {
 
   document.getElementById("tool-guard")?.remove();
   els.input.classList.toggle("held", blocked);
-  if (els.send) els.send.disabled = state.streaming ? false : blocked || !els.input.value.trim();
+  // A file on its own is a message. Requiring typed text as well would mean
+  // attaching something and then having to type "here" before it can be sent.
+  const empty = !els.input.value.trim() && !sendableFiles().length;
+  if (els.send) els.send.disabled = state.streaming ? false : blocked || empty;
 
   const hint = document.querySelector(".composer .hint");
   if (hint) {
     hint.textContent = blocked
       ? "Sending is paused while a model that cannot use your connectors is selected."
-      : "Enter to send · Shift+Enter for a new line";
+      : HINT_DEFAULT;
     hint.classList.toggle("warn", blocked);
   }
   if (!blocked) return;
@@ -731,7 +749,9 @@ async function openConversation(id) {
   try { convo = await (await fetch(`/api/chat/conversations/${id}`)).json(); }
   catch { showError("Couldn’t load that conversation."); return; }
   els.thread.innerHTML = "";
-  for (const m of convo.messages) addMessage(m.role, m.content);
+  // `m.content` is the display text — what was typed. The copy the model was
+  // sent, with the files inlined, stays in the database where it belongs.
+  for (const m of convo.messages) addMessage(m.role, m.content, m.attachments || []);
   stick = true; scrollToEnd();
   loadConversations();
 }
@@ -901,10 +921,155 @@ function newChat() {
   els.input.focus();
 }
 
+// ── Attachments ─────────────────────────────────────────────
+//
+// A file chosen here is uploaded immediately, not on send: a 20 MB file takes
+// a moment even over loopback, and that moment is better spent while the
+// question is still being typed than after pressing send with nothing on
+// screen to explain the wait.
+//
+// What "attached" means is worth being exact about, because the obvious
+// mental model is wrong in an interesting way. The browser will not tell a
+// page where a chosen file lives — `input.value` is `C:\fakepath\lease.pdf`
+// in every engine, deliberately, and has been for fifteen years. So the bytes
+// go to REFUGIO over loopback and REFUGIO writes its own copy; the path the
+// model is handed is that copy's, which is a real path on this machine that
+// opens in Finder. Nothing leaves the computer either way.
+
+const MAX_FILES = 5;
+let chipSeq = 0;
+
+/** The attachments a turn could actually be sent with.
+ *
+ *  Still uploading doesn't count, and neither does one that failed: a chip
+ *  that is on screen but not sendable would otherwise leave the send button
+ *  lit while pressing it did nothing at all. */
+// A declaration, not a const: toolGuard sits far above this and can run before
+// this line is evaluated.
+function sendableFiles() { return state.attachments.filter((f) => f.id && !f.error); }
+
+function humanBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** One chip. Used both in the composer tray and under a sent message; the
+ *  difference is only whether it can be taken off. */
+function chipNode(f, { removable = false } = {}) {
+  const node = document.createElement("span");
+  node.className = "chip";
+  if (f.pending) node.classList.add("pending");
+  if (f.error) node.classList.add("failed");
+  else if (f.id && !f.isText) node.classList.add("opaque");
+
+  const name = document.createElement("span");
+  name.className = "chip-name";
+  name.textContent = f.name;                       // never innerHTML: it's a filename
+  node.appendChild(name);
+
+  const meta = document.createElement("span");
+  meta.className = "chip-meta";
+  if (f.pending) meta.textContent = "attaching…";
+  else if (f.error) meta.textContent = f.error;
+  else if (!f.isText) meta.textContent = `${f.kind} · not readable`;
+  else meta.textContent = humanBytes(f.bytes);
+  node.appendChild(meta);
+
+  // The path lives here rather than on the chip. It is long, it is the same
+  // prefix every time, and this is where someone goes looking once — to check
+  // that "attached" meant something real.
+  node.title = f.error
+    ? `${f.name} — ${f.error}`
+    : f.pending ? f.name
+    : `${f.name}\n${humanBytes(f.bytes)} · ${f.kind}\nREFUGIO's copy: ${f.path}` +
+      (f.isText
+        ? (f.truncated ? `\n\nOnly the first part of this file is sent to the model.` : "")
+        : `\n\nREFUGIO cannot read the contents of this format. The model is told the name and path only, and told not to guess what is inside.`);
+
+  if (removable) {
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "chip-x";
+    x.title = "Remove";
+    x.setAttribute("aria-label", `Remove ${f.name}`);
+    x.textContent = "×";
+    x.addEventListener("click", () => detach(f));
+    node.appendChild(x);
+  }
+  return node;
+}
+
+function renderTray() {
+  els.attachTray.replaceChildren();
+  els.attachTray.hidden = !state.attachments.length;
+  for (const f of state.attachments) els.attachTray.appendChild(chipNode(f, { removable: true }));
+  els.attachBtn.disabled = state.attachments.length >= MAX_FILES;
+  els.attachBtn.title = els.attachBtn.disabled
+    ? `${MAX_FILES} files is the limit for one message`
+    : "Attach a file";
+  toolGuard();                                     // owns the send button's state
+}
+
+/** Take one file off, and delete REFUGIO's copy of it.
+ *
+ *  The delete matters: a chip removed before sending should not leave a copy
+ *  of someone's document sitting in an application directory. Best-effort —
+ *  if the request fails the chip still goes, because the visible thing has to
+ *  match what was asked for. */
+function detach(f) {
+  state.attachments = state.attachments.filter((x) => x.key !== f.key);
+  renderTray();
+  if (f.id) fetch(`/api/chat/attachments/${f.id}`, { method: "DELETE" }).catch(() => {});
+}
+
+/** Upload the chosen files, showing each as a chip the moment it is picked. */
+async function attachFiles(list) {
+  const files = [...list];
+  if (!files.length) return;
+
+  const room = MAX_FILES - state.attachments.length;
+  if (files.length > room) {
+    showError(room > 0
+      ? `Only ${room} more file${room === 1 ? "" : "s"} can go on one message — the rest were not attached.`
+      : `${MAX_FILES} files is the limit for one message.`);
+  }
+
+  for (const file of files.slice(0, Math.max(0, room))) {
+    const entry = { key: ++chipSeq, name: file.name, pending: true };
+    state.attachments.push(entry);
+    renderTray();
+    try {
+      const res = await fetch("/api/chat/attachments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          // Percent-encoded: HTTP headers are Latin-1 and a filename is not.
+          "X-Refugio-Filename": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+      Object.assign(entry, data, { pending: false });
+    } catch (err) {
+      // The chip stays, marked, rather than vanishing. A file that silently
+      // disappears between choosing it and sending is how someone ends up
+      // asking about a document the model never saw.
+      Object.assign(entry, { pending: false, error: err.message || "could not attach" });
+    }
+    renderTray();
+  }
+}
+
 /** Send a turn and paint tokens as they arrive over SSE. */
 async function send() {
   const text = els.input.value.trim();
-  if (!text || state.streaming) return;
+  // Still uploading is not ready to send: the ids don't exist yet, so the turn
+  // would go without the files the user is watching attach.
+  if (state.attachments.some((f) => f.pending)) return;
+  const files = state.attachments.filter((f) => f.id && !f.error);
+  if ((!text && !files.length) || state.streaming) return;
 
   // The guard, enforced rather than merely displayed. The disabled send button
   // is the visible half; this is the half that Enter cannot get past.
@@ -924,7 +1089,11 @@ async function send() {
 
   els.input.value = "";
   els.input.style.height = "auto";
-  addMessage("user", text);
+  // The tray empties with the box. Attachments belong to one message; leaving
+  // them would silently re-send the same file on the next question.
+  state.attachments = [];
+  renderTray();
+  addMessage("user", text, files);
   if (web) markWebTurn();
   setStreaming(true);
 
@@ -944,6 +1113,7 @@ async function send() {
         conversation_id: state.conversationId,
         model: state.model || undefined,
         web,
+        attachments: files.map((f) => f.id),
       }),
     });
 
@@ -1051,7 +1221,10 @@ function setStreaming(on) {
   els.send.textContent = on ? "\u25A0" : "\u2191";
   els.send.title = on ? "Stop" : "Send";
   els.send.classList.toggle("stopping", on);
-  els.send.disabled = on ? false : !els.input.value.trim();
+  els.send.disabled = on ? false : (!els.input.value.trim() && !sendableFiles().length);
+  // Attaching mid-answer would put the file on the NEXT message while the
+  // chip sits above a composer the user can't send from — clearer to wait.
+  els.attachBtn.disabled = on || state.attachments.length >= MAX_FILES;
 }
 
 // ── Wiring ──────────────────────────────────────────────────
@@ -1082,6 +1255,55 @@ els.thread.addEventListener("click", (e) => {
 });
 els.webArm.addEventListener("click", () => setWebArmed(!state.webArmed));
 els.newChat.addEventListener("click", newChat);
+
+// ── Attaching ───────────────────────────────────────────────
+// Three ways in, because people reach for all three: the paperclip, dragging
+// onto the window, and pasting.
+
+els.attachBtn.addEventListener("click", () => els.attachInput.click());
+els.attachInput.addEventListener("change", () => {
+  attachFiles(els.attachInput.files);
+  // Cleared so choosing the SAME file twice in a row still fires `change`.
+  els.attachInput.value = "";
+});
+
+// dragenter/dragover fire continuously and per-element, so a plain
+// show/hide flickers as the cursor crosses children. Counting enters and
+// leaves is the standard fix and the only reliable one.
+let dragDepth = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+
+window.addEventListener("dragenter", (e) => {
+  if (!hasFiles(e)) return;
+  dragDepth++;
+  els.dropVeil.hidden = false;
+});
+window.addEventListener("dragover", (e) => {
+  // Without preventDefault the browser navigates to the file on drop, which
+  // replaces the whole app with a text document and loses the conversation.
+  if (hasFiles(e)) e.preventDefault();
+});
+window.addEventListener("dragleave", (e) => {
+  if (!hasFiles(e)) return;
+  if (--dragDepth <= 0) { dragDepth = 0; els.dropVeil.hidden = true; }
+});
+window.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  els.dropVeil.hidden = true;
+  if (!state.streaming) attachFiles(e.dataTransfer.files);
+});
+
+// Pasting a file — a screenshot, most often. Text pastes are untouched: the
+// clipboard carries both a file and a string for some sources, and hijacking
+// an ordinary paste would be far worse than missing one.
+els.input.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length || state.streaming) return;
+  e.preventDefault();
+  attachFiles(files);
+});
 
 // The status chip is the door to the connectors page. It used to open a modal
 // sheet; the sheet is what the settings surface replaced.

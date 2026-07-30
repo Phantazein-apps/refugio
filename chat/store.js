@@ -40,10 +40,35 @@ export function initStore(dbPath) {
       ON messages(conversation_id, id);
   `);
 
+  // Added after the first release, so ALTER rather than a column in the CREATE
+  // above — an existing ~/.refugio-data/chat.db must keep working across an
+  // update, and losing someone's chat history to a schema change would be the
+  // worst possible way to ship a feature.
+  //
+  // Two columns, because a message with a file on it has two texts that are
+  // both true. `content` is what the model was sent — the question plus the
+  // file's contents — and it has to stay that way or a follow-up question
+  // about the file would be answered with the file gone from history.
+  // `display_content` is what the person typed, which is what belongs in the
+  // scrollback; showing them 20,000 characters of their own CSV back is not a
+  // transcript of the conversation they had.
+  addColumn("messages", "display_content", "TEXT");
+  addColumn("messages", "attachments", "TEXT");
+
   return db;
 }
 
+/** Add a column if this database predates it. SQLite has no IF NOT EXISTS for
+ *  ALTER TABLE, and catching the error would also swallow real ones. */
+function addColumn(table, name, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (cols.some((c) => c.name === name)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+}
+
 const now = () => new Date().toISOString();
+
+const parseJson = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
 export function ensureConversation(id) {
   const existing = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
@@ -54,11 +79,15 @@ export function ensureConversation(id) {
   ).run(id, t, t);
 }
 
-export function addMessage(conversationId, role, content, model = null) {
+export function addMessage(conversationId, role, content, model = null, extra = {}) {
+  // Both null on an ordinary message, which is nearly all of them — the two
+  // columns cost a message with no attachments nothing.
+  const display = extra.display != null && extra.display !== content ? extra.display : null;
+  const files = extra.attachments?.length ? JSON.stringify(extra.attachments) : null;
   db.prepare(
-    `INSERT INTO messages (conversation_id, role, content, model, created_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(conversationId, role, content, model, now());
+    `INSERT INTO messages (conversation_id, role, content, model, created_at, display_content, attachments)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(conversationId, role, content, model, now(), display, files);
   db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
     .run(now(), conversationId);
 }
@@ -85,9 +114,18 @@ export function getConversation(id) {
   ).get(id);
   if (!convo) return null;
   const messages = db.prepare(
-    `SELECT id, role, content, model, created_at
+    `SELECT id, role, content, model, created_at, display_content, attachments
      FROM messages WHERE conversation_id = ? ORDER BY id`
-  ).all(id);
+  ).all(id).map((m) => ({
+    id: m.id,
+    role: m.role,
+    // The transcript shows what was typed. `content` — question plus inlined
+    // file — is the model's copy and stays out of the window.
+    content: m.display_content ?? m.content,
+    model: m.model,
+    created_at: m.created_at,
+    attachments: parseJson(m.attachments) ?? [],
+  }));
   return { ...convo, pinned: !!convo.pinned, messages };
 }
 
@@ -112,6 +150,20 @@ export function deleteAllConversations() {
   // messages cascade via the foreign key declared on conversation_id.
   db.prepare("DELETE FROM conversations").run();
   return n;
+}
+
+/** Every attachment id any message still refers to.
+ *
+ *  Used to sweep uploads that were chosen and then abandoned — the window was
+ *  closed between picking a file and pressing send. Those are copies of the
+ *  user's own documents that nothing can ever reach again, and without this
+ *  they would sit in the data directory forever. */
+export function referencedAttachmentIds() {
+  const ids = new Set();
+  for (const r of db.prepare("SELECT attachments FROM messages WHERE attachments IS NOT NULL").all()) {
+    for (const f of parseJson(r.attachments) ?? []) if (f?.id) ids.add(f.id);
+  }
+  return ids;
 }
 
 /** How much history exists, for a settings page that must not guess. */

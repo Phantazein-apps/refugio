@@ -491,6 +491,67 @@ textarea {
   font-size: .6875rem; color: var(--ink-faint); text-align: center;
 }
 
+/* ── Attachments ───────────────────────────────────────────
+   A chip per file, above the box. The path is deliberately not printed on the
+   chip: it is long, it is the same prefix every time, and it belongs in the
+   tooltip where it can be read once rather than in the way permanently. */
+.attach-btn {
+  flex: 0 0 auto; align-self: center; display: grid; place-items: center;
+  width: 28px; height: 28px; border: 0; background: none;
+  color: var(--ink-faint); cursor: pointer;
+}
+.attach-btn:hover { color: var(--ink); }
+.attach-btn:disabled { opacity: .4; cursor: default; }
+
+.attach-tray {
+  max-width: 46rem; margin: 0 auto var(--s2);
+  display: flex; flex-wrap: wrap; gap: var(--s2);
+}
+/* An author `display` beats the UA stylesheet's [hidden] rule, as .gutter and
+   .model-panel already found out. Without this the empty tray still takes its
+   margin, and the veil never goes away after a drop. */
+.attach-tray[hidden] { display: none; }
+.chip {
+  display: flex; align-items: center; gap: var(--s2);
+  max-width: 22rem; padding: 4px var(--s2) 4px var(--s3);
+  border: 1px solid var(--border); background: var(--bg-surface-2);
+  border-radius: var(--radius-sm); font-size: .75rem; color: var(--ink);
+}
+.chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-meta { color: var(--ink-faint); white-space: nowrap; }
+.chip-x {
+  border: 0; background: none; color: var(--ink-faint);
+  cursor: pointer; font-size: .9rem; line-height: 1; padding: 0 2px;
+}
+.chip-x:hover { color: var(--accent); }
+/* Uploading. There is no size to show yet, so it says what it is doing rather
+   than a number that would be wrong. */
+.chip.pending { opacity: .6; }
+/* A file whose insides REFUGIO cannot read. Marked on the chip, not only in
+   the prompt — "I attached the PDF and it made something up" starts here. */
+.chip.opaque .chip-meta { color: var(--warn); }
+.chip.failed { border-color: var(--fail-rule); color: var(--fail); }
+
+/* The same chips under a sent message, so the scrollback still says which
+   files that answer was given. */
+.msg .attach-list { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+.msg .chip { background: none; }
+
+.drop-veil {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  /* Pointer events off: the veil must not swallow the `drop` event it exists
+     to advertise, and a dragleave fired by the veil appearing under the
+     cursor would make it flicker. */
+  pointer-events: none;
+}
+.drop-veil[hidden] { display: none; }
+.drop-veil > div {
+  border: 2px dashed var(--accent); padding: var(--s5) var(--s7);
+  font: 600 .875rem var(--font-sans); color: var(--ink);
+  background: var(--bg-surface);
+}
+
 @media (max-width: 720px) {
   .rail { display: none; }
   .thread, .composer-inner, .hint, .web-warn, .web-turn { max-width: none; }

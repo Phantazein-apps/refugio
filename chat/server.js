@@ -23,6 +23,7 @@ import * as store from "./store.js";
 import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
 import { explain, outputLines } from "./connector-errors.js";
+import * as attachments from "./attachments.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import { listModels, isUp, chatStream, complete, pullModel, OLLAMA_BASE } from "./ollama.js";
@@ -462,6 +463,41 @@ function readBody(req, limit = 1_000_000) {
   });
 }
 
+/** The same, without the JSON. Uploads arrive as raw bytes with the filename
+ *  in a header — no multipart parser, no base64 inflating every upload by a
+ *  third, and the buffer that comes out is written to disk unchanged.
+ *
+ *  Over the limit, this keeps reading and throws the bytes away rather than
+ *  destroying the request. Destroying it resets the connection, and the
+ *  browser then reports a generic network failure — so the one message that
+ *  would have explained the refusal ("that file is too large") never arrives
+ *  and the chip says "could not attach" instead. Draining is the price of
+ *  being able to answer. */
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    let over = false;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > limit) { over = true; chunks.length = 0; return; }
+      chunks.push(c);
+    });
+    req.on("end", () => (over ? reject(new Error("too large")) : resolve(Buffer.concat(chunks))));
+    req.on("error", reject);
+  });
+}
+
+/** Read and discard whatever is left of a request body.
+ *
+ *  Needed when a request is refused before its body arrives: ending the
+ *  response with the body still in flight makes Node reset the socket, and the
+ *  refusal is lost. */
+function drain(req) {
+  req.on("error", () => {});
+  req.resume();
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -501,6 +537,40 @@ async function serveStatic(res, urlPath) {
       : "no-cache",
   });
   res.end(body);
+}
+
+// ── Attachments ─────────────────────────────────────────────
+
+/** What the UI needs about a file, and nothing else.
+ *
+ *  Never the contents. This shape is what the chip is drawn from and what gets
+ *  stored on the message; putting the text in it would mean a 20,000-character
+ *  copy of the file in the conversation JSON on top of the copy already in
+ *  `content`, sent again on every history load. */
+function chipFor(rec) {
+  return {
+    id: rec.id, name: rec.name, bytes: rec.bytes, kind: rec.kind,
+    path: rec.path, isText: !!rec.isText, unreadableKind: !!rec.unreadableKind,
+    chars: rec.chars || 0, truncated: !!rec.truncated,
+  };
+}
+
+/** Turn the ids a turn was sent with back into files.
+ *
+ *  Ids that no longer resolve are dropped rather than failing the turn: an
+ *  attachment can go away between choosing it and sending (a reset, a manual
+ *  delete), and losing the whole message because of it would be worse than
+ *  sending the question without the file. The message says which files it has,
+ *  so a dropped one is visible rather than silent. */
+function resolveAttachments(ids) {
+  if (!Array.isArray(ids)) return [];
+  const out = [];
+  for (const id of ids.slice(0, attachments.MAX_FILES)) {
+    const rec = attachments.load(DATA_DIR, id);
+    if (rec) out.push(rec);
+    else log(`attachment ${String(id).slice(0, 12)} no longer exists — sending without it`);
+  }
+  return out;
 }
 
 // ── Turn runner ─────────────────────────────────────────────
@@ -553,7 +623,7 @@ async function runTool(call, webArmed) {
  * Run one turn and stream it to the client as SSE.
  * Events: `token` (incremental text), `done` (final metadata), `error`.
  */
-async function streamTurn(res, { conversationId, message, model, persistUser, web = false }) {
+async function streamTurn(res, { conversationId, message, model, persistUser, web = false, files = [] }) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -564,7 +634,15 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
   store.ensureConversation(conversationId);
-  if (persistUser) store.addMessage(conversationId, "user", message);
+  if (persistUser) {
+    // Two texts, both stored: the model gets the question with the files
+    // inlined, the transcript keeps the question. See store.js — this is why
+    // there are two columns.
+    store.addMessage(conversationId, "user", attachments.composeMessage(message, files), null, {
+      display: message,
+      attachments: files.map(chipFor),
+    });
+  }
 
   send("start", { conversation_id: conversationId });
 
@@ -773,10 +851,56 @@ async function route(req, res, url) {
     return;
   }
 
+  // ── Attachments ───────────────────────────────────────────
+  //
+  // Raw bytes in, with the name in a header. The browser will not tell us where
+  // the file came from — `<input type="file">` reports `C:\fakepath\` by design
+  // — so the bytes travel over loopback and the path this returns is the one
+  // REFUGIO wrote, which is a real path on this machine that the user can open.
+  if (p === "/api/chat/attachments" && req.method === "POST") {
+    const tooBig = {
+      error: `That file is larger than ${attachments.humanBytes(attachments.MAX_BYTES)}, which is more than a local model can do anything with.`,
+    };
+    // Checked from the header first so an oversized upload is refused before
+    // any of it is read. Reading it and then destroying the socket answers
+    // with a network error instead of this sentence, and "could not attach"
+    // does not tell anyone the file was simply too big.
+    if (Number(req.headers["content-length"]) > attachments.MAX_BYTES) {
+      drain(req);
+      return sendJson(res, 413, tooBig);
+    }
+    let raw;
+    try {
+      raw = await readRaw(req, attachments.MAX_BYTES);
+    } catch {
+      return sendJson(res, 413, tooBig);
+    }
+    if (!raw.length) return sendJson(res, 400, { error: "That file is empty." });
+    // The header is percent-encoded by the client: a filename can contain
+    // accents, emoji or a newline, and HTTP headers are Latin-1.
+    let name = "file";
+    try { name = decodeURIComponent(req.headers["x-refugio-filename"] || "file"); } catch { /* keep the default */ }
+    const id = randomUUID().replace(/-/g, "");
+    const rec = attachments.save(DATA_DIR, id, name, raw);
+    log(`attached ${rec.name} (${attachments.humanBytes(rec.bytes)}) → ${rec.path}`);
+    return sendJson(res, 200, chipFor(rec));
+  }
+
+  // Taking the chip off before sending deletes the copy. Leaving it on disk
+  // would mean a file the user visibly removed is still sitting in an
+  // application directory, which is not what "remove" looks like it does.
+  const attMatch = p.match(/^\/api\/chat\/attachments\/([A-Za-z0-9]+)$/);
+  if (attMatch && req.method === "DELETE") {
+    return sendJson(res, 200, { deleted: attachments.remove(DATA_DIR, attMatch[1]) });
+  }
+
   if (p === "/api/chat/ask" && req.method === "POST") {
     const body = await readBody(req);
     const message = (body.message || "").trim();
-    if (!message) return sendJson(res, 400, { error: "message is required" });
+    const files = resolveAttachments(body.attachments);
+    // A file on its own is a legitimate message — "here, look at this" — so an
+    // empty box is only an error when nothing came with it.
+    if (!message && !files.length) return sendJson(res, 400, { error: "message is required" });
     const model = body.model || (await resolveModel());
     if (!model) {
       return sendJson(res, 503, {
@@ -784,7 +908,7 @@ async function route(req, res, url) {
       });
     }
     const conversationId = (body.conversation_id || "").trim() || randomUUID().replace(/-/g, "");
-    return streamTurn(res, { conversationId, message, model, persistUser: true, web: body.web });
+    return streamTurn(res, { conversationId, message, model, persistUser: true, web: body.web, files });
   }
 
   // Regenerate / edit both re-run the last turn; they differ only in what the
@@ -855,7 +979,12 @@ async function route(req, res, url) {
   // the answer to "where is my data?", which on a local-first app is a
   // question with a real answer, and it lets someone take a copy first.
   if (p === "/api/chat/data" && req.method === "GET") {
-    return sendJson(res, 200, { ...store.historyStats(), dataDir: DATA_DIR, dbPath: DB_PATH });
+    return sendJson(res, 200, {
+      ...store.historyStats(), dataDir: DATA_DIR, dbPath: DB_PATH,
+      // Counted separately because it is the one part of "your data" that is
+      // copies of the user's own documents, not text they typed here.
+      attachments: attachments.stats(DATA_DIR),
+    });
   }
 
   // Destroy all chat history. Guarded by an explicit confirm token rather than
@@ -868,8 +997,13 @@ async function route(req, res, url) {
       return sendJson(res, 400, { error: 'send {"confirm":"delete"} to erase chat history' });
     }
     const deleted = store.deleteAllConversations();
-    log(`chat history erased — ${deleted} conversation(s)`);
-    return sendJson(res, 200, { deleted });
+    // The messages that referenced them are gone, so these are files nothing
+    // can reach any more. Leaving the user's own documents behind in an
+    // application directory after they asked for everything to be erased is
+    // the opposite of what the button says.
+    const files = attachments.removeAll(DATA_DIR);
+    log(`chat history erased — ${deleted} conversation(s), ${files} attached file(s)`);
+    return sendJson(res, 200, { deleted, attachments: files });
   }
 
   const convoMatch = p.match(/^\/api\/chat\/conversations\/([A-Za-z0-9_-]+)$/);
@@ -900,6 +1034,18 @@ async function route(req, res, url) {
 // ── Boot ────────────────────────────────────────────────────
 
 store.initStore(DB_PATH);
+
+// Sweep uploads that were chosen but never sent. A file picked and then
+// abandoned — window closed, question given up on — is a copy of the user's
+// own document that nothing can reach and nothing will ever delete. Only
+// touches what is both unreferenced and a day old, so an attachment sitting in
+// another window's composer right now is safe.
+try {
+  const swept = attachments.pruneOrphans(DATA_DIR, store.referencedAttachmentIds());
+  if (swept) log(`removed ${swept} attached file(s) that were never sent`);
+} catch (e) {
+  log(`could not sweep old attachments: ${e.message}`);
+}
 
 const server = http.createServer((req, res) => {
   // A malformed request-target (e.g. "//", which parses as protocol-relative)
