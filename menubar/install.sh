@@ -14,11 +14,40 @@ if ! command -v swift >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "▸ Building (release)…"
-swift build -c release
-
 APP="REFUGIO.app"
 BIN=".build/release/RefugioBar"
+DEST="/Applications/REFUGIO.app"
+LOG="/tmp/refugio-swift-build.log"
+
+# A failed build used to end the script with whatever `swift build` printed and
+# nothing else — and because a failure never reaches the copy below, the app in
+# /Applications stays exactly as it was. That combination is genuinely
+# misleading: the update appears to have worked, the old binary keeps running,
+# and the symptoms are cosmetic enough (a wordmark under the traffic lights, a
+# window that won't drag) to look like unrelated bugs. Two rounds of this were
+# spent chasing the wrong thing. So say it in as many words.
+echo "▸ Building (release)…"
+set +e
+swift build -c release 2>&1 | tee "$LOG"
+BUILD_STATUS=${PIPESTATUS[0]}
+set -e
+if [ "$BUILD_STATUS" -ne 0 ]; then
+  echo
+  echo "✗ THE MENU-BAR APP DID NOT BUILD. Nothing was installed."
+  if [ -d "$DEST" ]; then
+    STAMP="$(date -r "$DEST/Contents/MacOS/RefugioBar" '+%Y-%m-%d %H:%M' 2>/dev/null || echo unknown)"
+    echo "  $DEST is UNCHANGED — still the build from $STAMP."
+    echo "  It will keep running with the old behaviour until this compiles."
+  else
+    echo "  There is no app in /Applications, so there will be no menu-bar icon."
+  fi
+  echo
+  echo "  What the compiler said:"
+  grep -E "error:" "$LOG" | sed 's/^/    /' | head -20
+  echo
+  echo "  Full output: $LOG"
+  exit 1
+fi
 echo "▸ Assembling $APP…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -71,7 +100,7 @@ if ! codesign --force --deep --sign - "$APP" 2>/tmp/refugio-codesign.log; then
   sed 's/^/    /' /tmp/refugio-codesign.log
 fi
 
-DEST="/Applications/REFUGIO.app"
+# DEST is set at the top, beside the build-failure message that reports it.
 echo "▸ Installing to $DEST…"
 pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar" 2>/dev/null || true
 sleep 1

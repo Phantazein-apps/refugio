@@ -159,7 +159,12 @@ body {
 .rail.collapsed .convos-empty,
 .rail.collapsed .new-chat .nc-full { display: none; }
 .rail.collapsed .rail-toggle { margin: 0 auto; }
-.rail.collapsed .rail-head { padding: var(--s4) var(--s2); }
+/* Stacked, not side by side. At 56px the head has 40px of content width, and
+   the mark plus the toggle plus their gap needs about 47 — so in a row they
+   overflowed and the mark was the half that got pushed out of sight. */
+.rail.collapsed .rail-head {
+  flex-direction: column; gap: var(--s2); padding: var(--s4) var(--s2);
+}
 .rail.collapsed .new-chat { margin: var(--s3) var(--s2); text-align: center; }
 .rail.collapsed .new-chat .nc-mini { display: inline; }
 .rail.collapsed .convo { justify-content: center; padding: var(--s2) 0; }

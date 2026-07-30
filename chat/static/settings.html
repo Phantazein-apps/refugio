@@ -16,9 +16,10 @@
       }
       document.documentElement.dataset.theme = p;
     } catch (e) { document.documentElement.dataset.theme = "dark"; }
-    if (navigator.userAgent.indexOf("REFUGIO-Native") !== -1) {
-      document.documentElement.classList.add("native");
-    }
+    // See the note in index.html on why there are two signals.
+    var native = navigator.userAgent.indexOf("REFUGIO-Native") !== -1
+      || (window.locationbar && window.locationbar.visible === false);
+    if (native) document.documentElement.classList.add("native");
   })();
 </script>
 <link rel="stylesheet" href="phantazein.css">

@@ -24,9 +24,16 @@
     // lights there, and an AppKit strip sits over it so the window can be
     // dragged by its top bar. In a browser neither exists and the space would
     // be dead margin, so this is a class rather than a constant.
-    if (navigator.userAgent.indexOf("REFUGIO-Native") !== -1) {
-      document.documentElement.classList.add("native");
-    }
+    // Two signals, because one of them can be missing. The user agent is the
+    // reliable one, but it only exists in a binary built after this was added
+    // — and a menu-bar app that failed to rebuild is exactly the case where
+    // the band is most needed, since without it REFUGIO's own wordmark sits
+    // under the traffic lights and vanishes entirely once the rail collapses.
+    // A window with no location bar is not a browser tab; that is true of the
+    // old binary too.
+    var native = navigator.userAgent.indexOf("REFUGIO-Native") !== -1
+      || (window.locationbar && window.locationbar.visible === false);
+    if (native) document.documentElement.classList.add("native");
   })();
 </script>
 <link rel="stylesheet" href="phantazein.css">
