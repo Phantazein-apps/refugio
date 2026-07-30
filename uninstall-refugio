@@ -114,8 +114,24 @@ if [ "$DRY" = 0 ]; then
   for d in com.phantazein.refugio.app com.phantazein.refugio.menubar; do
     defaults delete "$d" >/dev/null 2>&1 && say "  removed  menu-bar preferences ($d)"
   done
+
+  # macOS also keeps a row per menu-bar app in Control Center's own list, and
+  # leaves it there forever once the app is gone — a phantom entry with a blank
+  # icon. Removing it is best-effort: the file is TCC-protected, so this
+  # succeeds only if the terminal happens to have Full Disk Access. It is
+  # cosmetic either way, so a failure is silent rather than a warning about
+  # something nobody needs to act on.
+  CC_PLIST="$HOME/Library/Group Containers/group.com.apple.controlcenter/Library/Preferences/group.com.apple.controlcenter.plist"
+  if [ -r "$CC_PLIST" ]; then
+    for d in com.phantazein.refugio.app com.phantazein.refugio.menubar; do
+      /usr/libexec/PlistBuddy -c "Delete :trackedApplications:$d" "$CC_PLIST" >/dev/null 2>&1 \
+        && say "  removed  Control Center menu-bar entry ($d)"
+    done
+    killall ControlCenter >/dev/null 2>&1 || true
+  fi
 else
   say "  would remove  menu-bar app preferences (defaults domain)"
+  say "  would try     Control Center menu-bar entries (needs Full Disk Access)"
 fi
 
 # ── 3. Chat history and settings ───────────────────────────────────────
