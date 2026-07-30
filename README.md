@@ -93,9 +93,7 @@ Only that path installs `uv`, the Python virtual environment and PyTorch, and on
 
 1. Installs **Node.js** and **Git** if missing (plus **[uv](https://docs.astral.sh/uv/)** only if you asked for Open WebUI)
 2. Clones REFUGIO to `~/refugio`
-3. Sets up your **local LLM engine**:
-   - Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM, **or**
-   - Lets you choose **[LM Studio](https://lmstudio.ai/)** instead (connects to its local server on `:1234`; auto-detected and preferred if already running)
+3. Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM (or connects to **[LM Studio](https://lmstudio.ai/)** if you set `REFUGIO_ENGINE=lmstudio`)
 4. Walks you through optional connectors: **personal** first (WhatsApp — with a QR scan in the browser — email, Apple Reminders, Things 3, Notion, and a memory backend), then **business** (Slack, Jira, ServiceNow, Salesforce) if you opt in
 5. Optionally sets up **https://refugio** as a local domain (mkcert + Caddy)
 6. Starts everything and opens REFUGIO — a native window on macOS, your browser elsewhere
@@ -124,8 +122,11 @@ On machines with comfortable RAM, REFUGIO **auto-starts on login**. On **low-RAM
 
 REFUGIO runs the model **on your machine** — nothing is sent to any external service.
 
-- **Ollama** (default) is installed automatically and a model is pulled for you.
-- **LM Studio** — choose it in the installer to connect to LM Studio's local server (OpenAI-compatible on `http://localhost:1234`). Start the server first (LM Studio → Developer → Start Server); the installer also auto-detects and defaults to it when it's already running.
+- **Ollama** (default) is installed automatically and a model is pulled for you. The installer doesn't ask — this is what almost everyone wants, and it's the one REFUGIO can install and manage for you.
+- **LM Studio** — for people already running it. Set `REFUGIO_ENGINE=lmstudio` and REFUGIO connects to its local server (OpenAI-compatible on `http://localhost:1234`) instead of installing Ollama. Start the server first: LM Studio → Developer → Start Server.
+- **Neither** — `REFUGIO_ENGINE=none` skips the engine entirely, for setting one up by hand later.
+
+Your choice is remembered in `~/.refugio.env`, so reinstalling never moves you off the engine you picked.
 
 ### Model auto-selection
 

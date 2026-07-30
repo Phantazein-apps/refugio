@@ -793,7 +793,7 @@ ${C.bold}============================================================
  A self-hosted refuge for your AI — runs on your own machine
 ============================================================${C.reset}
 
- Installs a local LLM (Ollama or LM Studio) + Open WebUI, plus
+ Installs a local LLM (Ollama by default) and REFUGIO's chat window, plus
  optional personal connectors (WhatsApp, email, Notion, memory)
  and business connectors (Slack, Jira, and more).
 
@@ -1148,13 +1148,27 @@ async function promptCredentials(envPath, targetDir) {
 
   console.log(`  ${C.bold}LLM Engine${C.reset}`)
 
+  // Not a question any more. Almost everyone wants Ollama — it is the one this
+  // installs and manages for you — and asking made the choice look consequential
+  // to people who had never heard of either. LM Studio is for someone who
+  // already runs it and knows they do:
+  //
+  //   REFUGIO_ENGINE=lmstudio   use LM Studio's local server on :1234
+  //   REFUGIO_ENGINE=none       set a backend up later, by hand
+  //
+  // An existing ~/.refugio.env wins over the default, so reinstalling never
+  // silently moves someone off the engine they chose last time.
+  const engine = (process.env.REFUGIO_ENGINE || existing.REFUGIO_ENGINE || "ollama").toLowerCase()
+  const llmChoice = engine === "lmstudio" ? "2" : engine === "none" || engine === "skip" ? "3" : "1"
+
   // LM Studio is a GUI app we can't auto-install, so we connect to its local
-  // server (OpenAI-compatible on :1234). Detect whether it's already running.
+  // server (OpenAI-compatible on :1234). Probed only when it is the choice, or
+  // to mention it to someone who is evidently already running it.
   const lmStudioUp = await probeHttp(`${LMSTUDIO_URL}/models`)
-  console.log(`    1) Ollama — auto-install and run a local model (recommended)`)
-  console.log(`    2) LM Studio — connect to its local server on :1234${lmStudioUp ? `  ${C.green}(detected)${C.reset}` : `  ${C.dim}(start it first)${C.reset}`}`)
-  console.log(`    3) Skip — set up a backend later`)
-  const llmChoice = await ask("Choose", lmStudioUp ? "2" : "1")
+  if (llmChoice === "1" && lmStudioUp) {
+    console.log(`    ${C.dim}LM Studio is running on :1234. REFUGIO uses Ollama by default —`)
+    console.log(`    re-run with REFUGIO_ENGINE=lmstudio to use LM Studio instead.${C.reset}`)
+  }
 
   if (llmChoice === "2") {
     env.OPENAI_API_BASE_URL = LMSTUDIO_URL
@@ -2005,6 +2019,12 @@ async function main() {
     --owui             Also install Open WebUI (legacy interface, being retired)
     --skip-owui        No-op, kept for compatibility — Open WebUI is now opt-in
     --help             Show this help
+
+  Environment:
+    REFUGIO_ENGINE=lmstudio   Use LM Studio's local server (:1234) instead of Ollama
+    REFUGIO_ENGINE=none       Skip the LLM engine; configure it later by hand
+    REFUGIO_MODEL=<tag>       Override the auto-selected Ollama model
+    REFUGIO_OWUI=1            Same as --owui
 
   Examples:
     node install-node.cjs                    Interactive install to ~/refugio
