@@ -6,6 +6,18 @@
 <title>REFUGIO — Settings</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.ico">
+<!-- See the note in index.html: the theme must be resolved before first paint. -->
+<script>
+  (function () {
+    try {
+      var p = localStorage.getItem("refugio.theme");
+      if (p !== "light" && p !== "dark") {
+        p = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.dataset.theme = p;
+    } catch (e) { document.documentElement.dataset.theme = "dark"; }
+  })();
+</script>
 <link rel="stylesheet" href="phantazein.css">
 <link rel="stylesheet" href="settings.css">
 </head>

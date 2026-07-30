@@ -39,6 +39,10 @@ const state = {
 
 import { renderMarkdown } from "./md.js";
 import { preferredModel, setPreferredModel, activeModel } from "./model-store.js";
+// Imported for its side effects: the head script sets the theme for first
+// paint, and this keeps it current afterwards — when macOS switches at sunset,
+// and when the setting is changed in a Settings window open elsewhere.
+import "./theme.js";
 
 /** Model output is untrusted text; md.js escapes before adding any markup. */
 const renderContent = (text) => renderMarkdown(text);

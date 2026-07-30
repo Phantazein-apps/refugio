@@ -243,7 +243,7 @@ body {
    drop the label and let the colour do the work; the exact figures are
    already spelled out in the line above the bar. */
 .membar span.tight { padding-left: 0; font-size: 0; }
-.membar .seg-other { background: var(--rule-hi); color: var(--ink-soft); }
+.membar .seg-other { background: var(--track-fill); color: var(--bg); }
 .membar .seg-model { background: var(--accent); color: var(--on-accent); }
 .membar .seg-free  { flex: 1; color: var(--ink-mute); }
 

@@ -19,6 +19,7 @@
 // trusted as markup.
 
 import { preferredModel, setPreferredModel, activeModel } from "./model-store.js";
+import { themePreference, setThemePreference } from "./theme.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -716,11 +717,6 @@ async function setWebEnabled(enabled, box) {
 }
 
 // ── Appearance ──────────────────────────────────────────────
-//
-// Deliberately short. The Phantazein design system is dark-only — there is no
-// light palette to switch to, and a theme control that offers one would be
-// inventing a feature the design does not have. What is here is what actually
-// changes something.
 
 const TEXT_KEY = "refugio.textScale";
 const MOTION_KEY = "refugio.reduceMotion";
@@ -735,8 +731,24 @@ function renderAppearance() {
   box.replaceChildren();
   const scale = localStorage.getItem(TEXT_KEY) || "1";
   const motion = localStorage.getItem(MOTION_KEY) === "1";
+  const theme = themePreference();
 
   box.append(
+    el("div.card", {},
+      el("h3", { text: "Theme" }),
+      el("div.field", {},
+        el("div.seg", {}, [["system", "System"], ["light", "Light"], ["dark", "Dark"]].map(([v, label]) =>
+          el(`button${theme === v ? ".is-on" : ""}`, {
+            type: "button",
+            text: label,
+            on: { click: () => { setThemePreference(v); renderAppearance(); } },
+          }))),
+      ),
+      el("div.aside", {
+        text: "System follows your Mac and switches with it. Applies to the chat window too, " +
+          "and takes effect immediately — nothing needs restarting.",
+      }),
+    ),
     el("div.card", {},
       el("h3", { text: "Text size" }),
       el("div.field", {},
@@ -764,11 +776,6 @@ function renderAppearance() {
         "Reduce animation",
       ),
       el("div.aside", { text: "REFUGIO already follows your system's reduce-motion setting. This turns it off here regardless." }),
-    ),
-    el("div.card", {},
-      el("h3", { text: "Theme" }),
-      el("div.prose", { text: "REFUGIO is dark only. The design has no light palette, and a switch that " +
-        "produced a half-converted one would be worse than not offering it." }),
     ),
   );
 }

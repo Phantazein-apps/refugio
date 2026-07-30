@@ -52,8 +52,9 @@
   color-scheme: dark;
 
   /* ── Colour ─────────────────────────────────────────────
-     Verbatim from the design system. Dark only: the site has no light mode,
-     and neither does this. */
+     Dark is the ground state, verbatim from the design system. The light
+     palette is derived below — see the note there for why it is not just
+     these values inverted. */
   --bg:         #000000;   /* page ground — pure black */
   --bg-elev:    #0a0a0a;   /* elevated band, expanded row */
   --bg-card:    #0e0e0e;   /* card hover / panel */
@@ -63,6 +64,11 @@
   --ink-mute:   #5e5c58;   /* labels, meta, disabled */
   --rule:       #1c1c1c;   /* default hairline */
   --rule-hi:    #2a2a2a;   /* emphasised border */
+  /* Filled area of a meter — the memory bars. Its own token because a border
+     colour and a filled region need different contrast: #2a2a2a reads fine as
+     a hairline on black and as a bar, but the light equivalent of a hairline
+     is far too pale to be a bar. */
+  --track-fill: #2a2a2a;
   --accent:     #ff0018;   /* THE red */
   --accent-dim: #b30011;
   --accent-hover: #d90014;
@@ -108,6 +114,55 @@
 
   --dur-fast: 200ms;
   --dur: 300ms;
+}
+
+/* ── Light ─────────────────────────────────────────────────
+ *
+ * The Claude Design handoff is dark-only, so this palette is derived rather
+ * than given. It is NOT the dark values inverted, for two reasons:
+ *
+ *   1. The state colours have to change. #2e9e5b on white is about 2.6:1 and
+ *      #e0a51e is worse — both are perfectly legible as a 9px dot on black
+ *      and unreadable as a text label on white. They are darkened here to
+ *      carry the same meaning at the same size. The red does not move: it is
+ *      the brand, it is what phantazein.com uses on white, and it is only
+ *      ever a fill or a heavy weight.
+ *   2. The rule colours invert in ROLE, not in value. On black a border is
+ *      lighter than its ground; on white it is darker. A literal inversion
+ *      gives borders that glow.
+ *
+ * Applied by a `data-theme` attribute that a small script in each page's
+ * <head> stamps on <html> before first paint — see theme.js. Doing it there
+ * rather than with a media query here is what lets the Appearance setting
+ * override the system, without the page flashing the wrong palette first.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:         #ffffff;
+  --bg-elev:    #f7f6f4;   /* elevated band, expanded row */
+  --bg-card:    #f1efec;   /* card hover / panel */
+  --bg-sel:     #e9e6e1;   /* selected nav item */
+  --ink:        #141413;   /* primary text */
+  --ink-soft:   #56534e;   /* body / secondary */
+  --ink-mute:   #85817a;   /* labels, meta, disabled */
+  --rule:       #e6e3de;   /* default hairline */
+  --rule-hi:    #d3cfc8;   /* emphasised border */
+  --track-fill: #a8a29a;
+
+  --accent-glow: rgba(255, 0, 24, 0.16);
+  --accent-tint: rgba(255, 0, 24, 0.09);
+
+  --ok:         #1c7a42;
+  --ok-rule:    #a9d5ba;
+  --ok-glow:    rgba(28, 122, 66, 0.16);
+  --warn:       #8a6100;
+  --warn-rule:  #e3cf9a;
+  --warn-glow:  rgba(138, 97, 0, 0.16);
+  --fail-rule:  #f2b8bf;
+
+  /* A shadow that reads as depth on white rather than as a dark smudge. */
+  --shadow-panel: 0 20px 60px rgba(20, 20, 19, 0.16);
 }
 
 *, *::before, *::after { box-sizing: border-box; border-radius: var(--radius); }
@@ -273,11 +328,13 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
    sideways. It is the child process's words, and it is labelled as such —
    REFUGIO never paraphrases it into the explanation above. */
 .verbatim { border: 1px solid var(--rule); background: var(--bg); }
-.verbatim .vline { display: flex; border-bottom: 1px solid #141414; }
+/* Tokenised, not #141414: on white that hairline was invisible and the
+   quotation lost its line numbering entirely. */
+.verbatim .vline { display: flex; border-bottom: 1px solid var(--rule); }
 .verbatim .vline:last-child { border-bottom: 0; }
 .verbatim .vn {
-  font-family: var(--mono); font-size: 10px; color: var(--rule-hi);
-  padding: 7px 10px; border-right: 1px solid #141414;
+  font-family: var(--mono); font-size: 10px; color: var(--ink-mute);
+  padding: 7px 10px; border-right: 1px solid var(--rule);
   width: 30px; text-align: right; flex-shrink: 0; user-select: none;
 }
 .verbatim .vt {

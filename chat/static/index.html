@@ -6,6 +6,22 @@
 <title>REFUGIO</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.ico">
+<!-- Before the stylesheets, deliberately. Deciding the theme after first paint
+     means a frame of black on a light Mac, which is not a subtlety when the
+     two palettes are this far apart. Kept inline and duplicated in
+     settings.html rather than in theme.js, because a <script src> in <head> —
+     even a blocking one — is a round trip this can't afford. -->
+<script>
+  (function () {
+    try {
+      var p = localStorage.getItem("refugio.theme");
+      if (p !== "light" && p !== "dark") {
+        p = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.dataset.theme = p;
+    } catch (e) { document.documentElement.dataset.theme = "dark"; }
+  })();
+</script>
 <link rel="stylesheet" href="phantazein.css">
 <link rel="stylesheet" href="app.css">
 </head>

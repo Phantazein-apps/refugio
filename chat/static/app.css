@@ -2,17 +2,17 @@
  *
  * Layout and components live here; the visual language comes from
  * phantazein.css, which index.html loads first. This file was originally the
- * SHERPA chat surface re-pointed at REFUGIO's red — a light theme with rounded
- * corners and a dark-mode media query. The Claude Design handoff replaced that
- * with the Phantazein system, which is dark-only and hard-edged, so the
- * palette below is now a thin mapping of this sheet's long-standing variable
- * names onto those tokens rather than a second set of colours.
+ * SHERPA chat surface re-pointed at REFUGIO's red, carrying its own palette
+ * and a dark-mode media query. The Claude Design handoff replaced that palette
+ * with the Phantazein one, so what remains below is a thin mapping of this
+ * sheet's long-standing variable names onto those tokens rather than a second
+ * set of colours.
  *
- * Two consequences worth stating, because they are not bugs:
- *   · There is no light mode. The design system has no light palette, and a
- *     half-converted one would be worse than not offering it.
- *   · There are no rounded corners anywhere. --radius-* are all zero and kept
- *     only so the ~30 rules referring to them didn't all have to change.
+ * Light and dark both work, switched by the `data-theme` attribute that
+ * phantazein.css keys off — this sheet must therefore never hardcode a colour,
+ * only reference a token. There are no rounded corners in either theme:
+ * --radius-* are all zero, kept only so the ~30 rules referring to them didn't
+ * all have to change.
  */
 
 :root {
@@ -49,7 +49,11 @@ body {
 /* ── Rail ──────────────────────────────────────────────── */
 .rail {
   width: var(--rail-w); flex: 0 0 var(--rail-w);
-  background: var(--bg-surface); border-right: 1px solid var(--border-subtle);
+  /* Lifted off the thread rather than flush with it — matching the settings
+     nav, and matching frame 4d, where the rail sits at #0a0a0a against a black
+     main. Flush, the two columns read as one surface with a stray line down
+     it, which is worse in light than in dark. */
+  background: var(--bg-surface-2); border-right: 1px solid var(--border-subtle);
   display: flex; flex-direction: column;
 }
 .rail-head {
@@ -271,7 +275,7 @@ body {
   padding: 14px 18px; border-bottom: 1px solid var(--rule);
 }
 .mp-track { flex: 1; height: 5px; background: var(--bg-sel); position: relative; }
-.mp-track > i { position: absolute; inset: 0 auto 0 0; background: var(--rule-hi); display: block; }
+.mp-track > i { position: absolute; inset: 0 auto 0 0; background: var(--track-fill); display: block; }
 .mp-num { font: 400 11.5px var(--font-mono); color: var(--ink); }
 
 .mp-row {
