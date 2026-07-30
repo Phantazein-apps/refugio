@@ -1,0 +1,399 @@
+/* REFUGIO settings — the surface that replaced the connectors modal sheet.
+ *
+ * Built from the Claude Design handoff ("REFUGIO Settings.dc.html", frames
+ * 4a–4c and 4e). Tokens live in phantazein.css; this file is layout and the
+ * components specific to this page.
+ *
+ * The organising rule, and the reason the sheet was replaced: A ROW STATES ITS
+ * CONDITION ONCE. The old sheet encoded state four separate times — a coloured
+ * dot, a right-aligned "5 tools · not reachable", a paragraph of prose, and
+ * the prominence of whichever button happened to be first — and the four could
+ * disagree. Here it is one dot, one label, one coloured rule down the left
+ * edge, and at most one filled button.
+ */
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 13.5px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Top strip ─────────────────────────────────────────── */
+.topstrip {
+  height: 38px;
+  flex: 0 0 38px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: 0 var(--s4);
+  background: var(--bg);
+}
+.back { display: inline-flex; align-items: center; gap: var(--s2); color: var(--ink); text-decoration: none; }
+.back .wordmark { font-family: var(--display); font-size: 13px; letter-spacing: 0.01em; }
+.strip-title { letter-spacing: var(--tracking-nav); }
+.back-link {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-hi);
+}
+.back-link:hover { color: var(--ink); }
+
+/* ── Frame ─────────────────────────────────────────────── */
+.settings { flex: 1; display: flex; min-height: 0; }
+
+.snav {
+  width: 196px;
+  flex: 0 0 196px;
+  border-right: 1px solid var(--rule);
+  background: var(--bg-elev);
+  padding: var(--s5) 0;
+  display: flex;
+  flex-direction: column;
+}
+.snav-head { padding: 0 var(--s5) 10px var(--s5); }
+.snav-item {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-left: var(--border-rule) solid transparent;
+  padding: 9px var(--s5);
+  font: 400 13.5px/1.4 var(--sans);
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+.snav-item:hover { color: var(--ink); }
+/* The active marker is a red rule and a lift in background — no rounded pill,
+   no fill. Same vocabulary as the state rule on a connector row. */
+.snav-item.is-active {
+  color: var(--ink);
+  background: var(--bg-sel);
+  border-left-color: var(--accent);
+}
+.snav-foot {
+  margin-top: auto;
+  padding: 0 var(--s5);
+  font-size: 9.5px;
+  line-height: 1.7;
+  color: var(--ink-mute);
+  letter-spacing: 0.06em;
+}
+
+/* ── Panes ─────────────────────────────────────────────── */
+.spane { flex: 1; min-width: 0; overflow-y: auto; }
+.pane { display: none; padding: var(--s5) 30px var(--s7) 30px; flex-direction: column; gap: 11px; }
+.pane.is-active { display: flex; }
+
+.pane-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s5); }
+.pane h2 { font-size: 26px; margin: 0 0 6px 0; }
+.pane-sub { font-size: 13px; color: var(--ink-soft); }
+.pane-foot { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
+.foot-note { font-size: 12.5px; color: var(--ink-mute); }
+
+/* Count pills: the four states, always all four, so a zero is visible.
+   Hiding "0 FAILED" is how a page reassures by omission. */
+.counts { display: flex; gap: 9px; flex-wrap: wrap; }
+.counts .pill { font-size: 10px; padding: 4px 8px; gap: 6px; }
+
+/* ── Rows ──────────────────────────────────────────────── */
+.rows { border: 1px solid var(--rule-hi); }
+.rows:empty { display: none; }
+.row { border-bottom: 1px solid var(--rule); border-left: var(--border-rule) solid transparent; }
+.row:last-child { border-bottom: 0; }
+/* Only the states that need attention carry a coloured rule and a lift. A
+   healthy connector is plain — nothing to notice is the correct amount to
+   notice. */
+.row.degraded { border-left-color: var(--warn); background: var(--bg-elev); }
+.row.failed   { border-left-color: var(--accent); background: var(--bg-elev); }
+
+.row-head {
+  width: 100%;
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 11px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.row-head:disabled { cursor: default; }
+.row-name { font-size: 15.5px; color: var(--ink); font-weight: 600; }
+.row-meta { margin-left: auto; font-size: 12.5px; color: var(--ink-soft); }
+.row-caret { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
+.row-body { padding: 0 18px 12px 18px; display: flex; flex-direction: column; gap: 9px; }
+.row-body[hidden] { display: none; }
+/* Indented to clear the dot when the body explains the row rather than
+   listing accounts under it. */
+.row-body.indent { padding-left: 46px; }
+
+.prose { font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); max-width: 640px; }
+.prose strong { color: var(--ink); font-weight: 600; }
+.aside { font-size: 12.5px; color: var(--ink-mute); }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+/* ── Accounts ──────────────────────────────────────────── */
+/* Every account carries its own state pill. In the old sheet a working number
+   was an unlabelled string and the ABSENCE of a label meant "fine" — which is
+   unreadable, because absence also means "we haven't checked". */
+.accounts { border: 1px solid var(--rule); background: var(--bg); }
+.account {
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.account:last-child { border-bottom: 0; }
+.account .who { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+.account.off .who { color: var(--ink-soft); text-decoration: line-through; }
+.account .btn { margin-left: auto; }
+
+/* ── Scope options ─────────────────────────────────────── */
+.scopes { display: flex; flex-direction: column; gap: 8px; }
+.scope-list { display: flex; gap: 26px; flex-wrap: wrap; }
+
+/* ── Error treatment (4c) ──────────────────────────────── */
+/* Grid, not flex-wrap: with wrap, the quotation column jumped below the
+   explanation on one failed connector and stayed beside it on the next,
+   purely because their prose was different lengths. Two failures in one list
+   laid out two different ways reads as two different kinds of problem. */
+.fail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 26px;
+  align-items: start;
+}
+@media (max-width: 940px) { .fail-grid { grid-template-columns: minmax(0, 1fr); } }
+.fail-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.fail-head { font-size: 16.5px; line-height: 1.45; color: var(--ink); }
+.fixes { display: flex; flex-direction: column; gap: 9px; border-top: 1px solid var(--rule); padding-top: 14px; }
+.fixes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.fixes li { font-size: 12.5px; color: var(--ink-soft); }
+
+.quote { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.quote-head { display: flex; align-items: center; gap: 10px; }
+.quote-note { font-size: 12px; line-height: 1.6; color: var(--ink-mute); }
+
+/* ── Blocked by another app ────────────────────────────── */
+.blocker {
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  padding: 11px 13px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+}
+.blocker .pid { color: var(--ink-mute); flex-shrink: 0; }
+.blocker .cmd {
+  color: var(--ink-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* min-width:0 is what actually lets a long command line shrink inside a
+     flex row instead of forcing the whole card wider than its column. */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* ── Memory (4e) ───────────────────────────────────────── */
+.memcard {
+  border: 1px solid var(--rule-hi);
+  background: var(--bg-elev);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.memcard .memline { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.memcard .memnums { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin-left: auto; }
+.memcard .memnums strong { color: var(--ink); font-weight: 400; }
+.membar { height: 22px; display: flex; border: 1px solid var(--rule); overflow: hidden; }
+.membar span {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+/* A segment too narrow to hold its own name shows a clipped fragment —
+   "OTHER" for other apps, "LLAM" for a model — which reads as a rendering
+   fault rather than a small number. Below the width where the label fits,
+   drop the label and let the colour do the work; the exact figures are
+   already spelled out in the line above the bar. */
+.membar span.tight { padding-left: 0; font-size: 0; }
+.membar .seg-other { background: var(--rule-hi); color: var(--ink-soft); }
+.membar .seg-model { background: var(--accent); color: var(--on-accent); }
+.membar .seg-free  { flex: 1; color: var(--ink-mute); }
+
+/* ── Model rows ────────────────────────────────────────── */
+.mrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  border-left: var(--border-rule) solid transparent;
+}
+.mrow:last-child { border-bottom: 0; }
+.mrow.running { background: var(--bg-elev); border-left-color: var(--accent); }
+.mrow.notools { border-left-color: var(--warn-rule); }
+.mrow .dot { margin-top: 4px; }
+.mrow .mname { width: 190px; flex-shrink: 0; }
+.mrow .mtag { font-family: var(--mono); font-size: 14.5px; color: var(--ink); }
+.mrow.dim .mtag { color: var(--ink-mute); }
+.mrow .mstate { font-size: 12px; color: var(--ink-mute); margin-top: 3px; }
+.mrow .mwhy { flex: 1; font-size: 12.5px; color: var(--ink-soft); min-width: 160px; }
+.mrow .mwhy strong { color: var(--ink); font-weight: 600; }
+.mrow .msize { text-align: right; width: 104px; flex-shrink: 0; }
+.mrow .mgb { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+.mrow.dim .mgb { color: var(--ink-mute); }
+.mrow .mfit { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; }
+.mrow .mfit.ok  { color: var(--ok); }
+.mrow .mfit.no  { color: var(--warn); }
+.mrow .mfit.never { color: var(--ink-mute); }
+.mrow .mpick { margin-left: 0; }
+
+/* ── Downloads ─────────────────────────────────────────── */
+.downloads { border: 1px solid var(--rule-hi); }
+.downloads[hidden] { display: none; }
+.drow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+}
+.drow:last-child { border-bottom: 0; }
+.drow .dtag { font-family: var(--mono); font-size: 13.5px; color: var(--ink); width: 190px; flex-shrink: 0; }
+.drow .dsize { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+.drow .dprog { flex: 1; font-size: 12.5px; color: var(--ink-soft); min-width: 120px; }
+.drow .btn { margin-left: auto; }
+.pbar { height: 5px; background: var(--rule); margin-top: 6px; }
+.pbar > i { display: block; height: 100%; background: var(--accent); transition: width var(--dur-fast); }
+
+/* ── Simple stacked cards, used by web / appearance / data ── */
+.card {
+  border: 1px solid var(--rule-hi);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.card + .card { margin-top: 11px; }
+.card.warn { border-color: var(--warn-rule); border-left: var(--border-rule) solid var(--warn); background: var(--bg-elev); }
+.card.danger { border-color: var(--fail-rule); border-left: var(--border-rule) solid var(--accent); background: var(--bg-elev); }
+.card h3 {
+  font-family: var(--display);
+  font-weight: 400;
+  text-transform: uppercase;
+  font-size: 15px;
+  letter-spacing: var(--tracking-display);
+  margin: 0;
+  color: var(--ink);
+}
+.kv { display: flex; gap: 10px; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+.kv .k { color: var(--ink-mute); }
+.path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.field { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.field label { font-size: 13px; color: var(--ink-soft); }
+.seg { display: flex; border: 1px solid var(--rule-hi); }
+.seg button {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--rule-hi);
+  padding: 7px 14px;
+  font: 500 12px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.seg button:last-child { border-right: 0; }
+.seg button.is-on { background: var(--accent); color: var(--on-accent); }
+
+input[type="text"] {
+  appearance: none;
+  background: var(--bg);
+  border: 1px solid var(--rule-hi);
+  color: var(--ink);
+  font: 400 13px var(--mono);
+  padding: 8px 12px;
+  min-width: 180px;
+}
+input[type="text"]:focus-visible { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
+
+/* ── Waiting / empty ───────────────────────────────────── */
+.waiting {
+  border: 1px solid var(--rule);
+  padding: 16px 18px;
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: var(--bg-elev);
+  border: 1px solid var(--rule-hi);
+  border-left: var(--border-rule) solid var(--accent);
+  padding: 11px 16px;
+  font-size: 13px;
+  color: var(--ink);
+  box-shadow: var(--shadow-panel);
+  z-index: 1000;
+}
+
+/* Narrow window: the nav becomes a strip of tabs rather than disappearing.
+   The chat window can be resized down to 640px wide. */
+@media (max-width: 760px) {
+  .settings { flex-direction: column; }
+  .snav {
+    width: auto;
+    flex: 0 0 auto;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+    padding: 0;
+  }
+  .snav-head, .snav-foot { display: none; }
+  .snav-item {
+    border-left: 0;
+    border-bottom: var(--border-rule) solid transparent;
+    white-space: nowrap;
+    padding: 11px 16px;
+  }
+  .snav-item.is-active { border-left: 0; border-bottom-color: var(--accent); }
+  .pane { padding: var(--s4) var(--s4) var(--s6) var(--s4); }
+  .mrow .mname { width: auto; }
+}

@@ -22,11 +22,21 @@ import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import * as store from "./store.js";
 import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./connector-options.js";
 import { McpPool } from "./mcp.js";
+import { explain, outputLines } from "./connector-errors.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import { listModels, isUp, chatStream, complete, pullModel, OLLAMA_BASE } from "./ollama.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, "static");
+
+// The version the settings page prints. Read from package.json rather than
+// duplicated here, so the number in the corner of the window is the number
+// that was released and cannot drift from it.
+const VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(join(dirname(__dirname), "package.json"), "utf-8")).version || "";
+  } catch { return ""; }
+})();
 
 const argPort = (() => {
   const i = process.argv.indexOf("--port");
@@ -145,6 +155,45 @@ function describeModels(names, activeModel) {
   });
 }
 
+/** Where this machine's memory has gone, for the bar on the models page.
+ *
+ *  Three numbers and only three, because only three are honestly knowable:
+ *  what the machine has, what is free right now, and what the selected model
+ *  wants. "In use by other apps" is the remainder — it is arithmetic, not a
+ *  measurement, and it is labelled that way in the UI.
+ *
+ *  What this deliberately does NOT do is attribute memory to named
+ *  applications ("close Chrome, frees 4.1 GB"). Getting that right means
+ *  reading per-process RSS and summing it per app bundle, and RSS
+ *  double-counts shared pages badly enough that the numbers would be wrong in
+ *  the user's favour — telling someone that closing Chrome frees 4 GB when it
+ *  frees 1.2 is the kind of specific, checkable, wrong advice that costs trust
+ *  in everything else on the page.
+ *
+ *  `activeGb` is what the model needs when resident, not proof that it is
+ *  resident: Ollama unloads an idle model after a few minutes, and there is no
+ *  cheap way to ask. The bar segment is the model's claim on memory while it
+ *  is in use, which is the number that matters when deciding whether a
+ *  different model would fit. */
+function memoryBreakdown(activeModel) {
+  const mf = memFit();
+  if (!mf) return null;
+  const totalGb = totalmem() / 1024 ** 3;
+  const freeGb = mf.availableMemGb();
+  const activeGb = activeModel ? mf.modelRamGb(activeModel.split("@")[0]) : 0;
+  const r = (n) => Math.round(n * 10) / 10;
+  return {
+    totalGb: r(totalGb),
+    freeGb: r(freeGb),
+    activeGb: r(activeGb),
+    // Clamped at zero: on a machine where the model is not actually resident,
+    // free + activeGb can exceed total, and a negative "other apps" segment
+    // would render as an inverted bar.
+    otherGb: r(Math.max(0, totalGb - freeGb - activeGb)),
+    activeModel: activeModel || null,
+  };
+}
+
 /** Models this Mac could run but hasn't downloaded.
  *
  *  The picker used to list only what Ollama already had — which after a fresh
@@ -240,17 +289,27 @@ const CONNECTOR_TTL = 30_000;
 async function connectorRows({ force = false } = {}) {
   if (!mcp) return [];
   if (!force && Date.now() - connectorCache.at < CONNECTOR_TTL) return connectorCache.rows;
-  const rows = (await mcp.describe()).map((r) => ({
-    ...r,
-    label: labelFor(r.id),
-    // Offered whenever the connector isn't fully healthy — a running connector
-    // whose account is unreachable usually needs re-linking, not restarting.
-    setup: r.state === "ok" ? null : setupUrlFor(r.id, mcp.servers.get(r.id)?.spec),
-    options: optionsFor(r.id).map((o) => ({
-      key: o.key, label: o.label, hint: o.hint || null,
-      value: !!connectorSettings[r.id]?.[o.key],
-    })),
-  }));
+  const rows = (await mcp.describe()).map((r) => {
+    const label = labelFor(r.id);
+    return {
+      ...r,
+      label,
+      // Offered whenever the connector isn't fully healthy — a running connector
+      // whose account is unreachable usually needs re-linking, not restarting.
+      setup: r.state === "ok" ? null : setupUrlFor(r.id, mcp.servers.get(r.id)?.spec),
+      // The plain-language cause and the connector's own words, computed here
+      // so the browser never has to pattern-match a stack trace. A healthy
+      // connector carries neither — there is nothing to explain, and an empty
+      // "what it printed" frame on a working row reads as a problem.
+      ...(r.state === "ok"
+        ? { explanation: null, output: [] }
+        : { explanation: explain({ ...r, label }), output: outputLines(r) }),
+      options: optionsFor(r.id).map((o) => ({
+        key: o.key, label: o.label, hint: o.hint || null,
+        value: !!connectorSettings[r.id]?.[o.key],
+      })),
+    };
+  });
   // Don't let an incomplete answer harden into a 30s lie. A connector still
   // booting can't list its accounts yet, which undercounts — cache that only
   // briefly so the number corrects itself instead of sitting wrong.
@@ -343,7 +402,11 @@ const MIME = {
 
 async function serveStatic(res, urlPath) {
   // normalize + prefix check keeps `..` from escaping STATIC_DIR.
-  const rel = urlPath === "/" ? "index.html" : decodeURIComponent(urlPath).replace(/^\/+/, "");
+  // "/settings" is a page, not a file. Extensionless so the menu-bar app and
+  // the in-app link can point at something a person could also type.
+  const rel = urlPath === "/" ? "index.html"
+    : urlPath === "/settings" || urlPath === "/settings/" ? "settings.html"
+    : decodeURIComponent(urlPath).replace(/^\/+/, "");
   const full = normalize(join(STATIC_DIR, rel));
   if (!full.startsWith(STATIC_DIR) || !existsSync(full)) {
     res.writeHead(404, { "Content-Type": "text/plain" });
@@ -581,6 +644,8 @@ async function route(req, res, url) {
       models: describeModels(models.map((m) => m.name), model),
       downloadable: downloadableModels(models.map((m) => m.name)),
       freeGb: memFit() ? Math.round(memFit().availableMemGb() * 10) / 10 : null,
+      memory: memoryBreakdown(model),
+      version: VERSION,
       ollama: OLLAMA_BASE,
       tools: mcp ? mcp.toolDefs(TOOL_LIMIT).map((t) => t.function.name) : [],
       // true / false / null-when-unrated. The UI warns only on an explicit
@@ -664,6 +729,28 @@ async function route(req, res, url) {
 
   if (p === "/api/chat/conversations" && req.method === "GET") {
     return sendJson(res, 200, store.listConversations());
+  }
+
+  // What the "Data & reset" page needs to state before it offers to destroy
+  // anything: how much there is, and where it lives. The path matters — it is
+  // the answer to "where is my data?", which on a local-first app is a
+  // question with a real answer, and it lets someone take a copy first.
+  if (p === "/api/chat/data" && req.method === "GET") {
+    return sendJson(res, 200, { ...store.historyStats(), dataDir: DATA_DIR, dbPath: DB_PATH });
+  }
+
+  // Destroy all chat history. Guarded by an explicit confirm token rather than
+  // just the method: this endpoint sits on a loopback server with no auth, and
+  // "POST somewhere" is something a page in another tab can be made to do. The
+  // token has to be typed by the person doing it.
+  if (p === "/api/chat/data/reset" && req.method === "POST") {
+    const body = await readBody(req);
+    if (body?.confirm !== "delete") {
+      return sendJson(res, 400, { error: 'send {"confirm":"delete"} to erase chat history' });
+    }
+    const deleted = store.deleteAllConversations();
+    log(`chat history erased — ${deleted} conversation(s)`);
+    return sendJson(res, 200, { deleted });
   }
 
   const convoMatch = p.match(/^\/api\/chat\/conversations\/([A-Za-z0-9_-]+)$/);

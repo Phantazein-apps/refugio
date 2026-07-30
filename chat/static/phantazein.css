@@ -1,0 +1,294 @@
+/* Phantazein design tokens — REFUGIO's shared visual language.
+ *
+ * Ported from the Claude Design handoff bundle
+ * (_ds/phantazein-design-system/tokens/*.css), which is itself taken from live
+ * phantazein.com. Kept as one file rather than five imports because every
+ * @import is a serialised round trip, and this sheet is loaded before first
+ * paint on a window the user opened by clicking a menu-bar icon.
+ *
+ * Two deliberate departures from the handoff:
+ *
+ *  1. FONTS ARE SELF-HOSTED. The bundle's tokens/fonts.css is a single
+ *     @import of fonts.googleapis.com. REFUGIO's whole claim is that nothing
+ *     leaves the machine, and a webfont request is a request — it carries the
+ *     user's IP and a referrer to a third party every time the window opens,
+ *     and it fails outright on a laptop with no network, which is a state this
+ *     app is expected to work in. The same faces are shipped in fonts/.
+ *
+ *  2. NO TYPE-SCALE CLAMPS. The site's --text-hero et al are clamp()ed against
+ *     the viewport because they live on a marketing page. This is a fixed-size
+ *     app window; the scale here is absolute.
+ *
+ * The brand is hard-edged: no border-radius anywhere, no shadows except the
+ * one that lifts a panel off the page. Emphasis is a rule colour or a
+ * background change, never a rounded corner.
+ */
+
+@font-face {
+  font-family: Inter; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("fonts/inter-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: Inter; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("fonts/inter-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: Inter; font-weight: 600; font-style: normal; font-display: swap;
+  src: url("fonts/inter-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo Black"; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("fonts/archivo-black-latin-400.woff2") format("woff2");
+}
+/* Variable font: one file covers 400–600, which is every weight the design
+   asks for. Declared with a range so the browser instances it rather than
+   synthesising a fake bold. */
+@font-face {
+  font-family: "JetBrains Mono"; font-weight: 400 600; font-style: normal; font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-var.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: dark;
+
+  /* ── Colour ─────────────────────────────────────────────
+     Verbatim from the design system. Dark only: the site has no light mode,
+     and neither does this. */
+  --bg:         #000000;   /* page ground — pure black */
+  --bg-elev:    #0a0a0a;   /* elevated band, expanded row */
+  --bg-card:    #0e0e0e;   /* card hover / panel */
+  --bg-sel:     #141414;   /* selected nav item */
+  --ink:        #f4f2ee;   /* primary text — warm off-white */
+  --ink-soft:   #a8a5a0;   /* body / secondary */
+  --ink-mute:   #5e5c58;   /* labels, meta, disabled */
+  --rule:       #1c1c1c;   /* default hairline */
+  --rule-hi:    #2a2a2a;   /* emphasised border */
+  --accent:     #ff0018;   /* THE red */
+  --accent-dim: #b30011;
+  --accent-hover: #d90014;
+  --accent-glow: rgba(255, 0, 24, 0.18);
+  --accent-tint: rgba(255, 0, 24, 0.12);
+  --on-accent:  #ffffff;
+
+  /* ── Connector / model state ────────────────────────────
+     Four states, four colours, used nowhere else. The rule the design is
+     built on: a row states its condition ONCE — one dot, one label, one
+     coloured rule down its left edge — instead of encoding it separately in
+     a dot, a tool count, a paragraph and a button's prominence. */
+  --ok:         #2e9e5b;   /* READY */
+  --ok-rule:    #2e5340;
+  --ok-glow:    rgba(46, 158, 91, 0.18);
+  --warn:       #e0a51e;   /* DEGRADED — running, but its account is unreachable */
+  --warn-rule:  #4a3c14;
+  --warn-glow:  rgba(224, 165, 30, 0.18);
+  --fail:       var(--accent);  /* FAILED — never started. Red is the same red. */
+  --fail-rule:  #520008;
+  --wait:       var(--ink-soft);  /* CONNECTING */
+
+  /* ── Type ───────────────────────────────────────────── */
+  --display: "Archivo Black", Archivo, ui-sans-serif, system-ui, sans-serif;
+  --sans:    Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --tracking-display: -0.01em;
+  --tracking-label:   0.12em;
+  --tracking-nav:     0.16em;
+  --tracking-kicker:  0.24em;
+
+  /* ── Spacing (4px grid) ─────────────────────────────── */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 20px; --s6: 24px; --s7: 32px; --s8: 48px;
+
+  /* ── Hard edges ─────────────────────────────────────── */
+  --radius: 0;
+  --border-hair: 1px;
+  --border-rule: 2px;      /* the state rule, and the active nav marker */
+  --shadow-panel: 0 30px 90px rgba(0, 0, 0, 0.8);
+  --focus-ring: 0 0 0 3px var(--accent-glow);
+
+  --dur-fast: 200ms;
+  --dur: 300ms;
+}
+
+*, *::before, *::after { box-sizing: border-box; border-radius: var(--radius); }
+
+::selection { background: var(--accent); color: var(--on-accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Type patterns ─────────────────────────────────────
+   The three that recur everywhere in the design: the uppercase Archivo Black
+   heading, the mono kicker above it, and the mono state pill. */
+
+.t-display {
+  font-family: var(--display);
+  font-weight: 400;                 /* Archivo Black IS the weight */
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-display);
+  line-height: 1.02;
+  color: var(--ink);
+  margin: 0;
+}
+/* The house rule: a red span wraps the LAST word or phrase of a display
+   title. Never the first, never the middle. */
+.t-display .red { color: var(--accent); }
+
+.t-kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-kicker);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.t-kicker .num { color: var(--accent); margin-right: 10px; }
+
+.t-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-nav);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.t-mono { font-family: var(--mono); }
+
+/* ── State dot ─────────────────────────────────────────
+   Shape carries meaning as well as colour, so the four states stay
+   distinguishable without relying on hue: READY is a filled circle,
+   CONNECTING a dotted outline, DEGRADED a haloed circle, FAILED a SQUARE —
+   the only non-round state in the product. */
+.dot {
+  width: 9px; height: 9px; flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ink-mute);
+}
+.dot.ok        { background: var(--ok); }
+.dot.connecting{ background: none; border: 2px dotted var(--wait); }
+.dot.degraded  { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-glow); }
+.dot.failed    { background: var(--accent); border-radius: 0; box-shadow: 0 0 0 3px var(--accent-glow); }
+.dot.idle      { background: none; border: 2px solid var(--rule-hi); }
+
+/* ── Buttons ───────────────────────────────────────────
+   Exactly one filled red button per situation, and it is always the fix that
+   can actually work. Everything else is outlined or a text link. This is the
+   whole point of the error design: "Reconnect anyway" used to sit beside the
+   real fix with equal weight. */
+.btn {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border: 1px solid var(--rule-hi);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+/* Some of these are anchors — "Scan to re-link" opens a setup page — and an
+   anchor styled as a button must not also be underlined like a link. */
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+.btn:hover:not(:disabled) { background: var(--bg-card); border-color: var(--ink-mute); }
+.btn:disabled { color: var(--ink-mute); cursor: default; }
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn.primary:disabled { background: var(--accent-dim); border-color: var(--accent-dim); color: rgba(255,255,255,0.6); }
+
+/* A text button: an action that is neither the fix nor a refusal — "show what
+   the connector printed", "unlink". Underlined so it reads as pressable
+   without competing with the filled button. */
+.btn.link {
+  border: 0;
+  border-bottom: 1px solid var(--rule-hi);
+  padding: 0 0 1px 0;
+  font-weight: 400;
+  color: var(--ink-soft);
+  background: none;
+}
+.btn.link:hover:not(:disabled) { color: var(--ink); border-bottom-color: var(--ink-mute); background: none; }
+
+/* ── Pills ─────────────────────────────────────────────
+   A bordered mono label stating a fact: READY, CALLS TOOLS, TOO BIG. */
+.pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border: 1px solid var(--rule-hi);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.pill.ok       { color: var(--ok);   border-color: var(--ok-rule); }
+.pill.degraded { color: var(--warn); border-color: var(--warn-rule); }
+.pill.failed   { color: var(--accent); border-color: var(--fail-rule); }
+.pill.plain    { border-color: var(--rule-hi); color: var(--ink-mute); }
+
+/* A state label with no border — used inline in a row where the row's own
+   left rule already carries the colour. */
+.state-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.state-label.ok        { color: var(--ok); }
+.state-label.connecting{ color: var(--ink-soft); }
+.state-label.degraded  { color: var(--warn); }
+.state-label.failed    { color: var(--accent); }
+
+/* ── Checkbox ──────────────────────────────────────────
+   Square, hairline, red when checked. Scope options only ever appear on a
+   connector that works — "off" must always mean narrower, and a checkbox on a
+   dead connector promises a narrowing that isn't happening. */
+.check {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 13px; color: var(--ink-soft); cursor: pointer;
+}
+.check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.check .box {
+  width: 15px; height: 15px; flex-shrink: 0;
+  border: 1px solid var(--rule-hi);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.check input:checked + .box { background: var(--accent); border-color: var(--accent); }
+.check input:checked + .box::after {
+  content: ""; width: 4px; height: 8px; margin-top: -2px;
+  border: solid var(--on-accent); border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.check input:focus-visible + .box { box-shadow: var(--focus-ring); }
+.check:hover { color: var(--ink); }
+
+/* ── Verbatim output ───────────────────────────────────
+   A connector's own stderr, shown as a quotation rather than a dump:
+   numbered lines, hairline frame, muted ink, wrapping instead of scrolling
+   sideways. It is the child process's words, and it is labelled as such —
+   REFUGIO never paraphrases it into the explanation above. */
+.verbatim { border: 1px solid var(--rule); background: var(--bg); }
+.verbatim .vline { display: flex; border-bottom: 1px solid #141414; }
+.verbatim .vline:last-child { border-bottom: 0; }
+.verbatim .vn {
+  font-family: var(--mono); font-size: 10px; color: var(--rule-hi);
+  padding: 7px 10px; border-right: 1px solid #141414;
+  width: 30px; text-align: right; flex-shrink: 0; user-select: none;
+}
+.verbatim .vt {
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft);
+  padding: 7px 11px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 1ms !important; animation-duration: 1ms !important; }
+}
+/* The same, set by hand in Settings → Appearance, for a machine whose system
+   preference says one thing and whose owner wants another. */
+.reduce-motion * { transition-duration: 1ms !important; animation-duration: 1ms !important; }

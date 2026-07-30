@@ -27,11 +27,20 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
     /// `url:` it shadowed it, and the first-load path below then passed the
     /// OPTIONAL parameter where a URL was required — a compile error, but only
     /// on the one line of two that got it wrong, which is easy to read past.
-    func show(url newURL: URL? = nil) {
+    ///
+    /// `navigate` forces a load into an already-open window. It defaults to
+    /// false because reopening must never throw away the conversation on
+    /// screen — but "Settings…" in the menu bar has to actually go somewhere,
+    /// and without this it focused whatever was already showing and did
+    /// nothing else, which reads as a dead menu item.
+    func show(url newURL: URL? = nil, navigate: Bool = false) {
+        let changed = newURL != nil && newURL != self.url
         if let newURL { self.url = newURL }
 
         if let window {
-            if let web, web.url == nil { web.load(URLRequest(url: self.url)) }
+            if let web, web.url == nil || (navigate && changed) {
+                web.load(URLRequest(url: self.url))
+            }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return

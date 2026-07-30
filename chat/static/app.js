@@ -9,7 +9,9 @@ const $ = (id) => document.getElementById(id);
 const els = {
   convos: $("convos"), thread: $("thread"), scroll: $("scroll"), empty: $("empty"),
   input: $("input"), send: $("send"), newChat: $("new-chat"),
-  model: $("model-pick"), status: $("status"), statusText: $("status-text"),
+  modelBtn: $("model-btn"), modelPanel: $("model-panel"), modelDot: $("model-dot"),
+  modelName: $("model-name"), modelSize: $("model-size"),
+  status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
   rail: $("rail"), railToggle: $("rail-toggle"),
   gutter: $("gutter"), gutterRail: $("gutter-rail"), gutterX: $("gutter-x"),
@@ -23,16 +25,20 @@ const state = {
   // inferred from the first — that is the whole guarantee.
   web: { enabled: false }, webArmed: false,
   railCollapsed: false,
+  // The last /api/chat/status payload, kept so the model panel can be drawn on
+  // click without a round trip — the numbers in it are at most fifteen seconds
+  // old, and the panel refreshes them as it opens.
+  status: null,
+  // Set when the user chooses to send anyway on a model that cannot call
+  // tools. Cleared on every model change: the override is for the model that
+  // was selected when it was given, not for the next one.
+  toolWarningOverridden: false,
 };
-
-// Outcome of the last connector fix, rendered once on the next panel draw.
-// Held outside the panel because the panel is destroyed and rebuilt to show
-// fresh data, which is precisely what would otherwise swallow the message.
-let pendingNotice = null;
 
 // ── Rendering ───────────────────────────────────────────────
 
 import { renderMarkdown } from "./md.js";
+import { preferredModel, setPreferredModel, activeModel } from "./model-store.js";
 
 /** Model output is untrusted text; md.js escapes before adding any markup. */
 const renderContent = (text) => renderMarkdown(text);
@@ -130,60 +136,10 @@ async function refreshStatus() {
     if (s.available && (c.failed || c.degraded)) els.status.classList.add("warn");
     els.status.title = "Click for connector details";
     showModelWarning(s);
-    // Label each model with what it needs against the RAM free right now.
-    // Choosing a model is the main lever over speed, and picking one blind
-    // means finding out it doesn't fit by watching the machine swap.
-    els.model.innerHTML = "";
-    for (const m of s.models || []) {
-      const o = document.createElement("option");
-      o.value = m.name;
-      // Say whether you can use it, not how many gigabytes to conjure.
-      // "free 2.6 GB more" was a quantity with no action attached — on macOS
-      // you do not free memory by hand — and it read as a sum with the size
-      // beside it. These two cases need opposite responses, so they are
-      // worded as the two situations they are.
-      const parts = [];
-      if (m.needGb) parts.push(`${m.needGb} GB`);
-      if (m.everFits === false) parts.push("\u26a0 too big for this Mac");
-      else if (m.fits === false) parts.push("\u26a0 too big right now");
-      o.textContent = m.name + (parts.length ? `  \u00b7 ${parts.join("  \u00b7 ")}` : "");
-      if (m.fits === false) o.dataset.tight = "1";
-      // The number lives here, for whoever wants it.
-      if (m.fits === false) {
-        o.title = m.everFits === false
-          ? `${m.name} needs ${m.needGb} GB — more than this Mac has.`
-          : `${m.name} needs ${m.freeUpGb} GB more than is free. Quit a few apps, then reopen this list.`;
-      }
-      if (m.name === s.model) o.selected = true;
-      els.model.appendChild(o);
-    }
+    state.status = s;
+    renderModelButton();
+    if (!els.modelPanel.hidden) renderModelPanel();
 
-    // Models you could have. Before this the picker listed only what Ollama had
-    // already downloaded — exactly one after a fresh install — and the only way
-    // to get another was `ollama pull` in a terminal, which is the thing this
-    // app exists to avoid. Kept in a separate group so choosing one is
-    // obviously a download, not a switch.
-    if (s.downloadable?.length) {
-      const g = document.createElement("optgroup");
-      g.label = "Download";
-      for (const m of s.downloadable) {
-        const o = document.createElement("option");
-        o.value = `pull:${m.name}`;
-        o.textContent = `${m.name}  \u00b7 ${m.needGb} GB download`;
-        o.title = `Downloads ${m.needGb} GB from Ollama. You can keep using ${s.model || "the current model"} meanwhile.`;
-        g.appendChild(o);
-      }
-      els.model.appendChild(g);
-    }
-    if (!s.models?.length && !s.downloadable?.length) {
-      els.model.innerHTML = "<option>no models</option>";
-    }
-    // Explains the labels rather than restating a number nobody asked for.
-    els.model.title = s.freeGb != null
-      ? `${s.freeGb} GB of memory free right now. A model marked "too big right ` +
-        `now" would fit if you quit some other apps.`
-      : "";
-    state.model = s.model;
     applyWebSetting(s.web);
   } catch {
     els.status.className = "status down";
@@ -201,19 +157,17 @@ async function refreshStatus() {
  *  Only on an explicit false. A model we haven't rated is unknown, and warning
  *  about it would train people to ignore this bar. */
 function showModelWarning(s) {
-  // Three distinct problems, in the order they block you. "No model at all" is
-  // where a fresh install lands when the download fails, and the UI used to
-  // say "no models" in the picker and stop — naming the situation without
-  // saying the one command that resolves it.
+  // Two problems now, not three. The third — a model that cannot call tools —
+  // was a one-line bar telling the user to run `ollama pull` in a terminal,
+  // which is the thing this app exists to avoid. It is now intercepted at the
+  // point it does damage, in the thread, with buttons: see toolGuard().
   let text = null;
+  let action = null;
   if (!s.ollamaUp) {
-    text = "Ollama isn't running — REFUGIO can't answer anything. Start it: open -a Ollama";
-  } else if (!s.model || !(s.models || []).length) {
-    text = "No model installed. Download one: ollama pull qwen2.5:3b  " +
-           "(2.6 GB — the smallest that can use your connectors)";
-  } else if (s.modelTools === false) {
-    text = `${s.model} can't use connectors — it will answer from memory and ` +
-           `never read your data. Run: ollama pull qwen2.5:3b`;
+    text = "Ollama isn't running, so REFUGIO can't answer anything. Start the Ollama app and this will clear.";
+  } else if (!modelFor(s) || !(s.models || []).length) {
+    text = "No model is installed. REFUGIO can't answer anything until there is one.";
+    action = { label: "Download one", pane: "models" };
   }
 
   let bar = document.getElementById("model-warn");
@@ -224,7 +178,286 @@ function showModelWarning(s) {
     bar.className = "model-warn";
     els.scroll.parentElement.insertBefore(bar, els.scroll);
   }
-  bar.textContent = text;
+  bar.replaceChildren(document.createTextNode(text));
+  if (action) {
+    const a = document.createElement("a");
+    a.href = `/settings#${action.pane}`;
+    a.textContent = action.label;
+    bar.append(" ", a);
+  }
+}
+
+// ── Model picker (4d) ───────────────────────────────────────
+//
+// A panel rather than a <select>, because the decision needs numbers a native
+// option list cannot carry: what a model costs, whether it fits in the memory
+// free RIGHT NOW, and — the one that actually matters — whether it can reach
+// the connectors at all. A select could only ever append that to a string.
+
+/** The model in use: the user's choice if it is still installed, else the
+ *  server's. One function so the button, the panel, the guard and the request
+ *  body cannot disagree about which model this is. */
+function modelFor(s) { return activeModel(s); }
+
+function modelInfo(s, name) {
+  return (s?.models || []).find((m) => m.name === name) || null;
+}
+
+function renderModelButton() {
+  const s = state.status;
+  const name = modelFor(s);
+  state.model = name;
+
+  const info = modelInfo(s, name);
+  const noTools = info?.tools === false;
+
+  els.modelName.textContent = name || "no model";
+  els.modelSize.textContent = noTools ? "NO TOOLS" : info?.needGb ? `${info.needGb} GB` : "";
+  els.modelSize.classList.toggle("warn", noTools);
+  els.modelDot.className = `dot ${!s?.ollamaUp || !name ? "failed" : noTools ? "degraded" : "ok"}`;
+  els.modelBtn.classList.toggle("warn", noTools);
+  els.modelBtn.title = noTools
+    ? `${name} cannot call tools, so it cannot read anything through your connectors.`
+    : name ? `${name} — click to change model` : "No model installed";
+
+  toolGuard();
+}
+
+function renderModelPanel() {
+  const s = state.status;
+  const panel = els.modelPanel;
+  panel.replaceChildren();
+  const active = modelFor(s);
+
+  // Free memory first, as a bar. Every row below is a claim against it, and
+  // "6.2 GB" means nothing without the number it is being subtracted from.
+  if (s?.memory) {
+    const pct = Math.max(0, Math.min(100, (s.memory.freeGb / s.memory.totalGb) * 100));
+    const head = document.createElement("div");
+    head.className = "mp-mem";
+    const label = document.createElement("span");
+    label.className = "t-label";
+    label.textContent = "Memory free right now";
+    const track = document.createElement("span");
+    track.className = "mp-track";
+    const fill = document.createElement("i");
+    fill.style.width = `${pct}%`;
+    track.appendChild(fill);
+    const num = document.createElement("span");
+    num.className = "mp-num";
+    num.textContent = `${s.memory.freeGb} GB`;
+    head.append(label, track, num);
+    panel.appendChild(head);
+  }
+
+  for (const m of s?.models || []) {
+    const isActive = m.name === active;
+    const tooBigEver = m.everFits === false;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "mp-row" + (isActive ? " active" : "") + (tooBigEver ? " dim" : "");
+    row.disabled = tooBigEver;
+
+    const dot = document.createElement("span");
+    dot.className = `dot ${isActive ? "ok" : "idle"}`;
+
+    const mid = document.createElement("div");
+    mid.className = "mp-mid";
+    const tag = document.createElement("div");
+    tag.className = "mp-tag";
+    tag.textContent = m.name;
+    const sub = document.createElement("div");
+    sub.className = "mp-sub";
+    // One line, and it is about what this model can do for you — not a second
+    // copy of the size, which is already on the right.
+    sub.textContent = m.tools === false ? "Cannot call tools — no connectors"
+      : tooBigEver ? "Too large for this Mac"
+      : m.fits === false ? `Needs ${m.freeUpGb} GB more than is free`
+      : isActive ? "In use · calls tools"
+      : m.tools === null ? "Tool calling unrated"
+      : "Calls tools";
+    if (m.tools === false) sub.classList.add("warn");
+    mid.append(tag, sub);
+
+    const right = document.createElement("div");
+    right.className = "mp-right";
+    const gb = document.createElement("div");
+    gb.className = "mp-gb";
+    gb.textContent = m.needGb ? `${m.needGb} GB` : "";
+    const fit = document.createElement("div");
+    fit.className = "mp-fit " + (tooBigEver || m.fits === false ? "no" : "ok");
+    fit.textContent = tooBigEver ? "TOO BIG" : m.fits === false ? "TOO BIG NOW" : "FITS";
+    right.append(gb, fit);
+
+    row.append(dot, mid, right);
+    if (!tooBigEver) row.addEventListener("click", () => pickModel(m.name));
+    panel.appendChild(row);
+  }
+
+  if (!(s?.models || []).length) {
+    const none = document.createElement("div");
+    none.className = "mp-none";
+    none.textContent = s?.ollamaUp
+      ? "No models installed."
+      : "Ollama isn't running, so there is nothing to list.";
+    panel.appendChild(none);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "mp-foot";
+  const manage = document.createElement("a");
+  manage.href = "/settings#models";
+  manage.textContent = "Manage models";
+  const more = document.createElement("a");
+  more.href = "/settings#models";
+  more.textContent = "Download another";
+  const note = document.createElement("span");
+  note.className = "mp-note";
+  note.textContent = "SWITCHING KEEPS THIS CHAT";
+  foot.append(manage, more, note);
+  panel.appendChild(foot);
+}
+
+function setModelPanel(open) {
+  els.modelPanel.hidden = !open;
+  els.modelBtn.setAttribute("aria-expanded", String(open));
+  if (open) { renderModelPanel(); refreshStatus(); }
+}
+
+function pickModel(name) {
+  setPreferredModel(name);
+  // The override travels with the model it was given for. Switching away and
+  // back must ask again — otherwise one "send anyway" silently disarms the
+  // warning for the rest of the session.
+  state.toolWarningOverridden = false;
+  renderModelButton();
+  setModelPanel(false);
+}
+
+// ── The model that cannot call tools (4f) ───────────────────
+//
+// The worst failure in the product, and the quietest: everything looks
+// healthy, the model answers fluently, and it invents the contents of your
+// WhatsApp because it has no way to look. It cannot be a banner — a banner is
+// something you scroll past — so sending is held until the choice is made.
+
+function toolGuard() {
+  const s = state.status;
+  const name = modelFor(s);
+  const info = modelInfo(s, name);
+  const blocked = info?.tools === false && !state.toolWarningOverridden;
+
+  document.getElementById("tool-guard")?.remove();
+  els.input.classList.toggle("held", blocked);
+  if (els.send) els.send.disabled = state.streaming ? false : blocked || !els.input.value.trim();
+
+  const hint = document.querySelector(".composer .hint");
+  if (hint) {
+    hint.textContent = blocked
+      ? "Sending is paused while a model that cannot use your connectors is selected."
+      : "Enter to send · Shift+Enter for a new line";
+    hint.classList.toggle("warn", blocked);
+  }
+  if (!blocked) return;
+
+  // Offer the models that WOULD work, by name, with their fit — the whole
+  // point is that the fix is one click and needs no knowledge of Ollama.
+  //
+  // Ordered by what fits first, then LARGEST first within that — the primary
+  // button should be the most capable model this machine can actually run,
+  // not the cheapest. Someone who has just been told their answer would be
+  // invented wants the best available, and the smaller one is right there as
+  // the second button if they'd rather have speed.
+  const alternatives = (s?.models || [])
+    .filter((m) => m.tools === true && m.everFits !== false)
+    .sort((a, b) => (b.fits === true) - (a.fits === true) || (b.needGb || 0) - (a.needGb || 0))
+    .slice(0, 2);
+
+  const card = document.createElement("div");
+  card.id = "tool-guard";
+  card.className = "tool-guard";
+
+  const dot = document.createElement("span");
+  dot.className = "dot degraded";
+
+  const body = document.createElement("div");
+  body.className = "tg-body";
+
+  const h = document.createElement("div");
+  h.className = "tg-head";
+  h.textContent = `${name} cannot read your data.`;
+
+  const p = document.createElement("div");
+  p.className = "tg-prose";
+  p.append(
+    document.createTextNode("This model has no way to call connectors, so it will answer from general knowledge and "),
+  );
+  const strong = document.createElement("strong");
+  strong.textContent = "quietly make things up";
+  p.append(strong, document.createTextNode(
+    " about anything it should have looked up. Your connectors are fine — it simply cannot reach them."));
+
+  body.append(h, p);
+
+  if (alternatives.length) {
+    const box = document.createElement("div");
+    box.className = "tg-switch";
+    const lbl = document.createElement("div");
+    lbl.className = "t-label";
+    lbl.textContent = "Switch to a model that can";
+    const row = document.createElement("div");
+    row.className = "tg-actions";
+    alternatives.forEach((m, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn" + (i === 0 ? " primary" : "");
+      b.textContent = `Use ${m.name} · ${m.fits === false ? "tight" : "fits"}`;
+      b.addEventListener("click", () => pickModel(m.name));
+      row.appendChild(b);
+    });
+    const anyway = document.createElement("button");
+    anyway.type = "button";
+    anyway.className = "btn link";
+    anyway.textContent = "Ask anyway, without my data";
+    anyway.addEventListener("click", () => {
+      state.toolWarningOverridden = true;
+      toolGuard();
+      els.input.focus();
+    });
+    row.appendChild(anyway);
+    box.append(lbl, row);
+    body.appendChild(box);
+  } else {
+    // Nothing installed can do the job. The fix is a download, not a switch.
+    const box = document.createElement("div");
+    box.className = "tg-switch";
+    const lbl = document.createElement("div");
+    lbl.className = "t-label";
+    lbl.textContent = "Nothing installed can call tools";
+    const row = document.createElement("div");
+    row.className = "tg-actions";
+    const dl = document.createElement("a");
+    dl.className = "btn primary";
+    dl.href = "/settings#models";
+    dl.textContent = "Download one that can";
+    const anyway = document.createElement("button");
+    anyway.type = "button";
+    anyway.className = "btn link";
+    anyway.textContent = "Ask anyway, without my data";
+    anyway.addEventListener("click", () => { state.toolWarningOverridden = true; toolGuard(); els.input.focus(); });
+    row.append(dl, anyway);
+    box.append(lbl, row);
+    body.appendChild(box);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "tg-foot";
+  foot.textContent = "Switching keeps this conversation.";
+  body.appendChild(foot);
+
+  card.append(dot, body);
+  els.thread.appendChild(card);
+  scrollToEnd();
 }
 
 // ── Web search ──────────────────────────────────────────────
@@ -260,357 +493,33 @@ function setWebArmed(on) {
     : "";
 }
 
-/** Persist the standing permission from the connectors panel. */
-async function setWebEnabled(box, enabled) {
-  box.disabled = true;
+/** Persist the standing permission.
+ *
+ *  Lives in Settings now, but the chat still has to react: the composer's
+ *  per-message arming control must appear and disappear with it. */
+async function setWebEnabled(enabled) {
   try {
     const res = await fetch("/api/chat/web", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
     });
-    if (!res.ok) throw new Error("failed");
-    const data = await res.json();
-    applyWebSetting(data.web);
-    // Redraw the row from the server's answer. Leaving it alone left the
-    // header reading "off" beside a ticked box — the same row saying two
-    // different things, which is exactly what this panel exists not to do.
-    document.querySelector("#connectors .conn.web")?.replaceWith(webSection(data.web));
-  } catch {
-    box.checked = !enabled;
-  } finally {
-    box.disabled = false;
-  }
+    if (res.ok) applyWebSetting((await res.json()).web);
+  } catch { /* the next status poll will correct the control */ }
 }
 
-/** The web-search section of the connectors panel.
- *
- *  Rendered apart from the connector list, and last. Everything above it reads
- *  the user's own data on this machine; this one doesn't, and putting it in the
- *  same list would quietly file it as one more local connector. */
-function webSection(web) {
-  const row = document.createElement("div");
-  row.className = "conn web" + (web.enabled ? " on" : "");
+// ── Connectors ──────────────────────────────────────────────
+//
+// The modal sheet that used to live here is gone. It encoded each connector's
+// state four separate times — a dot, a right-aligned "5 tools · not
+// reachable", a paragraph of prose, and whichever button happened to be first
+// — and the four could disagree. It has been replaced by the settings page,
+// which states a row's condition once. The status chip is now a door to it.
 
-  const head = document.createElement("div");
-  head.className = "conn-head";
-  const dot = document.createElement("span");
-  dot.className = "conn-dot";
-  const name = document.createElement("span");
-  name.className = "conn-name";
-  name.textContent = "Web search";
-  const meta = document.createElement("span");
-  meta.className = "conn-meta";
-  meta.textContent = web.enabled ? `via ${web.engine || "a search engine"}` : "off";
-  head.append(dot, name, meta);
-  row.appendChild(head);
-
-  const why = document.createElement("div");
-  why.className = "conn-why";
-  why.textContent = web.warning || "";
-  row.appendChild(why);
-
-  const label = document.createElement("label");
-  label.className = "conn-opt";
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.checked = !!web.enabled;
-  box.onchange = () => setWebEnabled(box, box.checked);
-  const text = document.createElement("span");
-  text.className = "conn-opt-text";
-  const t1 = document.createElement("span");
-  t1.textContent = web.label || "Allow web search";
-  text.appendChild(t1);
-  if (web.hint) {
-    const hint = document.createElement("span");
-    hint.className = "conn-opt-hint";
-    hint.textContent = web.hint;
-    text.appendChild(hint);
-  }
-  label.append(box, text);
-  row.appendChild(label);
-  return row;
+function openSettings(pane = "connectors") {
+  location.href = `/settings#${pane}`;
 }
 
-/** The connectors panel: what REFUGIO is actually plugged into.
- *
- *  Built because the answer to "is WhatsApp working?" used to live only in a
- *  terminal the user had closed. Each connector states its own condition, and
- *  a failed one shows its reason verbatim instead of just going missing. */
-async function showConnectors() {
-  let panel = document.getElementById("connectors");
-  if (panel) { panel.remove(); return; }          // click again to close
-
-  panel = document.createElement("div");
-  panel.id = "connectors";
-  panel.className = "sheet";
-  panel.innerHTML = `<div class="sheet-card"><div class="sheet-head">
-      <strong>Connectors</strong><button class="sheet-x" title="Close">&times;</button>
-    </div><div class="sheet-body">Checking\u2026</div></div>`;
-  document.body.appendChild(panel);
-
-  const close = () => panel.remove();
-  panel.querySelector(".sheet-x").onclick = close;
-  panel.onclick = (e) => { if (e.target === panel) close(); };   // backdrop
-  document.addEventListener("keydown", function esc(e) {
-    if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); }
-  });
-
-  const body = panel.querySelector(".sheet-body");
-  let data;
-  try {
-    data = await (await fetch("/api/chat/connectors")).json();
-  } catch {
-    body.textContent = "Couldn\u2019t reach REFUGIO.";
-    return;
-  }
-
-  body.innerHTML = "";
-  if (!data.connectors?.length) {
-    // An empty list right after launch means the pool hasn't read the config
-    // yet, NOT that nothing is configured. Telling someone with three working
-    // connectors to re-run the installer is worse than saying nothing.
-    //
-    // The web-search section is still appended below: with no connectors at
-    // all it is the one thing here the user can actually switch on.
-    const none = document.createElement("div");
-    none.innerHTML = data.starting
-      ? `<div class="conn-empty">Starting\u2026<br>
-         <span class="conn-sub">Connectors take a few seconds to come up.</span></div>`
-      : `<div class="conn-empty">No connectors configured.<br>
-         <span class="conn-sub">Re-run the REFUGIO installer to add WhatsApp, reminders or notes.</span></div>`;
-    body.appendChild(none);
-  }
-  for (const c of data.connectors || []) {
-    const row = document.createElement("div");
-    row.className = "conn " + (c.state || (c.ok ? "ok" : "failed"));
-
-    const head = document.createElement("div");
-    head.className = "conn-head";
-    const dot = document.createElement("span");
-    dot.className = "conn-dot";
-    const name = document.createElement("span");
-    name.className = "conn-name";
-    name.textContent = c.label || c.id;
-    const meta = document.createElement("span");
-    meta.className = "conn-meta";
-    const toolCount = `${c.tools} tool${c.tools === 1 ? "" : "s"}`;
-    meta.textContent = c.state === "connecting" ? "connecting\u2026"
-      : c.state === "degraded" ? `${toolCount} \u00b7 not reachable`
-      : c.ok ? toolCount : "not working";
-    head.append(dot, name, meta);
-    row.appendChild(head);
-
-    // Accounts are what makes a connector plural: two WhatsApp numbers are two
-    // things the user thinks about, and an unpaired one is worth surfacing.
-    for (const a of c.accounts || []) {
-      const acc = document.createElement("div");
-      // Paired-but-offline is not the same as never-paired, and calling both
-      // "not linked" sends someone to re-scan a QR code they don't need.
-      const paired = !!a.phone;
-      const state = a.connected ? "" : paired ? " \u2014 offline" : " \u2014 not linked yet";
-      acc.className = "conn-acct" + (a.connected ? "" : paired ? " idle" : " off");
-      acc.textContent = (paired ? `+${a.phone}` : a.id || "account") + state;
-      row.appendChild(acc);
-    }
-
-    if (!c.ok && c.error) {
-      const err = document.createElement("div");
-      err.className = "conn-err";
-      err.textContent = c.error;   // textContent: this is a child process's stderr
-      row.appendChild(err);
-    }
-
-    // Fixing a connector must not require a terminal. That was the whole point
-    // of the native window, and it stops being true the moment something
-    // breaks — which is exactly when a non-technical user is least able to
-    // open one.
-    // One primary action: the thing most likely to actually work, chosen from
-    // the connector's state rather than from what is cheapest to run.
-    if (c.state === "failed" || c.state === "degraded") {
-      if (c.conflict) {
-        // Name the process. It may be a leftover, or Claude Desktop
-        // legitimately holding the same account — only the user knows which,
-        // so show what is about to stop rather than just offering "Fix".
-        const what = document.createElement("div");
-        what.className = "conn-blocked";
-        what.textContent = `Blocked by PID ${c.conflict.pid}: ${c.conflict.command}`;
-        row.appendChild(what);
-      }
-
-      // Say what is wrong BEFORE anything is clicked. Making someone press a
-      // button to learn why it won't help is a bad trade, and restarting is
-      // exactly that here: the connector is running fine, so there is nothing
-      // for a restart to repair.
-      const relinkFirst = c.state === "degraded" && !c.conflict && !!c.setup;
-      if (relinkFirst) {
-        const why = document.createElement("div");
-        why.className = "conn-why";
-        why.textContent =
-          "The connector is running, but this account isn't connected to WhatsApp. " +
-          "That usually means the phone unlinked this device, which only re-linking fixes.";
-        row.appendChild(why);
-      }
-
-      const actions = document.createElement("div");
-      actions.className = "conn-actions";
-
-      if (relinkFirst) {
-        // Re-link leads. Reconnect was primary here and could never succeed —
-        // a prominent button that cannot fix the problem it is offered for.
-        const link = document.createElement("a");
-        link.className = "conn-btn primary";
-        link.href = c.setup.url;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = c.setup.label;
-        actions.appendChild(link);
-      }
-
-      const btn = document.createElement("button");
-      btn.className = "conn-btn" + (relinkFirst ? "" : " primary");
-      // Restarting while something else holds the lock just fails again, so
-      // when a blocker is identified that IS the action — not an extra option.
-      btn.textContent = c.conflict ? "Stop it and restart"
-        : c.state === "degraded" ? "Reconnect anyway" : "Restart";
-      btn.onclick = () => runFix(btn, c.id, c.conflict ? "resolve" : "retry");
-      actions.appendChild(btn);
-      row.appendChild(actions);
-
-      // The outcome belongs between the button that produced it and the next
-      // step it recommends. Rendered after the fallback link, "re-link below"
-      // pointed at a link that was above it.
-      if (pendingNotice && pendingNotice.id === c.id) {
-        const note = document.createElement("div");
-        note.className = `conn-note ${pendingNotice.tone}`;
-        note.textContent = pendingNotice.text;
-        row.appendChild(note);
-      }
-
-      // Re-linking is the fallback, not the first thing to try: reconnecting is
-      // instant and usually enough, while re-linking means getting the phone
-      // out. Offer it as a next step for when the quick fix didn't work.
-      if (c.setup && !relinkFirst) {
-        const more = document.createElement("div");
-        more.className = "conn-next";
-        more.append(document.createTextNode("Still not working? "));
-        const link = document.createElement("a");
-        link.href = c.setup.url;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = c.setup.label;
-        link.title = c.setup.hint || "";
-        more.appendChild(link);
-        row.appendChild(more);
-      }
-    }
-
-    // Scope options only on a connector that works. Offering "include archived
-    // chats" under a connector that cannot reach WhatsApp asks someone to tune
-    // something that is not running — and buries the one control that matters
-    // (the fix button) under settings that currently change nothing.
-    for (const opt of (c.state === "ok" ? c.options || [] : [])) {
-      const label = document.createElement("label");
-      label.className = "conn-opt";
-
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = !!opt.value;
-      box.onchange = () => setConnectorOption(box, c.id, opt.key, box.checked);
-
-      // Checkbox, then a COLUMN holding the label and its hint. Letting the
-      // hint be a sibling of the label made it compete for the same row, which
-      // crushed the label into a narrow stack of single words.
-      const text = document.createElement("span");
-      text.className = "conn-opt-text";
-
-      const name = document.createElement("span");
-      name.textContent = opt.label;
-      text.appendChild(name);
-
-      if (opt.hint) {
-        const hint = document.createElement("span");
-        hint.className = "conn-opt-hint";
-        hint.textContent = opt.hint;
-        text.appendChild(hint);
-      }
-
-      label.append(box, text);
-      row.appendChild(label);
-    }
-    body.appendChild(row);
-  }
-
-  if (data.web) {
-    applyWebSetting(data.web);
-    body.appendChild(webSection(data.web));
-  }
-  pendingNotice = null;
-}
-
-/** Persist one connector option. Reverts the box if the server refuses, so the
- *  UI can never show a scope that isn't actually in force. */
-async function setConnectorOption(box, server, key, value) {
-  box.disabled = true;
-  try {
-    const res = await fetch("/api/chat/connectors/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ server, key, value }),
-    });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "failed");
-  } catch {
-    box.checked = !value;
-  } finally {
-    box.disabled = false;
-  }
-}
-
-/** Run a connector fix and redraw the panel with the result.
- *
- *  Redraws from the server's response rather than optimistically: the point of
- *  this panel is that it says what is actually true. */
-async function runFix(btn, id, action) {
-  const label = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = action === "resolve" ? "Stopping\u2026" : "Retrying\u2026";
-  try {
-    const res = await fetch(`/api/chat/connectors/${encodeURIComponent(id)}/${action}`,
-      { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `failed (${res.status})`);
-
-    // Say what happened. The panel redraws from fresh data, so a connector that
-    // is still broken renders identically to before — the button appears to
-    // simply revert, and the action looks like it did nothing. It ran; it just
-    // did not help, and that is a different thing the user needs told.
-    const row = (data.connectors || []).find((c) => c.id === id);
-    pendingNotice = { id, ...describeOutcome(row, action) };
-  } catch (e) {
-    pendingNotice = { id, tone: "bad", text: String(e.message || e) };
-  }
-  document.getElementById("connectors")?.remove();
-  await showConnectors();
-  refreshStatus();
-}
-
-/** Turn the post-fix state into a sentence.
- *
- *  A failed fix is not a failed action — "reconnected, still offline" points at
- *  re-linking, while "could not reach it at all" points somewhere else. */
-function describeOutcome(row, action) {
-  if (!row) return { tone: "bad", text: "That connector is no longer listed." };
-  if (row.state === "ok") {
-    return { tone: "good", text: action === "resolve" ? "Stopped it — connector is working." : "Working now." };
-  }
-  if (row.state === "connecting") return { tone: "info", text: "Restarted — still starting up." };
-  if (row.state === "degraded") {
-    return { tone: "warn", text: row.setup
-      ? "Restarted, and the account is still unreachable — as expected when the device has been unlinked. Use Open WhatsApp setup to re-link."
-      : "Restarted, but the account is still unreachable." };
-  }
-  return { tone: "bad", text: "Still not working." };
-}
 
 // ── History rail ────────────────────────────────────────────
 //
@@ -980,6 +889,10 @@ function newChat() {
   resetSources();
   els.thread.innerHTML = EMPTY_HTML;
   els.empty = $("empty");
+  // The thread was just emptied, taking the guard card with it. The condition
+  // it warns about has not changed, so it has to be put back — otherwise
+  // "New chat" is a way to dismiss the warning without answering it.
+  toolGuard();
   loadConversations();
   els.input.focus();
 }
@@ -988,6 +901,11 @@ function newChat() {
 async function send() {
   const text = els.input.value.trim();
   if (!text || state.streaming) return;
+
+  // The guard, enforced rather than merely displayed. The disabled send button
+  // is the visible half; this is the half that Enter cannot get past.
+  const info = modelInfo(state.status, state.model);
+  if (info?.tools === false && !state.toolWarningOverridden) { toolGuard(); return; }
 
   // Consume the arming here, before anything is sent. Clearing it in `finally`
   // would leave it set for as long as the answer takes to stream — and if the
@@ -1020,7 +938,7 @@ async function send() {
       body: JSON.stringify({
         message: text,
         conversation_id: state.conversationId,
-        model: els.model.value || undefined,
+        model: state.model || undefined,
         web,
       }),
     });
@@ -1137,7 +1055,9 @@ function setStreaming(on) {
 els.input.addEventListener("input", () => {
   els.input.style.height = "auto";
   els.input.style.height = Math.min(els.input.scrollHeight, 192) + "px";
-  els.send.disabled = state.streaming || !els.input.value.trim();
+  // toolGuard owns the disabled state when a tool-blind model is selected;
+  // asking it keeps one rule in one place instead of two that can disagree.
+  toolGuard();
 });
 els.input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
@@ -1157,72 +1077,28 @@ els.thread.addEventListener("click", (e) => {
   });
 });
 els.webArm.addEventListener("click", () => setWebArmed(!state.webArmed));
-els.status.addEventListener("click", showConnectors);
 els.newChat.addEventListener("click", newChat);
-els.model.addEventListener("change", () => {
-  const v = els.model.value;
-  if (v.startsWith("pull:")) { downloadModel(v.slice(5)); return; }
-  state.model = v;
+
+// The status chip is the door to the connectors page. It used to open a modal
+// sheet; the sheet is what the settings surface replaced.
+els.status.addEventListener("click", () => openSettings("connectors"));
+els.status.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSettings("connectors"); }
 });
 
-/** Download a model, showing bytes as they arrive.
- *
- *  A model is gigabytes over a home connection. A spinner for ten minutes is
- *  indistinguishable from a hang, so this reports the actual counts — and puts
- *  the picker back where it was, since the download is not a switch. */
-async function downloadModel(name) {
-  // Don't leave the picker showing a model that isn't installed yet.
-  els.model.value = state.model || els.model.options[0]?.value || "";
+els.modelBtn.addEventListener("click", () => setModelPanel(els.modelPanel.hidden));
+// Dismiss on an outside click or Escape, like any other popover. Without this
+// the panel stays open over the thread and has to be un-clicked from the
+// button, which nobody tries.
+document.addEventListener("click", (e) => {
+  if (els.modelPanel.hidden) return;
+  if (els.modelPanel.contains(e.target) || els.modelBtn.contains(e.target)) return;
+  setModelPanel(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !els.modelPanel.hidden) setModelPanel(false);
+});
 
-  let bar = document.getElementById("model-warn");
-  if (!bar) {
-    bar = document.createElement("div");
-    bar.id = "model-warn";
-    bar.className = "model-warn";
-    els.scroll.parentElement.insertBefore(bar, els.scroll);
-  }
-  bar.textContent = `Downloading ${name}\u2026`;
-
-  try {
-    const res = await fetch("/api/chat/models/pull", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok || !res.body) {
-      throw new Error((await res.json().catch(() => ({}))).error || `failed (${res.status})`);
-    }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const frames = buf.split("\n\n");
-      buf = frames.pop() ?? "";
-      for (const frame of frames) {
-        const ev = /^event: (.+)$/m.exec(frame)?.[1];
-        const raw = /^data: (.+)$/m.exec(frame)?.[1];
-        if (!ev || !raw) continue;
-        let d; try { d = JSON.parse(raw); } catch { continue; }
-        if (ev === "progress") {
-          const gb = (n) => (n / 1024 ** 3).toFixed(1);
-          bar.textContent = d.total
-            ? `Downloading ${name} \u2014 ${gb(d.completed)} of ${gb(d.total)} GB`
-            : `${name}: ${d.status || "working"}\u2026`;
-        } else if (ev === "error") {
-          throw new Error(d.error);
-        } else if (ev === "done") {
-          bar.textContent = `${name} downloaded \u2014 choose it in the model list to use it.`;
-          setTimeout(refreshStatus, 500);
-        }
-      }
-    }
-  } catch (e) {
-    bar.textContent = `Couldn\u2019t download ${name}: ${e.message}`;
-  }
-}
 
 els.railToggle.addEventListener("click", () => setRailCollapsed(!state.railCollapsed));
 els.gutterRail.addEventListener("click", () => setGutter(true));

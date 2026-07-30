@@ -6,6 +6,7 @@
 <title>REFUGIO</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.ico">
+<link rel="stylesheet" href="phantazein.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -22,9 +23,22 @@
   </aside>
 
   <main class="main">
+    <!-- Also the window's drag handle in the native app: the title bar there is
+         transparent and the web view runs under it, so this strip is where a
+         person instinctively grabs the window. -->
     <div class="topbar">
-      <select class="model-pick" id="model-pick" aria-label="Model"></select>
-      <div class="status" id="status"><span class="led"></span><span id="status-text">checking…</span></div>
+      <!-- A button and a panel, not a <select>. A native select cannot show
+           what a model costs against the memory free right now, which is the
+           only thing that makes the choice decidable. -->
+      <button class="model-btn" id="model-btn" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <span class="dot" id="model-dot"></span>
+        <span class="mb-name" id="model-name">…</span>
+        <span class="mb-size" id="model-size"></span>
+        <span class="mb-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="model-panel" id="model-panel" role="dialog" aria-label="Choose a model" hidden></div>
+      <div class="status" id="status" role="button" tabindex="0"><span class="led"></span><span id="status-text">checking…</span></div>
+      <a class="settings-link" href="/settings" title="Settings">Settings</a>
     </div>
 
     <div class="scroll" id="scroll">

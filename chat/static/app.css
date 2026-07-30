@@ -1,48 +1,39 @@
-/* REFUGIO chat — visual language lifted from the SHERPA/PHANTAZEIN chat
-   surface (token names, spacing scale, type ramp, Inter), re-pointed at
-   REFUGIO's red accent and trimmed to what a plain chat window needs.
-
-   Written against this app's own markup rather than copied wholesale: the
-   upstream sheet is ~1,900 lines coupled to an evidence/citation UI that
-   REFUGIO has no equivalent of. */
-
-@font-face { font-family: Inter; font-weight: 400; font-display: swap;
-  src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
-@font-face { font-family: Inter; font-weight: 500; font-display: swap;
-  src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
-@font-face { font-family: Inter; font-weight: 600; font-display: swap;
-  src: url("fonts/inter-latin-600-normal.woff2") format("woff2"); }
+/* REFUGIO chat.
+ *
+ * Layout and components live here; the visual language comes from
+ * phantazein.css, which index.html loads first. This file was originally the
+ * SHERPA chat surface re-pointed at REFUGIO's red — a light theme with rounded
+ * corners and a dark-mode media query. The Claude Design handoff replaced that
+ * with the Phantazein system, which is dark-only and hard-edged, so the
+ * palette below is now a thin mapping of this sheet's long-standing variable
+ * names onto those tokens rather than a second set of colours.
+ *
+ * Two consequences worth stating, because they are not bugs:
+ *   · There is no light mode. The design system has no light palette, and a
+ *     half-converted one would be worse than not offering it.
+ *   · There are no rounded corners anywhere. --radius-* are all zero and kept
+ *     only so the ~30 rules referring to them didn't all have to change.
+ */
 
 :root {
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
 
-  --accent:        #ff0018;   /* REFUGIO / Phantazein red */
-  --accent-soft:   color-mix(in srgb, #ff0018 14%, transparent);
+  --accent-soft:   var(--accent-tint);
 
-  --bg-app:        #f6f9fe;
-  --bg-surface:    #ffffff;
-  --bg-surface-2:  #fafafc;
-  --bg-surface-3:  #efeff4;
-  --border:        #dedee4;
-  --border-subtle: #ececef;
-  --ink:           #141413;
-  --ink-muted:     #5e5c58;
-  --ink-faint:     #8b929c;
+  --bg-app:        var(--bg);        /* page ground */
+  --bg-surface:    var(--bg);        /* the thread */
+  --bg-surface-2:  var(--bg-elev);   /* rail, composer */
+  --bg-surface-3:  var(--bg-card);   /* hover, chips */
+  --border:        var(--rule-hi);
+  --border-subtle: var(--rule);
+  --ink-muted:     var(--ink-soft);
+  --ink-faint:     var(--ink-mute);
 
-  --radius-sm: 4px;  --radius-md: 6px;  --radius-lg: 10px;
-  --radius-xl: 14px; --radius-pill: 999px;
+  --radius-sm: 0; --radius-md: 0; --radius-lg: 0;
+  --radius-xl: 0; --radius-pill: 0;
 
-  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
   --rail-w: 260px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-app: #101317; --bg-surface: #161a20; --bg-surface-2: #1b1f25;
-    --bg-surface-3: #262c34; --border: #2c323a; --border-subtle: #20242b;
-    --ink: #f4f2ee; --ink-muted: #a8a5a0; --ink-faint: #8b929c;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -72,7 +63,7 @@ body {
    would spend the whole beta not knowing they were in one. */
 .beta {
   font: 600 .5625rem/1 var(--font-sans); letter-spacing: .08em;
-  text-transform: uppercase; color: #fff; background: var(--accent);
+  text-transform: uppercase; color: var(--on-accent); background: var(--accent);
   padding: 3px 5px; border-radius: var(--radius-sm);
 }
 .rail.collapsed .beta { display: none; }
@@ -89,7 +80,7 @@ body {
 .rail-toggle:hover { color: var(--ink); background: var(--bg-surface-3); }
 .new-chat {
   margin: var(--s3) var(--s4); padding: var(--s2) var(--s3);
-  background: var(--accent); color: #fff; border: 0;
+  background: var(--accent); color: var(--on-accent); border: 0;
   border-radius: var(--radius-md); font: 500 .8125rem var(--font-sans);
   cursor: pointer; text-align: left;
 }
@@ -122,7 +113,7 @@ body {
   display: grid; place-items: center; background: var(--bg-surface-3);
   font: 600 .6875rem var(--font-sans); color: var(--ink-faint);
 }
-.convo.active .convo-glyph { background: var(--accent); color: #fff; }
+.convo.active .convo-glyph { background: var(--accent); color: var(--on-accent); }
 .convo-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .convo-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .convo-when { font-size: .625rem; line-height: .875rem; color: var(--ink-faint); }
@@ -186,7 +177,7 @@ body {
 .gutter-rail:hover { color: var(--ink); background: var(--bg-surface-2); }
 .gr-count {
   min-width: 20px; height: 20px; border-radius: var(--radius-pill);
-  background: var(--accent); color: #fff; display: grid; place-items: center;
+  background: var(--accent); color: var(--on-accent); display: grid; place-items: center;
   font: 600 .6875rem var(--font-sans);
 }
 /* Vertical, so the word reads down the tab instead of wrapping to nothing. */
@@ -245,19 +236,102 @@ body {
 /* ── Main ──────────────────────────────────────────────── */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .topbar {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--s3); padding: var(--s3) var(--s5);
+  position: relative;                     /* the model panel anchors to this */
+  display: flex; align-items: center;
+  gap: var(--s4); padding: 0 var(--s5); height: 52px;
   border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface);
 }
-.model-pick {
-  font: 400 .8125rem var(--font-sans); color: var(--ink-muted);
-  background: var(--bg-surface-2); border: 1px solid var(--border);
-  border-radius: var(--radius-md); padding: var(--s1) var(--s2);
+
+/* ── Model button + panel (design 4d) ──────────────────────
+   A button, not a <select>: the choice depends on numbers — what a model
+   costs against the memory free right now, and whether it can call tools at
+   all — that a native option list can only append to a string. */
+.model-btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 7px 13px; cursor: pointer;
+  background: var(--bg-elev); border: 1px solid var(--accent);
+  color: var(--ink); font: 400 12px var(--font-mono);
 }
-.status { font-size: .75rem; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; }
+.model-btn:hover { background: var(--bg-card); }
+.model-btn.warn { border-color: var(--warn-rule); }
+.model-btn .dot { width: 7px; height: 7px; }
+.mb-size { color: var(--ink-mute); font-size: 11px; }
+.mb-size.warn { color: var(--warn); }
+.mb-caret { color: var(--ink-mute); font-size: 11px; }
+
+.model-panel {
+  position: absolute; top: 46px; left: var(--s5); z-index: 40;
+  width: min(520px, calc(100vw - 2 * var(--s5)));
+  background: var(--bg); border: 1px solid var(--rule-hi);
+  box-shadow: var(--shadow-panel);
+}
+.model-panel[hidden] { display: none; }
+.mp-mem {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px; border-bottom: 1px solid var(--rule);
+}
+.mp-track { flex: 1; height: 5px; background: var(--bg-sel); position: relative; }
+.mp-track > i { position: absolute; inset: 0 auto 0 0; background: var(--rule-hi); display: block; }
+.mp-num { font: 400 11.5px var(--font-mono); color: var(--ink); }
+
+.mp-row {
+  width: 100%; display: flex; align-items: center; gap: 12px;
+  padding: 11px 18px; border: 0; border-bottom: 1px solid var(--rule);
+  background: none; color: inherit; text-align: left; cursor: pointer;
+}
+.mp-row:hover:not(:disabled) { background: var(--bg-card); }
+.mp-row.active { background: var(--bg-elev); }
+.mp-row:disabled { cursor: default; }
+.mp-row.dim .mp-tag, .mp-row.dim .mp-gb { color: var(--ink-mute); }
+.mp-mid { flex: 1; min-width: 0; }
+.mp-tag { font: 400 13.5px var(--font-mono); color: var(--ink); }
+.mp-sub { font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
+.mp-sub.warn { color: var(--warn); }
+.mp-right { text-align: right; flex-shrink: 0; }
+.mp-gb { font: 400 12px var(--font-mono); color: var(--ink-muted); }
+.mp-fit { font: 400 10px var(--font-mono); letter-spacing: .06em; }
+.mp-fit.ok { color: var(--ok); }
+.mp-fit.no { color: var(--warn); }
+.mp-none { padding: 14px 18px; font-size: 12.5px; color: var(--ink-mute); }
+.mp-foot { display: flex; align-items: center; gap: 14px; padding: 12px 18px; }
+.mp-foot a { font-size: 12.5px; color: var(--ink-muted); border-bottom: 1px solid var(--border); text-decoration: none; }
+.mp-foot a:hover { color: var(--ink); }
+.mp-note { margin-left: auto; font: 400 10px var(--font-mono); color: var(--ink-mute); letter-spacing: .06em; }
+
+.status { font-size: .75rem; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .status .led { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
-.status.ok .led { background: #0dbd8b; }
+.status.ok .led { background: var(--ok); }
 .status.down .led { background: var(--accent); }
+.settings-link {
+  font-size: .75rem; color: var(--ink-faint); text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+.settings-link:hover { color: var(--ink); }
+
+/* ── The model that cannot call tools (design 4f) ───────────
+   Rendered into the thread, where the answer would have appeared, because
+   that is where the damage happens. A dismissible banner would be scrolled
+   past, and the failure it describes — a fluent, confident, invented answer
+   about the user's own data — is the one failure that must not be. */
+.tool-guard {
+  display: flex; gap: 18px; align-items: flex-start;
+  max-width: 46rem; margin: var(--s5) auto; padding: 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--warn-rule); border-left: 2px solid var(--warn);
+}
+.tool-guard .dot { margin-top: 7px; }
+.tg-body { display: flex; flex-direction: column; gap: 13px; min-width: 0; }
+.tg-head { font-size: 1.05rem; line-height: 1.45; color: var(--ink); font-weight: 600; }
+.tg-prose { font-size: .84rem; line-height: 1.65; color: var(--ink-muted); }
+.tg-prose strong { color: var(--ink); font-weight: 600; }
+.tg-switch {
+  display: flex; flex-direction: column; gap: 9px;
+  border: 1px solid var(--rule); background: var(--bg); padding: 12px 14px;
+}
+.tg-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tg-foot { font-size: .78rem; color: var(--ink-mute); }
+.composer .hint.warn { color: var(--warn); }
+#input.held { opacity: .55; }
 
 .scroll { flex: 1; overflow-y: auto; }
 .thread { max-width: 46rem; margin: 0 auto; padding: var(--s6) var(--s5) var(--s8); }
@@ -268,7 +342,7 @@ body {
   display: grid; place-items: center; font-size: .6875rem; font-weight: 600;
   background: var(--bg-surface-3); color: var(--ink-muted);
 }
-.msg.user .avatar { background: var(--accent); color: #fff; }
+.msg.user .avatar { background: var(--accent); color: var(--on-accent); }
 .content { min-width: 0; flex: 1; }
 .bubble { min-width: 0; }
 .bubble p { margin: 0 0 var(--s3); white-space: pre-wrap; word-wrap: break-word; }
@@ -340,7 +414,7 @@ textarea {
 }
 .send {
   flex: 0 0 auto; width: 32px; height: 32px; border: 0; border-radius: var(--radius-pill);
-  background: var(--accent); color: #fff; cursor: pointer; font-size: .9rem;
+  background: var(--accent); color: var(--on-accent); cursor: pointer; font-size: .9rem;
 }
 .send:disabled { opacity: .4; cursor: default; }
 .hint { max-width: 46rem; margin: var(--s2) auto 0; font-size: .6875rem; color: var(--ink-faint); }
@@ -357,11 +431,11 @@ textarea {
   padding: 4px var(--s3); cursor: pointer; white-space: nowrap;
 }
 .web-arm:hover { color: var(--ink); border-color: var(--ink-faint); }
-.web-arm.armed { background: #e8a33d; border-color: #e8a33d; color: #1b1508; }
+.web-arm.armed { background: var(--warn); border-color: var(--warn); color: var(--bg); }
 .web-warn {
   max-width: 46rem; margin: 0 auto var(--s2);
   padding: var(--s2) var(--s3); border-radius: var(--radius-sm);
-  border-left: 3px solid #e8a33d; background: var(--bg-surface-3);
+  border-left: 3px solid var(--warn); background: var(--bg-surface-3);
   font-size: .75rem; line-height: 1.1rem; color: var(--ink-muted);
 }
 /* Marks the turn in the scrollback — the composer warning is gone the instant
@@ -370,8 +444,6 @@ textarea {
   max-width: 46rem; margin: 0 auto var(--s3);
   font-size: .6875rem; color: var(--ink-faint); text-align: center;
 }
-.conn.web .conn-dot { background: var(--ink-faint); }
-.conn.web.on .conn-dot { background: #e8a33d; }
 
 @media (max-width: 720px) {
   .rail { display: none; }
@@ -392,7 +464,7 @@ textarea {
 }
 .tool-chip:hover { color: var(--ink); border-color: var(--ink-faint); }
 .tool-chip[data-state="running"] { border-color: var(--accent); color: var(--ink); }
-.tool-chip[data-state="ok"]      { border-color: #0dbd8b; }
+.tool-chip[data-state="ok"]      { border-color: var(--ok); }
 .tool-chip[data-state="failed"]  { border-color: var(--accent); color: var(--accent); }
 
 /* Markdown */
@@ -448,114 +520,14 @@ textarea {
   font-size: .75rem; line-height: 1.15rem;
 }
 
-/* ── Connectors panel ────────────────────────
-   What REFUGIO is plugged into. The status pill opens it. */
+/* ── Status chip ────────────────────────────
+   The connectors sheet that lived here is gone; the settings page replaced
+   it. What remains is the chip that opens it. */
 .status { cursor: pointer; }
 .status:hover { color: var(--ink); }
-.status.warn .led { background: #e8a33d; }
+.status.warn .led { background: var(--warn); }
 
-.sheet {
-  position: fixed; inset: 0; z-index: 50;
-  background: color-mix(in srgb, #000 42%, transparent);
-  display: grid; place-items: start center; padding: 10vh var(--s4) var(--s4);
-}
-.sheet-card {
-  width: min(30rem, 100%); max-height: 74vh; display: flex; flex-direction: column;
-  background: var(--bg-surface); color: var(--ink);
-  border: 1px solid var(--border); border-radius: var(--radius-lg);
-  box-shadow: 0 18px 48px rgba(0,0,0,.28);
-}
-.sheet-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border-subtle);
-}
-.sheet-x {
-  border: 0; background: none; color: var(--ink-faint);
-  font-size: 1.25rem; line-height: 1; cursor: pointer; padding: 0 2px;
-}
-.sheet-x:hover { color: var(--accent); }
-.sheet-body { overflow-y: auto; padding: var(--s2) var(--s4) var(--s4); }
-
-.conn { padding: var(--s3) 0; border-bottom: 1px solid var(--border-subtle); }
-.conn:last-child { border-bottom: 0; }
-.conn-head { display: flex; align-items: center; gap: var(--s2); }
-.conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #0dbd8b; flex: 0 0 auto; }
-.conn.failed .conn-dot { background: var(--accent); }
-.conn.connecting .conn-dot { background: var(--ink-faint); }
-/* Running, but the account behind it is unreachable — its tools will
-   return nothing. Amber, because it is neither working nor broken. */
-.conn.degraded .conn-dot { background: #e8a33d; }
-.conn-name { font-weight: 500; }
-.conn-meta { margin-left: auto; font-size: .6875rem; color: var(--ink-faint); }
-
-/* Accounts are why a connector can be plural — two numbers, two things. */
-.conn-acct {
-  margin: var(--s1) 0 0 15px; font: 400 .75rem/1.1rem var(--font-mono);
-  color: var(--ink-muted);
-}
-.conn-acct.off { color: var(--accent); }
-/* Paired but not connected right now — a warning, not an error. */
-.conn-acct.idle { color: var(--ink-faint); }
-
-.conn-err {
-  margin: var(--s2) 0 0 15px; padding: var(--s2);
-  background: var(--bg-surface-3); border-radius: var(--radius-sm);
-  font: 400 .6875rem/1rem var(--font-mono); color: var(--ink-muted);
-  overflow-wrap: anywhere;
-}
-/* Scope options — all off by default, off always means narrower.
-   Checkbox on the left, then a COLUMN of label + hint. The hint was previously
-   a sibling of the label, so it competed for the same row and squeezed the
-   label into a stack of single words. */
-.conn-opt {
-  display: flex; align-items: flex-start; gap: var(--s2);
-  margin: var(--s2) 0 0 15px; font-size: .8125rem; cursor: pointer;
-}
-.conn-opt input {
-  accent-color: var(--accent); cursor: pointer;
-  margin: 0; flex: 0 0 auto; margin-top: 3px;   /* aligns with the first line */
-}
-.conn-opt-text { display: flex; flex-direction: column; min-width: 0; }
-.conn-opt-hint { font-size: .6875rem; line-height: 1rem; color: var(--ink-faint); }
-
-/* Fixing a connector, without a terminal. */
-.conn-blocked {
-  margin: var(--s2) 0 0 15px; font-size: .6875rem; color: var(--ink-muted);
-  overflow-wrap: anywhere;
-}
-.conn-actions { display: flex; gap: var(--s2); margin: var(--s3) 0 0 15px; }
-.conn-btn {
-  border: 1px solid var(--border); background: var(--bg-surface-2);
-  color: var(--ink); border-radius: var(--radius-md);
-  font: 500 .75rem var(--font-sans); padding: 5px var(--s3); cursor: pointer;
-}
-.conn-btn:hover:not(:disabled) { border-color: var(--ink-faint); }
-/* Why a connector is broken — stated before anything is clicked. */
-.conn-why {
-  margin: var(--s2) 0 0 15px; font-size: .75rem; line-height: 1.1rem;
-  color: var(--ink-muted);
-}
-
-/* Outcome of a fix. Must survive the panel redraw that follows one. */
-.conn-note {
-  margin: var(--s2) 0 0 15px; padding: var(--s2) var(--s3);
-  border-radius: var(--radius-sm); font-size: .75rem; line-height: 1.1rem;
-  border-left: 3px solid var(--ink-faint); background: var(--bg-surface-3);
-}
-.conn-note.good { border-left-color: #0dbd8b; }
-.conn-note.warn { border-left-color: #e8a33d; }
-.conn-note.bad  { border-left-color: var(--accent); }
-
-/* The fallback is a sentence, not a rival button. */
-.conn-next { margin: var(--s2) 0 0 15px; font-size: .75rem; color: var(--ink-faint); }
-.conn-next a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.conn-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.conn-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
-.conn-btn:disabled { opacity: .55; cursor: default; }
-
-.conn-empty { padding: var(--s4) 0; text-align: center; color: var(--ink-muted); }
-.conn-empty .conn-sub { font-size: .75rem; color: var(--ink-faint); }
 
 /* Send button becomes Stop while streaming */
 .send.stopping { background: var(--bg-surface-3); color: var(--ink); }
-.send.stopping:hover { background: var(--accent); color: #fff; }
+.send.stopping:hover { background: var(--accent); color: var(--on-accent); }

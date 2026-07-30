@@ -134,6 +134,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
+        // Settings is a page inside the chat window rather than a separate
+        // surface, but it needs its own way in. Connectors moved out of the
+        // installer's terminal prompts and onto that page, so "WhatsApp stopped
+        // working" has to be answerable from the menu bar — the only part of
+        // REFUGIO that is always on screen.
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+
         menu.addItem(.separator())
 
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
@@ -195,12 +204,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if NSEvent.modifierFlags.contains(.option) {
                 NSWorkspace.shared.open(appURL())
             } else {
-                chatWindow.show(url: appURL())
+                // navigate: true so this comes back from the settings page. It
+                // only reloads when the URL actually differs, so an already-open
+                // chat is left exactly as it was.
+                chatWindow.show(url: appURL(), navigate: true)
             }
         } else {
             // Start with the browser auto-opening when the stack is ready.
             startStack(openBrowser: true)
         }
+    }
+
+    /// Open the chat window on the settings page.
+    ///
+    /// Only the built-in chat UI has one — Open WebUI, the legacy surface, does
+    /// not. Rather than open a URL that 404s there, say so and offer the one
+    /// action that makes it available.
+    @objc private func openSettings() {
+        guard running, portOpen(8090) else {
+            let a = NSAlert()
+            a.messageText = running
+                ? "Settings needs REFUGIO's own chat window."
+                : "REFUGIO isn't running."
+            a.informativeText = running
+                ? "This copy is serving the legacy Open WebUI interface, which has no settings page. "
+                + "Re-run the installer to switch to REFUGIO's own window."
+                : "Start REFUGIO from this menu, then open Settings."
+            a.addButton(withTitle: "OK")
+            a.runModal()
+            return
+        }
+        chatWindow.show(url: URL(string: "http://127.0.0.1:8090/settings")!, navigate: true)
     }
 
     @objc private func toggleRun() {

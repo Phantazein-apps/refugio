@@ -34,7 +34,7 @@ Works on **macOS, Linux, and Windows**. No prerequisites — the installer handl
 
 > ## ⚠️ This is a beta
 >
-> **REFUGIO v2 is in beta.** The chat window, the connectors panel, web search and the
+> **REFUGIO v2 is in beta.** The chat window, the settings page, web search and the
 > native macOS window are all new and will have rough edges. Things will break and
 > change. [Tell us what breaks](https://github.com/Phantazein-apps/refugio/issues) —
 > that is what a beta is for.
@@ -117,7 +117,21 @@ On machines with comfortable RAM, REFUGIO **auto-starts on login**. On **low-RAM
 
 1. Open REFUGIO — the **menu-bar app** on macOS (or its Dock icon), the **tray icon** on Linux and Windows, or **http://127.0.0.1:8090** in any browser
 2. Start chatting — your local model is ready
-3. Click the **status pill** in the top right to see your connectors, fix a broken one, and choose how much each may read
+3. Open **Settings** to see your connectors, fix a broken one, choose how much each may read, switch or download models, and turn web search on
+
+### Settings
+
+Everything that used to be a terminal prompt is a page now: **http://127.0.0.1:8090/settings**, the link in the chat window's top bar, the status pill, or ⌘, from the menu-bar app.
+
+| Page | What it answers |
+|---|---|
+| **Connectors** | Which of your local programs are working, and what to do about the ones that aren't. Each connector states its condition once — ready, connecting, degraded, or failed. A failure names the thing that refused and what wasn't read, with the connector's own output quoted verbatim beside it; where REFUGIO can't explain the output it shows the quotation alone rather than inventing a cause. Scope options ("today's reminders only") appear only on connectors that work, because *off* must always mean narrower. |
+| **Models** | What's installed, what's selected, and what fits in the memory free right now. A model that can't call tools is marked as such — that failure is otherwise invisible, because the model answers fluently and simply never reads your data. Downloads run from here. |
+| **Web search** | The one thing in REFUGIO that leaves your machine. Off by default, and switching it on still doesn't start searching — each message has to be armed on its own, in the chat, with the warning shown at the time. |
+| **Appearance** | Text size and motion. There is no light theme: REFUGIO is dark only. |
+| **Data & reset** | How many conversations exist, where the database is on disk, and an erase that requires typing the word `delete`. Nothing is synced anywhere, so that file is the only copy. |
+
+If you pick a model that can't call tools, the chat holds the message rather than answering: it would reply from general knowledge and quietly invent the contents of your own data. It offers the installed models that can, and an explicit way through if you meant it.
 
 ## Local LLM engine
 

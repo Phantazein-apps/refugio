@@ -159,7 +159,7 @@ export class McpPool {
       .filter(([name]) => !only || only.includes(name));
 
     for (const [name, spec] of servers) {
-      this.servers.set(name, { name, tools: 0, ok: false, error: null, spec });
+      this.servers.set(name, { name, tools: 0, ok: false, error: null, output: "", spec });
     }
 
     await Promise.all(servers.map(([name, spec]) =>
@@ -193,7 +193,7 @@ export class McpPool {
     for (const key of [...this.byName.keys()]) {
       if (key.startsWith(prefix)) this.byName.delete(key);
     }
-    Object.assign(entry, { tools: 0, ok: false, error: null });
+    Object.assign(entry, { tools: 0, ok: false, error: null, output: "" });
 
     try {
       await this.#connectOne(name, entry.spec, timeoutMs);
@@ -258,13 +258,20 @@ export class McpPool {
       // attach late and drain whatever the child managed to say before dying.
       transport.stderr?.on("data", keepStderr);
       await new Promise((r) => setTimeout(r, 150));
+      // Keep the tail whole, not just the one line firstCause() picks. The
+      // settings page quotes it back verbatim, labelled as the connector's own
+      // words, because a translation we got wrong is worse than no translation
+      // — and the line that names the real cause is not always the line a
+      // regex would choose.
+      const entry = this.servers.get(name);
+      if (entry) entry.output = errTail;
       throw new Error(errTail ? `${e.message} — ${firstCause(errTail)}` : e.message);
     }
   }
 
   #register(name, client, tools) {
     const entry = this.servers.get(name);
-    if (entry) { entry.ok = true; entry.tools = tools.length; entry.error = null; }
+    if (entry) { entry.ok = true; entry.tools = tools.length; entry.error = null; entry.output = ""; }
 
     this.clients.set(name, client);
     for (const t of tools) {
@@ -307,7 +314,8 @@ export class McpPool {
       // configured") is a confident lie during the first ~15 seconds.
       const state = s.ok ? "ok" : s.error ? "failed" : "connecting";
       const row = { id: s.name, tools: s.tools, ok: s.ok, state, error: s.error,
-                    accounts: [], accountsUnknown: false, conflict: null };
+                    output: s.output || "", accounts: [], accountsUnknown: false,
+                    conflict: null };
       if (!s.ok) {
         if (state === "failed") row.conflict = await conflictingProcess(s.error, s.spec);
         return row;

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REFUGIO — Settings</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico">
+<link rel="stylesheet" href="phantazein.css">
+<link rel="stylesheet" href="settings.css">
+</head>
+<body>
+
+<!-- The strip is also the window's drag handle in the native app: the title
+     bar there is transparent and full-height content sits under it, so
+     without a deliberate grab surface there is nowhere to pick the window up.
+     -webkit-app-region has no effect in WKWebView, so this pairs with
+     isMovableByWindowBackground on the AppKit side. -->
+<header class="topstrip">
+  <a class="back" href="/" title="Back to chat">
+    <svg width="17" height="17" viewBox="0 0 512 512" aria-hidden="true">
+      <path d="M196 424 L120 424 L120 120 L392 120 L392 424 L316 424" fill="none"
+            stroke="currentColor" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+      <g stroke="#ff0018" stroke-width="40">
+        <line x1="176" y1="192" x2="236" y2="252"/><line x1="336" y1="192" x2="276" y2="252"/>
+        <line x1="176" y1="352" x2="236" y2="292"/><line x1="336" y1="352" x2="276" y2="292"/>
+      </g>
+    </svg>
+    <span class="wordmark">REFUGIO</span>
+  </a>
+  <span class="t-label strip-title">Settings</span>
+  <a class="back-link" href="/">← Back to chat</a>
+</header>
+
+<div class="settings">
+
+  <nav class="snav" aria-label="Settings sections">
+    <div class="t-label snav-head">Settings</div>
+    <button type="button" class="snav-item is-active" data-pane="connectors">Connectors</button>
+    <button type="button" class="snav-item" data-pane="models">Models</button>
+    <button type="button" class="snav-item" data-pane="web">Web search</button>
+    <button type="button" class="snav-item" data-pane="appearance">Appearance</button>
+    <button type="button" class="snav-item" data-pane="data">Data &amp; reset</button>
+    <div class="snav-foot t-mono">
+      REFUGIO <span id="version">—</span><br>36.71° N · 4.28° W
+    </div>
+  </nav>
+
+  <main class="spane" id="spane">
+
+    <!-- ── Connectors ───────────────────────────────────── -->
+    <section class="pane is-active" id="pane-connectors" aria-labelledby="h-connectors">
+      <div class="pane-head">
+        <div>
+          <h2 class="t-display" id="h-connectors">Connectors</h2>
+          <div class="pane-sub" id="connectors-sub">Reading what is running…</div>
+        </div>
+        <div class="counts" id="connector-counts"></div>
+      </div>
+      <div class="rows" id="connector-rows"></div>
+      <div class="pane-foot" id="connectors-foot"></div>
+    </section>
+
+    <!-- ── Models ───────────────────────────────────────── -->
+    <section class="pane" id="pane-models" aria-labelledby="h-models">
+      <div class="pane-head">
+        <div>
+          <h2 class="t-display" id="h-models">Models</h2>
+          <div class="pane-sub">What is running, what is installed, and what fits in the memory free right now.</div>
+        </div>
+      </div>
+
+      <div class="memcard" id="memcard"></div>
+      <div class="rows" id="model-rows"></div>
+
+      <div class="pane-foot">
+        <button class="btn" id="show-downloads" type="button">Download a model</button>
+        <span class="foot-note">Downloads run in the background. Closing this window cancels one in progress.</span>
+      </div>
+      <div class="downloads" id="downloads" hidden></div>
+    </section>
+
+    <!-- ── Web search ───────────────────────────────────── -->
+    <section class="pane" id="pane-web" aria-labelledby="h-web">
+      <div class="pane-head">
+        <div>
+          <h2 class="t-display" id="h-web">Web <span class="red">search</span></h2>
+          <div class="pane-sub">The one thing in REFUGIO that leaves this machine.</div>
+        </div>
+      </div>
+      <div id="web-body"></div>
+    </section>
+
+    <!-- ── Appearance ───────────────────────────────────── -->
+    <section class="pane" id="pane-appearance" aria-labelledby="h-appearance">
+      <div class="pane-head">
+        <div>
+          <h2 class="t-display" id="h-appearance">Appearance</h2>
+          <div class="pane-sub">Saved in this window, not on any server.</div>
+        </div>
+      </div>
+      <div id="appearance-body"></div>
+    </section>
+
+    <!-- ── Data & reset ─────────────────────────────────── -->
+    <section class="pane" id="pane-data" aria-labelledby="h-data">
+      <div class="pane-head">
+        <div>
+          <h2 class="t-display" id="h-data">Data &amp; <span class="red">reset</span></h2>
+          <div class="pane-sub">Everything REFUGIO knows is in one folder on this machine.</div>
+        </div>
+      </div>
+      <div id="data-body"></div>
+    </section>
+
+  </main>
+</div>
+
+<script type="module" src="settings.js"></script>
+</body>
+</html>

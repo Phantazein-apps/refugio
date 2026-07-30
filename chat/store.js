@@ -96,6 +96,32 @@ export function deleteConversation(id) {
   return info.changes > 0;
 }
 
+/** Delete every conversation, returning what was destroyed.
+ *
+ *  The count is read BEFORE the delete and returned, because the settings page
+ *  has to say what it is about to do ("delete 41 conversations") and then
+ *  confirm what it did. An unconfirmed wipe of the only copy of someone's chat
+ *  history is not a thing to be casual about — nothing here is synced anywhere,
+ *  so this is genuinely the last copy.
+ *
+ *  Pinned conversations are included. A pin marks importance, not immunity, and
+ *  a "delete everything" that quietly kept some of it would be the worse
+ *  surprise of the two. */
+export function deleteAllConversations() {
+  const { n } = db.prepare("SELECT COUNT(*) AS n FROM conversations").get();
+  // messages cascade via the foreign key declared on conversation_id.
+  db.prepare("DELETE FROM conversations").run();
+  return n;
+}
+
+/** How much history exists, for a settings page that must not guess. */
+export function historyStats() {
+  const { conversations } = db.prepare("SELECT COUNT(*) AS conversations FROM conversations").get();
+  const { messages } = db.prepare("SELECT COUNT(*) AS messages FROM messages").get();
+  const { oldest } = db.prepare("SELECT MIN(created_at) AS oldest FROM conversations").get();
+  return { conversations, messages, oldest: oldest || null };
+}
+
 export function setPinned(id, pinned) {
   db.prepare("UPDATE conversations SET pinned = ? WHERE id = ?")
     .run(pinned ? 1 : 0, id);
