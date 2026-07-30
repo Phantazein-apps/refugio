@@ -952,28 +952,36 @@ async function preflight(targetDir) {
   // the port check below — killing :8080 is futile while IBEX's KeepAlive respawns.
   cleanupLegacyIbex()
 
-  // Check if port 8080 is in use
+  // Is the port we are about to use already taken?
+  //
+  // This checked 8080 unconditionally — Open WebUI's port, which the default
+  // install no longer uses. So it offered to kill a process over a port that
+  // did not matter, while never checking 8090, the one that does. A question
+  // about the wrong port is worse than no question: it teaches people to say
+  // yes to killing processes the installer has no business touching.
+  const wantsOwuiPort = process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1"
+  const uiPort = wantsOwuiPort ? 8080 : parseInt(process.env.REFUGIO_CHAT_PORT || "8090", 10)
   try {
     const portCheck = isWin
-      ? runQuiet("netstat -ano | findstr :8080 | findstr LISTENING")
-      : runQuiet("lsof -iTCP:8080 -sTCP:LISTEN -t 2>/dev/null")
+      ? runQuiet(`netstat -ano | findstr :${uiPort} | findstr LISTENING`)
+      : runQuiet(`lsof -iTCP:${uiPort} -sTCP:LISTEN -t 2>/dev/null`)
     if (portCheck) {
-      warn("Port 8080 is already in use")
+      warn(`Port ${uiPort} is already in use`)
       if (!isWin) {
         try {
           const procInfo = runQuiet(`ps -p ${portCheck.split("\n")[0]} -o comm= 2>/dev/null`)
           console.log(`    ${C.dim}Process: ${procInfo} (PID ${portCheck.split("\n")[0]})${C.reset}`)
         } catch {}
       }
-      const killIt = await confirm("Kill the process using port 8080?", true)
+      const killIt = await confirm(`Kill the process using port ${uiPort}?`, true)
       if (killIt) {
         try {
           if (isWin) {
-            run("for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :8080 ^| findstr LISTENING') do taskkill /PID %a /F", { shell: true, stdio: "ignore" })
+            run(`for /f "tokens=5" %a in ('netstat -ano ^| findstr :${uiPort} ^| findstr LISTENING') do taskkill /PID %a /F`, { shell: true, stdio: "ignore" })
           } else {
-            run("lsof -iTCP:8080 -sTCP:LISTEN -t | xargs kill", { shell: true, stdio: "ignore" })
+            run(`lsof -iTCP:${uiPort} -sTCP:LISTEN -t | xargs kill`, { shell: true, stdio: "ignore" })
           }
-          ok("Freed port 8080")
+          ok(`Freed port ${uiPort}`)
         } catch {}
       } else {
         issues = true
