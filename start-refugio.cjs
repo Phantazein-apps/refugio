@@ -322,6 +322,43 @@ class Supervisor {
 
 // ── Main ────────────────────────────────────────────────────
 
+/**
+ * Put https://refugio in front of a port, if the certificate and Caddy exist.
+ *
+ * Extracted because this used to live INSIDE the Open WebUI branch — and on a
+ * v2 install Open WebUI is not installed, so that branch never runs and the
+ * supervisor never started Caddy at all. https://refugio then worked only for
+ * as long as the instance the INSTALLER started happened to survive: a reboot,
+ * a `caddy stop`, a crash, and it was gone with no way back, because
+ * `refugio restart` was not what had started it.
+ *
+ * Returns whether the domain is now serving, so callers can say so honestly
+ * rather than printing a URL that may not resolve.
+ */
+function startCaddy(port) {
+  if (isWin) return false
+  const certFile = path.join(REFUGIO_DIR, "certs", "refugio.pem")
+  const keyFile = path.join(REFUGIO_DIR, "certs", "refugio-key.pem")
+  const caddyFile = path.join(REFUGIO_DIR, "Caddyfile")
+  // launchd's PATH does not include /opt/homebrew/bin, so look in the places
+  // Caddy actually installs to before trusting the name alone.
+  const caddyBin = ["/opt/homebrew/bin/caddy", "/usr/local/bin/caddy", "/usr/bin/caddy"]
+    .find(p => fs.existsSync(p)) || (has("caddy") ? "caddy" : null)
+  if (!fs.existsSync(certFile) || !caddyBin) return false
+
+  // Rewritten every start: the port can change between runs (8090 for the chat
+  // window, 8080 for Open WebUI), and a stale Caddyfile proxies to whatever
+  // was serving last time.
+  fs.writeFileSync(caddyFile, `https://refugio {\n    tls ${certFile} ${keyFile}\n    reverse_proxy localhost:${port}\n}\n`)
+  try {
+    try { execSync(`"${caddyBin}" stop`, { stdio: "ignore" }) } catch {}
+    execSync(`"${caddyBin}" start --config "${caddyFile}"`, { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function main() {
   const args = new Set(process.argv.slice(2))
   const noBrowser = args.has("--no-browser")
@@ -588,6 +625,13 @@ ${C.bold}============================================================
   const useThings = os.platform() === "darwin" && env.REFUGIO_THINGS === "1" && fs.existsSync(thingsJs)
   if (useThings) ok("things (Things 3) → via MCPO (stdio)")
 
+  // Apple Notes. In-repo rather than an npm dependency, so it ships with the
+  // checkout and cannot be missing. No "is it installed?" check either —
+  // unlike Things 3, Notes.app is part of macOS.
+  const notesJs = path.join(REFUGIO_DIR, "servers", "notes.js")
+  const useNotes = os.platform() === "darwin" && env.REFUGIO_NOTES === "1" && fs.existsSync(notesJs)
+  if (useNotes) ok("notes (Apple Notes) → via MCPO (stdio)")
+
   // ── Generate MCPO config and start proxy ────────────────────
   const MCPO_PORT = 8010
   const mcpoBin = isWin
@@ -650,6 +694,9 @@ ${C.bold}============================================================
     if (useThings) {
       mcpoConfig.mcpServers["things"] = { command: nodeBin, args: [thingsJs] }
     }
+    if (useNotes) {
+      mcpoConfig.mcpServers["notes"] = { command: nodeBin, args: [notesJs] }
+    }
 
     for (const s of activeMcpServers) {
       mcpoConfig.mcpServers[s.server] = {
@@ -704,6 +751,7 @@ ${C.bold}============================================================
     if (useEpistole) allServers.push("email")
     if (useReminders) allServers.push("reminders")
     if (useThings) allServers.push("things")
+    if (useNotes) allServers.push("notes")
     allServers.push(...activeMcpServers.map(s => s.server))
     if (useMemPalace) allServers.push("memory")
 
@@ -826,22 +874,9 @@ ${C.bold}============================================================
 
     // ── Start Caddy ─────────────────────────────────────────────
     let refugioUrl = isWin ? `http://127.0.0.1:${PORT}` : `http://refugio.localhost:${PORT}`
-    const certFile = path.join(REFUGIO_DIR, "certs", "refugio.pem")
-    const keyFile = path.join(REFUGIO_DIR, "certs", "refugio-key.pem")
-    const caddyFile = path.join(REFUGIO_DIR, "Caddyfile")
-
-    // Find caddy binary — launchd PATH doesn't include /opt/homebrew/bin
-    const caddyBin = ["/opt/homebrew/bin/caddy", "/usr/local/bin/caddy", "/usr/bin/caddy"]
-      .find(p => fs.existsSync(p)) || (has("caddy") ? "caddy" : null)
-
-    if (fs.existsSync(certFile) && caddyBin) {
-      fs.writeFileSync(caddyFile, `https://refugio {\n    tls ${certFile} ${keyFile}\n    reverse_proxy localhost:${PORT}\n}\n`)
-      try {
-        try { execSync(`"${caddyBin}" stop`, { stdio: "ignore" }) } catch {}
-        execSync(`"${caddyBin}" start --config "${caddyFile}"`, { stdio: "ignore" })
-        ok("https://refugio → localhost:" + PORT)
-        refugioUrl = "https://refugio"
-      } catch {}
+    if (startCaddy(PORT)) {
+      ok("https://refugio → localhost:" + PORT)
+      refugioUrl = "https://refugio"
     }
 
     // ── Wait for Open WebUI ─────────────────────────────────────
@@ -933,6 +968,20 @@ window.location.href = '/';
     console.log(`    ${C.dim}(It needs 'uv' — if the installer skipped Open WebUI, that's usually why.)${C.reset}`)
   } else {
     uiState = "skipped"
+  }
+
+  // ── https://refugio, on whichever surface is actually serving ──
+  //
+  // The Open WebUI branch above starts Caddy for itself. This is the other
+  // path — the default one — where OWUI is not installed at all, so nothing
+  // had started it. The port is read back off whichever URL won rather than
+  // assumed, so the domain follows the surface instead of a constant.
+  if (uiUrl && !uiUrl.startsWith("https://refugio")) {
+    const m = /:(\d+)/.exec(uiUrl)
+    if (m && startCaddy(parseInt(m[1], 10))) {
+      ok(`https://refugio → localhost:${m[1]}`)
+      uiUrl = "https://refugio"
+    }
   }
 
   // Lead with the one thing the user actually needs: where to go, or why
