@@ -2,6 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- Keys matched against two menu-bar apps that work on the same Mac
+       (SmackMyMacUp, ItsGOATtime) after this one would not appear at all.
+       Individually they look cosmetic; together they are the difference
+       between a bundle macOS treats as an app and one it does not. The icon
+       matters most: System Settings ▸ Control Center lists menu bar apps BY
+       THEIR ICON, and this bundle had none. -->
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
+  <key>NSSupportsAutomaticTermination</key><true/>
+  <key>NSSupportsSuddenTermination</key><false/>
   <key>CFBundleName</key><string>REFUGIO</string>
   <key>CFBundleDisplayName</key><string>REFUGIO</string>
   <!-- macOS 26 keeps a per-app allow-list of menu bar icons, keyed by BUNDLE ID,

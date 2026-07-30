@@ -36,9 +36,38 @@ if [ -n "${REFUGIO_BUNDLE_ID:-}" ]; then
   echo "  using bundle id $REFUGIO_BUNDLE_ID"
 fi
 
-# Ad-hoc sign: enough for a local menu-bar agent + SMAppService login item.
+# App icon. Built here from REFUGIO's existing artwork rather than checked in,
+# so there is one source of truth for the logo.
+#
+# This is not decoration. System Settings ▸ Control Center lists menu bar apps
+# by their icon, and two menu-bar apps that work on the same machine
+# (SmackMyMacUp, ItsGOATtime) both ship one where this bundle shipped none.
+ICON_SRC="$(cd "$(dirname "$0")/.." && pwd)/branding/web-app-manifest-512x512.png"
+if [ -f "$ICON_SRC" ] && command -v iconutil >/dev/null 2>&1; then
+  echo "▸ Building app icon…"
+  ICONSET="$(mktemp -d)/AppIcon.iconset"
+  mkdir -p "$ICONSET"
+  for sz in 16 32 64 128 256 512; do
+    sips -z $sz $sz "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null 2>&1
+    sips -z $((sz*2)) $((sz*2)) "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null \
+    && echo "  icon built" || echo "  icon build failed — continuing without one"
+  rm -rf "$(dirname "$ICONSET")"
+fi
+
+# PkgInfo — the classic four-plus-four type/creator stamp. Both working apps
+# write one; this bundle did not.
+printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+# Ad-hoc sign, --deep so the nested binary and resources are covered too.
+# The failure was also being swallowed: `|| true` after a silenced codesign
+# meant an unsigned bundle looked exactly like a signed one.
 echo "▸ Signing (ad-hoc)…"
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+if ! codesign --force --deep --sign - "$APP" 2>/tmp/refugio-codesign.log; then
+  echo "  ⚠ codesign failed — the app may not be treated as a real app:"
+  sed 's/^/    /' /tmp/refugio-codesign.log
+fi
 
 DEST="/Applications/REFUGIO.app"
 echo "▸ Installing to $DEST…"
