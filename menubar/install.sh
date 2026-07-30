@@ -20,6 +20,17 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 cd "$HERE"
 
+# --check: build, assemble and sign, then stop. Writes nothing to
+# /Applications, launches nothing.
+#
+# This exists so CI can run the REAL script rather than a paraphrase of it.
+# Every failure this script has had was in a step BEFORE the copy — a path
+# resolved against the wrong working directory, a cosmetic step aborting the
+# whole run under `set -e` — and all of them are reachable in --check mode.
+# A CI job that only ran `swift build` would have caught none of them.
+CHECK=0
+if [ "${1:-}" = "--check" ]; then CHECK=1; fi
+
 if ! command -v swift >/dev/null 2>&1; then
   echo "✗ Swift toolchain not found. Install it with: xcode-select --install" >&2
   exit 1
@@ -122,6 +133,13 @@ echo "▸ Signing (ad-hoc)…"
 if ! codesign --force --deep --sign - "$APP" 2>/tmp/refugio-codesign.log; then
   echo "  ⚠ codesign failed — the app may not be treated as a real app:"
   sed 's/^/    /' /tmp/refugio-codesign.log
+fi
+
+if [ "$CHECK" -eq 1 ]; then
+  echo
+  echo "✓ Build, assembly and signing all succeeded."
+  echo "  --check: nothing was installed to /Applications and nothing launched."
+  exit 0
 fi
 
 # DEST is set at the top, beside the build-failure message that reports it.

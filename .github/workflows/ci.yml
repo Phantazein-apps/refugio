@@ -1,0 +1,134 @@
+# REFUGIO CI.
+#
+# This repository had no CI at all, and the cost was concrete: Swift changes
+# were written, reviewed and shipped without ever being compiled, because the
+# environment they were written in has no Swift toolchain. Three separate user
+# reports — a menu-bar icon that would not change, a window that would not
+# drag, a wordmark hidden under the traffic lights — were one un-built binary.
+#
+# So the jobs here are chosen to catch the things that actually went wrong,
+# not the things that are easy to check:
+#
+#   macos    Does the menu-bar app COMPILE, and does install.sh get all the
+#            way to a signed bundle? Both failures this month were in that
+#            script rather than in the Swift, so it runs the real script in
+#            --check mode instead of a paraphrase of it.
+#   node     The unit tests, plus a syntax pass over the browser modules,
+#            which are never imported by the tests and so are never parsed.
+#   shell    Syntax and shellcheck over every script a user runs.
+#
+# No `npm ci` anywhere: the tests import only node: builtins and files in this
+# repo. That keeps CI fast and immune to a registry outage, and it is worth
+# preserving — if a test ever needs a dependency, prefer moving the logic
+# behind a seam it can test without one.
+
+name: CI
+
+on:
+  push:
+    branches: [main, "v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A second push supersedes the first; nobody needs the older answer.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Tests + JS syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # node:sqlite, which chat/store.js uses instead of a native module, needs
+      # 22.5+. Pinning the major keeps CI honest about the floor the installer
+      # actually requires.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Unit tests
+        run: node --test "test/*.test.js"
+
+      # The browser modules are not imported by any test — they run in a page,
+      # not in Node — so nothing else would notice a syntax error in them until
+      # the window opened blank.
+      - name: Parse the browser modules
+        run: |
+          for f in chat/static/*.js; do
+            node --check "$f" || exit 1
+            echo "  ok  $f"
+          done
+
+      - name: Parse the Node entry points
+        run: |
+          for f in chat/*.js scripts/*.cjs install-node.cjs start-refugio.cjs; do
+            [ -f "$f" ] || continue
+            node --check "$f" || exit 1
+            echo "  ok  $f"
+          done
+
+  macos:
+    name: Menu-bar app builds
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      # Invoked from the REPO ROOT, deliberately. That is the form the README
+      # gives, and it is the form that broke: the script used $0 to find the
+      # repo root after it had already cd'd, so `./menubar/..` resolved to
+      # menubar/menubar/.. and the run died after a clean build but before
+      # installing anything. Running it the other way would not have caught it.
+      - name: Build, assemble and sign (no install)
+        run: ./menubar/install.sh --check
+
+      # And from inside menubar/, because both forms have to keep working.
+      - name: Same, invoked from menubar/
+        run: cd menubar && ./install.sh --check
+
+      - name: The bundle has what macOS needs
+        run: |
+          APP=menubar/REFUGIO.app
+          test -x "$APP/Contents/MacOS/RefugioBar" || { echo "no binary"; exit 1; }
+          test -f "$APP/Contents/Info.plist"       || { echo "no Info.plist"; exit 1; }
+          test -f "$APP/Contents/PkgInfo"          || { echo "no PkgInfo"; exit 1; }
+          # --deep, but not --strict. These bundles are ad-hoc signed (`--sign -`)
+          # because there is no Developer ID yet, and --strict applies checks an
+          # ad-hoc signature is not meant to satisfy. A red build over that would
+          # be the CI equivalent of the message nobody read.
+          codesign --verify --deep "$APP" || { echo "signature invalid"; exit 1; }
+          echo "  ok  bundle verified"
+
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax
+        run: |
+          for f in install-refugio uninstall-refugio menubar/install.sh \
+                   menubar/doctor.sh tray/refugio-tray.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f" || exit 1
+            echo "  ok  $f"
+          done
+
+      # Advisory, not gating. shellcheck is genuinely useful on scripts this
+      # size, but it also has opinions this codebase has deliberately not
+      # taken, and a CI job that cries wolf gets ignored — which is how the
+      # build failure everyone was staring at went unread for three rounds.
+      - name: shellcheck (advisory)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning install-refugio uninstall-refugio \
+            menubar/install.sh menubar/doctor.sh tray/refugio-tray.sh || true
