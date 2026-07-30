@@ -16,7 +16,7 @@ import { join, dirname, extname, normalize } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import { createRequire } from "module";
-import { homedir } from "os";
+import { homedir, totalmem } from "os";
 
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import * as store from "./store.js";
@@ -124,14 +124,21 @@ function describeModels(names, activeModel) {
     // The running model demonstrably fits — it is running.
     const isActive = !!activeModel && name === activeModel;
     const fits = isActive ? true : (needGb && budget != null ? needGb <= budget : null);
+
+    // "Too big right now" and "too big for this Mac" are different problems
+    // with different answers — close some apps, versus never going to work —
+    // and the old label collapsed them into one number of gigabytes to free.
+    // Telling someone to free 2.6 GB is not an instruction most people can
+    // act on: on macOS you do not free memory by hand, the system manages it.
+    const everFits = needGb ? needGb <= (totalmem() / 1024 ** 3) - 1.5 : null;
+
     return {
       name,
       needGb: needGb || null,                    // null = not on the ladder, unknown
       fits,
-      // How much more RAM to free before this model is usable. "Won't fit" says
-      // a model is out of reach; this says what to do about it, which is the
-      // difference between a warning and an instruction. Open WebUI gave the
-      // number and it was the useful half.
+      everFits,
+      // Kept for the tooltip, where a number is useful to someone who wants
+      // one. It is no longer the label.
       freeUpGb: fits === false ? Math.max(0.1, Math.round((needGb - budget) * 10) / 10) : null,
       tools: modelSupportsTools(name),
     };

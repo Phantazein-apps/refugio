@@ -137,23 +137,31 @@ async function refreshStatus() {
     for (const m of s.models || []) {
       const o = document.createElement("option");
       o.value = m.name;
-      // Name · what it needs · what to do. "Won't fit" alone leaves someone
-      // staring at a model they can't use with no idea how close they are.
+      // Say whether you can use it, not how many gigabytes to conjure.
+      // "free 2.6 GB more" was a quantity with no action attached — on macOS
+      // you do not free memory by hand — and it read as a sum with the size
+      // beside it. These two cases need opposite responses, so they are
+      // worded as the two situations they are.
       const parts = [];
       if (m.needGb) parts.push(`${m.needGb} GB`);
-      if (m.fits === false) {
-        // "2.6 GB · free 2.6 GB more" read as a sum, as though 5.2 GB were
-        // needed. The shortfall says the same thing without the arithmetic.
-        parts.push(m.freeUpGb ? `\u26a0 ${m.freeUpGb} GB short` : "\u26a0 won't fit");
-      }
+      if (m.everFits === false) parts.push("\u26a0 too big for this Mac");
+      else if (m.fits === false) parts.push("\u26a0 too big right now");
       o.textContent = m.name + (parts.length ? `  \u00b7 ${parts.join("  \u00b7 ")}` : "");
       if (m.fits === false) o.dataset.tight = "1";
+      // The number lives here, for whoever wants it.
+      if (m.fits === false) {
+        o.title = m.everFits === false
+          ? `${m.name} needs ${m.needGb} GB — more than this Mac has.`
+          : `${m.name} needs ${m.freeUpGb} GB more than is free. Quit a few apps, then reopen this list.`;
+      }
       if (m.name === s.model) o.selected = true;
       els.model.appendChild(o);
     }
     if (!s.models?.length) els.model.innerHTML = "<option>no models</option>";
+    // Explains the labels rather than restating a number nobody asked for.
     els.model.title = s.freeGb != null
-      ? `${s.freeGb} GB RAM free right now`
+      ? `${s.freeGb} GB of memory free right now. A model marked "too big right ` +
+        `now" would fit if you quit some other apps.`
       : "";
     state.model = s.model;
     applyWebSetting(s.web);
