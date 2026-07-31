@@ -160,6 +160,13 @@ body {
 .prose { font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); max-width: 640px; }
 .prose strong { color: var(--ink); font-weight: 600; }
 .aside { font-size: 12.5px; color: var(--ink-mute); }
+/* A control an administrator has taken away. The caution colour, not the
+   failure one: nothing is broken here, someone else decided. */
+.aside.managed {
+  color: var(--warn); margin-top: 6px;
+  border-left: 3px solid var(--warn-rule); padding-left: 8px;
+}
+.check input:disabled ~ .box { opacity: .45; }
 .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 
 /* ── Accounts ──────────────────────────────────────────── */

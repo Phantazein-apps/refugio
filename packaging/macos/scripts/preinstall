@@ -1,0 +1,37 @@
+#!/bin/bash
+# Runs as root, before the payload lands.
+#
+# Its only job is to make sure nothing is holding the files we are about to
+# replace. An upgrade over a running REFUGIO leaves a supervisor pointing at a
+# node_modules that no longer exists, and the symptom — connectors that fail
+# with module-not-found — looks nothing like the cause.
+#
+# Everything here is best-effort. A preinstall that exits non-zero aborts the
+# whole installation, so a machine where nothing was running yet must not fail
+# because there was nothing to stop.
+
+LOG="/var/log/refugio-install.log"
+say() { echo "$(date '+%Y-%m-%d %H:%M:%S') preinstall: $*" >> "$LOG"; }
+
+say "starting"
+
+# Stop the agent for every logged-in user. `launchctl bootout` needs the right
+# GUI domain, and there can be more than one — fast user switching means two
+# people can both have REFUGIO running on the same Mac.
+for uid in $(ps -axo uid,args | awk '/[l]oginwindow.app/ {print $1}' | sort -u); do
+  [ "$uid" -lt 500 ] && continue      # system accounts, not people
+  launchctl bootout "gui/$uid/com.phantazein.refugio.agent" 2>/dev/null
+  launchctl bootout "gui/$uid/com.phantazein.refugio" 2>/dev/null
+  say "stopped agent for uid $uid"
+done
+
+# The supervisor is a plain node process, not a service, so it survives the
+# agent going away. Match on the script path rather than on "node", which would
+# take out every Node process on a developer's machine.
+pkill -f "/usr/local/refugio/start-refugio.cjs" 2>/dev/null && say "stopped supervisor"
+
+# Quit the menu-bar app so /Applications/REFUGIO.app can be replaced. Killing
+# it is fine — it holds no state of its own; everything lives in the supervisor.
+pkill -x "REFUGIO" 2>/dev/null && say "quit the menu-bar app"
+
+exit 0

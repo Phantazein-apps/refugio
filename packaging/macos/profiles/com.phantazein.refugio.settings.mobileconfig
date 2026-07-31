@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Managed settings for REFUGIO.
+
+  Pushing this makes macOS write /Library/Managed Preferences/
+  com.phantazein.refugio.plist, which is where chat/managed.js reads from. A
+  setting here is DISABLED in Settings, not merely overwritten — a switch that
+  accepts a click and reverts on the next poll is read as a bug in REFUGIO
+  rather than as a decision by IT.
+
+  Every key is optional. Delete what you do not want to control and the user
+  keeps that choice.
+
+  The keys are deliberately one-way. `webSearch` can be set to "off", never to
+  "on": arming a search is a per-message decision made by the person at the
+  keyboard, with a warning shown at the time, and that promise is not an
+  administrator's to override. The most a policy can do anywhere here is take
+  a capability away.
+
+  Verify it landed:  refugio policy
+-->
+<plist version="1.0">
+<dict>
+  <key>PayloadDisplayName</key>
+  <string>REFUGIO — Settings</string>
+  <key>PayloadIdentifier</key>
+  <string>com.phantazein.refugio.settings</string>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>7C4D2E90-0000-4000-A000-REPLACEME0001</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadScope</key>
+  <string>System</string>
+
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>com.apple.ManagedClient.preferences</string>
+      <key>PayloadIdentifier</key>
+      <string>com.phantazein.refugio.settings.prefs</string>
+      <key>PayloadUUID</key>
+      <string>7C4D2E90-0000-4000-A000-REPLACEME0002</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+
+      <key>PayloadContent</key>
+      <dict>
+        <key>com.phantazein.refugio</key>
+        <dict>
+          <key>Forced</key>
+          <array>
+            <dict>
+              <key>mcx_preference_settings</key>
+              <dict>
+
+                <!-- "off"  — the user cannot switch web search on at all.
+                     "user" — the user decides (the default; omit the key). -->
+                <key>webSearch</key>
+                <string>off</string>
+
+                <!-- "off" stops REFUGIO contacting github.com entirely,
+                     including the manual "Check now" button. Set this when
+                     updates arrive through MDM, which on a managed fleet they
+                     should — otherwise you have users being told to run
+                     `git pull` on a machine they do not administer. -->
+                <key>updateChecks</key>
+                <string>off</string>
+
+                <!-- "off" removes the paperclip. The control disappears
+                     rather than refusing when pressed: a button that is
+                     present and rejects reads as broken, a button that is
+                     absent reads as a product that does not do that. -->
+                <key>attachments</key>
+                <string>user</string>
+
+                <!-- Only these connectors are STARTED. Anything else in the
+                     config is never launched — not hidden, not launched. A
+                     hidden connector still holds an open session to whatever
+                     it connects to.
+
+                     Omit the key entirely to allow all of them. -->
+                <key>allowedConnectors</key>
+                <array>
+                  <string>notes</string>
+                  <string>reminders</string>
+                </array>
+
+              </dict>
+            </dict>
+          </array>
+        </dict>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

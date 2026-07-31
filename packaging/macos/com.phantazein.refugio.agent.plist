@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Per-user login agent.
+
+  In /Library/LaunchAgents, not ~/Library/LaunchAgents: a package installed by
+  MDM runs as root and cannot write into a home directory that may not exist
+  yet. An agent here is loaded for EVERY user at login, which is exactly the
+  per-machine-install / per-user-runtime split this whole package is built
+  around.
+
+  A LaunchAgent and not a LaunchDaemon, and that is not a detail. REFUGIO reads
+  the user's Notes, Reminders and Messages; those live in the user's session
+  and behind the user's TCC consent. A daemon runs as root outside any session,
+  where it can reach none of them — and where "REFUGIO can read my messages"
+  would mean something very different and much worse.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.phantazein.refugio.agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/refugio/bin/refugio-user-setup</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart if it dies, but not if it dies instantly and repeatedly: a
+       supervisor that cannot start (no Node, broken payload) would otherwise
+       spin forever, and the throttle turns that into ten seconds between
+       attempts rather than a hot loop. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- The bundled runtimes first, then the usual places. An admin's Homebrew
+       Node must not be able to shadow the one that was tested with. Both
+       architectures are on the path; only one of the two directories exists
+       as a working binary for this Mac, and the wrong one simply never
+       resolves. refugio-user-setup picks explicitly rather than relying on
+       this ordering. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/refugio/runtime/darwin-arm64/bin:/usr/local/refugio/runtime/darwin-x64/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>/dev/null</string>
+</dict>
+</plist>

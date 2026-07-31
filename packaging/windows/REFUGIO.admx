@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Group Policy template for REFUGIO.
+
+  Install by copying to:
+      %SystemRoot%\PolicyDefinitions\REFUGIO.admx
+      %SystemRoot%\PolicyDefinitions\en-US\REFUGIO.adml
+  or, for a domain, into the central store (\\domain\SYSVOL\domain\Policies\
+  PolicyDefinitions\). Intune ingests the same file under
+  Devices ▸ Configuration ▸ Import ADMX.
+
+  Everything here writes to SOFTWARE\Policies\Phantazein\REFUGIO, which is what
+  chat/managed.js reads. The keys are kept identical to POLICY_KEYS in that
+  file on purpose: a policy an administrator can set in Group Policy and which
+  REFUGIO then ignores is worse than no policy at all, because it is invisible.
+
+  Note what is deliberately absent: there is no setting that turns web search
+  ON for everyone. Arming a search is a per-message decision the user makes
+  with a warning in front of them, and that is not an administrator's to make
+  on their behalf. Policy here can only ever take a capability away.
+-->
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="refugio" namespace="Phantazein.Policies.REFUGIO" />
+    <using prefix="windows" namespace="Microsoft.Policies.Windows" />
+  </policyNamespaces>
+
+  <resources minRequiredRevision="1.0" />
+
+  <categories>
+    <category name="REFUGIO" displayName="$(string.REFUGIO)" />
+  </categories>
+
+  <policies>
+
+    <policy name="DisableWebSearch" class="Machine"
+            displayName="$(string.DisableWebSearch)"
+            explainText="$(string.DisableWebSearch_Help)"
+            key="SOFTWARE\Policies\Phantazein\REFUGIO"
+            valueName="webSearch">
+      <parentCategory ref="REFUGIO" />
+      <supportedOn ref="windows:SUPPORTED_Windows10" />
+      <enabledValue><string>off</string></enabledValue>
+      <disabledValue><string>user</string></disabledValue>
+    </policy>
+
+    <policy name="DisableUpdateChecks" class="Machine"
+            displayName="$(string.DisableUpdateChecks)"
+            explainText="$(string.DisableUpdateChecks_Help)"
+            key="SOFTWARE\Policies\Phantazein\REFUGIO"
+            valueName="updateChecks">
+      <parentCategory ref="REFUGIO" />
+      <supportedOn ref="windows:SUPPORTED_Windows10" />
+      <enabledValue><string>off</string></enabledValue>
+      <disabledValue><string>user</string></disabledValue>
+    </policy>
+
+    <policy name="DisableAttachments" class="Machine"
+            displayName="$(string.DisableAttachments)"
+            explainText="$(string.DisableAttachments_Help)"
+            key="SOFTWARE\Policies\Phantazein\REFUGIO"
+            valueName="attachments">
+      <parentCategory ref="REFUGIO" />
+      <supportedOn ref="windows:SUPPORTED_Windows10" />
+      <enabledValue><string>off</string></enabledValue>
+      <disabledValue><string>user</string></disabledValue>
+    </policy>
+
+    <policy name="AllowedConnectors" class="Machine"
+            displayName="$(string.AllowedConnectors)"
+            explainText="$(string.AllowedConnectors_Help)"
+            key="SOFTWARE\Policies\Phantazein\REFUGIO"
+            presentation="$(presentation.AllowedConnectors)">
+      <parentCategory ref="REFUGIO" />
+      <supportedOn ref="windows:SUPPORTED_Windows10" />
+      <elements>
+        <text id="AllowedConnectorsText" valueName="allowedConnectors" required="true" />
+      </elements>
+    </policy>
+
+  </policies>
+</policyDefinitions>

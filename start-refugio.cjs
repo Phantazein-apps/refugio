@@ -16,6 +16,40 @@ const isWin = os.platform() === "win32"
 const home = os.homedir()
 const REFUGIO_DIR = path.resolve(__dirname)
 
+/**
+ * Is this a packaged install — laid down by the .pkg or .msi rather than cloned
+ * by install-node.cjs?
+ *
+ * Decided by asking whether we can write next to ourselves, which is the thing
+ * that actually matters, rather than a flag someone has to remember to set. A
+ * git checkout in ~/refugio is writable; /usr/local/refugio and
+ * C:\Program Files\REFUGIO are not.
+ *
+ * It changes two things, and both were outright bugs before this existed:
+ *
+ *   1. mcpo-config.json is rewritten on every launch. Into a root-owned
+ *      directory that throws EACCES, the supervisor dies, the login agent's
+ *      KeepAlive restarts it, and the machine sits in a crash loop that looks
+ *      from outside like a package which installed fine and does nothing.
+ *   2. The chat database lived in REFUGIO_DIR/data. On a shared Mac that is
+ *      one database for everyone who logs in — not a permissions inconvenience
+ *      but one person reading another person's conversations.
+ *
+ * Existing installs are deliberately unaffected: their directory IS writable,
+ * so they keep REFUGIO_DIR/data and their history stays exactly where it is.
+ * Only a packaged install — which is new, and has nothing to migrate — goes
+ * per-user.
+ */
+const PACKAGED = (() => {
+  try { fs.accessSync(REFUGIO_DIR, fs.constants.W_OK); return false } catch { return true }
+})()
+
+/** Where mutable state goes: per-user under a packaged install, alongside the
+ *  code for a git checkout, which is where it has always been. */
+const STATE_DIR = PACKAGED ? path.join(home, ".refugio-data") : REFUGIO_DIR
+const CHAT_DATA_DIR = PACKAGED ? STATE_DIR : path.join(REFUGIO_DIR, "data")
+if (PACKAGED) { try { fs.mkdirSync(STATE_DIR, { recursive: true }) } catch {} }
+
 const C = process.stdout.isTTY ? {
   green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m",
   bold: "\x1b[1m", dim: "\x1b[2m", reset: "\x1b[0m"
@@ -715,7 +749,9 @@ ${C.bold}============================================================
       }
     }
 
-    const mcpoConfigPath = path.join(REFUGIO_DIR, "mcpo-config.json")
+    // STATE_DIR, not REFUGIO_DIR: this file is rewritten on every launch, and
+    // a packaged install cannot write beside its own code.
+    const mcpoConfigPath = path.join(STATE_DIR, "mcpo-config.json")
 
     // Never replace a working declaration with an empty one.
     //
@@ -805,7 +841,15 @@ ${C.bold}============================================================
         chatStdio = ["ignore", chatLog, chatLog]
       } catch {}
       supervisor.start("chat", nodeBin, ["--no-warnings", chatEntry, "--port", String(CHAT_PORT)], {
-        env: { ...mergedEnv, REFUGIO_DATA_DIR: path.join(REFUGIO_DIR, "data") },
+        env: {
+          ...mergedEnv,
+          REFUGIO_DATA_DIR: CHAT_DATA_DIR,
+          // Told explicitly rather than left to the chat server's own default.
+          // Its default resolves relative to its own location, which is the
+          // install directory — the one place a packaged install must not
+          // write, and the one place the supervisor has just moved away from.
+          REFUGIO_MCPO_CONFIG: path.join(STATE_DIR, "mcpo-config.json"),
+        },
         stdio: chatStdio
       })
       chatUrl = `http://127.0.0.1:${CHAT_PORT}`

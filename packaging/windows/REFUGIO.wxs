@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  REFUGIO.msi — WiX v4/v5 source.
+
+  Shaped by the same constraint as the .pkg: an MSI deployed by Intune or SCCM
+  runs as SYSTEM, silently, possibly before anyone has logged in. So this is a
+  strictly per-machine install, and everything per-user happens later, at each
+  user's first logon, through Active Setup.
+
+  Active Setup is the mechanism Windows has for exactly this and it is
+  under-used: a StubPath under HKLM runs once per user, the first time each
+  user logs on after the Version string changes. Bumping that Version is how a
+  later MSI re-runs the per-user step. The alternative — a Run key that fires
+  every single logon — does the work over and over and cannot tell a first
+  logon from the four-hundredth.
+
+  Build:  packaging/windows/build-msi.ps1
+  Deploy: msiexec /i REFUGIO.msi /qn
+          msiexec /i REFUGIO.msi /qn WEBSEARCH=off UPDATECHECKS=off
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="REFUGIO"
+           Manufacturer="Phantazein"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="7E2C4A18-9B31-4F6D-8C55-1A0D3E7B9F42"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="REFUGIO — a private AI assistant that runs on this computer" />
+
+    <!-- Refuse to install per-user. An MSI that quietly falls back to a
+         per-user install when run without elevation produces a machine where
+         REFUGIO exists for one account and no other, which is very hard to
+         diagnose from a helpdesk. -->
+    <Launch Condition="Privileged" Message="REFUGIO must be installed for all users. Run this installer as an administrator." />
+    <Launch Condition="VersionNT >= 1000" Message="REFUGIO requires Windows 10 or later." />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of REFUGIO is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Admin-settable at deploy time. These write the same policy keys a
+         Group Policy object would, so an admin can choose either route:
+             msiexec /i REFUGIO.msi /qn WEBSEARCH=off UPDATECHECKS=off
+         Anything other than "off" is left unwritten, so the user decides. -->
+    <Property Id="WEBSEARCH" Secure="yes" />
+    <Property Id="UPDATECHECKS" Secure="yes" />
+    <Property Id="ATTACHMENTS" Secure="yes" />
+    <Property Id="ALLOWEDCONNECTORS" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="REFUGIO" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppShortcutFolder" Name="REFUGIO" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="REFUGIO" Level="1">
+      <ComponentGroupRef Id="PayloadFiles" />
+      <ComponentGroupRef Id="MachineConfig" />
+    </Feature>
+
+    <!-- WiX v4+ harvests at build time with <Files>. This replaces heat.exe,
+         which no longer exists as a CLI verb — and which would have been the
+         wrong tool anyway: a hand-maintained component list over node_modules
+         is stale the first time a dependency changes. -->
+    <ComponentGroup Id="PayloadFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.StageDir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="MachineConfig" Directory="INSTALLFOLDER">
+
+      <!-- Active Setup: the per-user half.
+           The GUID names this component to Windows and must never change
+           across versions — a new GUID makes every user look brand new and the
+           setup runs again for all of them. The Version string is what to bump
+           when the per-user step itself changes. -->
+      <Component Id="ActiveSetup" Guid="B4F1D6C2-3E88-4A17-9D20-6C5E8B1A7F03">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Active Setup\Installed Components\{B4F1D6C2-3E88-4A17-9D20-6C5E8B1A7F03}">
+          <RegistryValue Type="string" Value="REFUGIO per-user setup" />
+          <RegistryValue Name="Version" Type="string" Value="1,0,0,0" />
+          <RegistryValue Name="StubPath" Type="expandable"
+                         Value="&quot;[INSTALLFOLDER]runtime\node.exe&quot; &quot;[INSTALLFOLDER]packaging\windows\user-setup.js&quot;" />
+          <!-- Runs without a console window flashing on every first logon. -->
+          <RegistryValue Name="IsInstalled" Type="integer" Value="1" />
+        </RegistryKey>
+      </Component>
+
+      <!-- Machine policy, written only when the admin asked for it. The
+           Policies hive rather than a vendor key: it is what Group Policy and
+           Intune's ADMX ingestion both target, and a standard user cannot
+           write to it — which is the entire point of calling it policy. -->
+      <Component Id="PolicyWebSearch" Guid="1D9A47B5-88C2-4E31-B7A6-2F40C6E15D88" Condition="WEBSEARCH=&quot;off&quot;">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Policies\Phantazein\REFUGIO"
+                       Name="webSearch" Type="string" Value="off" KeyPath="yes" />
+      </Component>
+      <Component Id="PolicyUpdates" Guid="2E8B5619-70D3-4C42-98B1-3A5FD7E26C99" Condition="UPDATECHECKS=&quot;off&quot;">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Policies\Phantazein\REFUGIO"
+                       Name="updateChecks" Type="string" Value="off" KeyPath="yes" />
+      </Component>
+      <Component Id="PolicyAttachments" Guid="3F7C662A-51E4-4D53-A9C2-4B60E8F337AA" Condition="ATTACHMENTS=&quot;off&quot;">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Policies\Phantazein\REFUGIO"
+                       Name="attachments" Type="string" Value="off" KeyPath="yes" />
+      </Component>
+      <Component Id="PolicyConnectors" Guid="4A6D773B-42F5-4E64-BAD3-5C71F9A448BB" Condition="ALLOWEDCONNECTORS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Policies\Phantazein\REFUGIO"
+                       Name="allowedConnectors" Type="string" Value="[ALLOWEDCONNECTORS]" KeyPath="yes" />
+      </Component>
+
+      <!-- Where the machine says what it has. Read by inventory tooling, and
+           by whoever is on the phone trying to find out what is installed. -->
+      <Component Id="InstallReceipt" Guid="5B8E884C-63A6-4F75-8BE4-6D82FAB559CC">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Phantazein\REFUGIO">
+          <RegistryValue Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+          <RegistryValue Name="Version" Type="string" Value="$(var.ProductVersion)" />
+        </RegistryKey>
+      </Component>
+
+      <!-- There is no REFUGIO.exe on Windows — the UI is a browser window and
+           a PowerShell tray script. The shortcut therefore starts the
+           supervisor, which is what "open REFUGIO" means here. -->
+      <Component Id="StartMenuShortcut" Guid="6C9F995D-74B7-4086-9CF5-7E93ABC66ADD" Directory="AppShortcutFolder">
+        <Shortcut Id="RefugioShortcut"
+                  Name="REFUGIO"
+                  Target="[INSTALLFOLDER]runtime\refugio-node.exe"
+                  Arguments="&quot;[INSTALLFOLDER]start-refugio.cjs&quot;"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Show="minimized" />
+        <RemoveFolder Id="RemoveAppShortcutFolder" On="uninstall" />
+        <!-- HKCU KeyPath because a shortcut in a per-machine package still has
+             to be advertised per user; without it, ICE38 fails the build. -->
+        <RegistryValue Root="HKCU" Key="SOFTWARE\Phantazein\REFUGIO"
+                       Name="shortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Uninstall has to take the user's running copy with it, or the
+         supervisor keeps running out of a directory that no longer exists,
+         keeps holding port 8090, and the reinstall after it fails to bind.
+
+         The target is refugio-node.exe — a copy of node.exe made at build time
+         precisely so this line exists. Targeting node.exe would terminate every
+         unrelated Node process on the machine, which on a developer's laptop
+         means killing their work to uninstall ours. -->
+    <util:CloseApplication Id="StopSupervisor" Target="refugio-node.exe"
+                           CloseMessage="no" TerminateProcess="1"
+                           RebootPrompt="no" />
+  </Package>
+</Wix>

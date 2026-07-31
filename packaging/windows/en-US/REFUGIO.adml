@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English strings for REFUGIO.admx. Goes in PolicyDefinitions\en-US\. -->
+<policyDefinitionResources revision="1.0" schemaVersion="1.0">
+  <displayName>REFUGIO</displayName>
+  <description>Policies for REFUGIO, a private AI assistant that runs locally.</description>
+  <resources>
+    <stringTable>
+      <string id="REFUGIO">REFUGIO</string>
+
+      <string id="DisableWebSearch">Turn off web search</string>
+      <string id="DisableWebSearch_Help">Web search is the only feature of REFUGIO that sends anything off the computer. It is off by default, and even when a user switches it on, each individual message has to be armed for search separately, with a warning shown at the time.
+
+Enabled: the user cannot switch web search on at all. The control in Settings is disabled and says it was set by your organisation.
+
+Disabled or Not Configured: the user decides.
+
+There is deliberately no policy that turns web search on. Arming a search is a decision made by the person at the keyboard, in front of a warning, and REFUGIO will not make it on their behalf.</string>
+
+      <string id="DisableUpdateChecks">Turn off update checks</string>
+      <string id="DisableUpdateChecks_Help">REFUGIO can check whether a newer version exists by asking github.com what commit a public branch points at. No user data is sent — not messages, not a version, not an identifier.
+
+Enabled: REFUGIO makes no update requests at all, including the manual "Check now" button.
+
+Set this on a managed fleet where updates arrive through your deployment tool. Otherwise REFUGIO will tell users an update is available and show them a command they have no rights to run.</string>
+
+      <string id="DisableAttachments">Turn off file attachments</string>
+      <string id="DisableAttachments_Help">Files attached to a message are copied into the user's profile and their text is read into the prompt. Everything stays on the computer.
+
+Enabled: the attach control is removed from the chat. It disappears rather than refusing when pressed — a button that is present and rejects reads as a broken feature.
+
+Disabled or Not Configured: the user may attach files.</string>
+
+      <string id="AllowedConnectors">Limit which connectors may run</string>
+      <string id="AllowedConnectors_Help">A comma-separated list of connector ids. Only these are started; anything else in the configuration is never launched.
+
+For example:  notes, reminders
+
+Leave this policy Not Configured to allow every connector that is installed.
+
+This is enforced where connectors are started, not where they are displayed — a connector excluded here is not running at all, rather than running and hidden.</string>
+    </stringTable>
+
+    <presentationTable>
+      <presentation id="AllowedConnectors">
+        <textBox refId="AllowedConnectorsText">
+          <label>Connector ids, comma-separated</label>
+          <defaultValue>notes, reminders</defaultValue>
+        </textBox>
+      </presentation>
+    </presentationTable>
+  </resources>
+</policyDefinitionResources>

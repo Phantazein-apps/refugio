@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  productbuild distribution.
+
+  The two attributes that decide whether this is MDM-deployable at all:
+
+    rootVolumeOnly   forbids the "Install for me only" destination. A per-user
+                     install of a per-machine package is how you end up with
+                     REFUGIO in ~/Applications for whoever happened to run the
+                     installer, and nowhere for anyone else.
+    enable_localSystem  makes the system volume a legal target. Without it,
+                     `installer -pkg … -target /` — which is what every MDM
+                     runs — is refused.
+-->
+<installer-gui-script minSpecVersion="2">
+  <title>REFUGIO</title>
+  <organization>com.phantazein</organization>
+
+  <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
+
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+
+  <!-- macOS 12 is the floor: the menu-bar app uses APIs introduced in
+       Monterey, and an installer that lands on Big Sur and then fails to
+       launch is worse than one that declines up front and says why. -->
+  <volume-check>
+    <allowed-os-versions>
+      <os-version min="12.0"/>
+    </allowed-os-versions>
+  </volume-check>
+
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
+
+  <pkg-ref id="com.phantazein.refugio"/>
+
+  <choices-outline>
+    <line choice="default">
+      <line choice="com.phantazein.refugio"/>
+    </line>
+  </choices-outline>
+
+  <choice id="default"/>
+  <choice id="com.phantazein.refugio" visible="false">
+    <pkg-ref id="com.phantazein.refugio"/>
+  </choice>
+
+  <pkg-ref id="com.phantazein.refugio" version="0" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  PPPC — Privacy Preferences Policy Control.
+
+  ═══════════════════════════════════════════════════════════════════════
+  THIS FILE IS A TEMPLATE. It will not work until the two placeholders are
+  replaced with values from YOUR signed build. See packaging/README.md.
+  ═══════════════════════════════════════════════════════════════════════
+
+  Why it exists: an installer cannot grant itself access to Notes, Reminders
+  or Messages. macOS asks the user, per app, at the moment of first use, and
+  nothing a .pkg does can pre-answer that — by design, and it is the right
+  design. On an unmanaged Mac the user clicks Allow and it works.
+
+  On a managed Mac that prompt is a problem. It appears the first time someone
+  asks REFUGIO about their reminders, it is easy to dismiss by accident, and a
+  dismissed prompt is remembered — after which the connector fails forever with
+  a permissions error and the user has no idea why. A PPPC profile pushed by
+  MDM grants the access up front, silently, and the prompt never appears.
+
+  What it CANNOT do: SystemPolicyAllFiles (Full Disk Access) is included below
+  because Messages' chat.db needs it, but be deliberate about that one — it is
+  the broadest grant on the system. Remove that entry if you are not deploying
+  the Messages connector.
+
+  ── Filling in the placeholders ──────────────────────────────────────────
+  After signing REFUGIO.app with your Developer ID Application certificate:
+
+      codesign -dr - /Applications/REFUGIO.app
+
+  prints a line beginning "designated => ". Everything after that arrow is the
+  CodeRequirement below. The IdentifierType stays "bundleID".
+
+  Deploy alongside the .pkg. Order does not matter; the profile can land first.
+-->
+<plist version="1.0">
+<dict>
+  <key>PayloadDisplayName</key>
+  <string>REFUGIO — Privacy Preferences</string>
+  <key>PayloadIdentifier</key>
+  <string>com.phantazein.refugio.pppc</string>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>3E1B6A70-0000-4000-A000-REPLACEME0001</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadScope</key>
+  <string>System</string>
+  <key>PayloadDescription</key>
+  <string>Grants REFUGIO the access it needs to read this Mac's Notes, Reminders and Messages, so people are not asked at an awkward moment.</string>
+
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>com.apple.TCC.configuration-profile-policy</string>
+      <key>PayloadIdentifier</key>
+      <string>com.phantazein.refugio.pppc.tcc</string>
+      <key>PayloadUUID</key>
+      <string>3E1B6A70-0000-4000-A000-REPLACEME0002</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>PayloadDisplayName</key>
+      <string>REFUGIO TCC</string>
+
+      <key>Services</key>
+      <dict>
+        <!-- Automation: sending Apple Events to another app. This is what the
+             Notes, Reminders and Things connectors use — they drive those apps
+             through JXA rather than reading their databases, which is why the
+             grant is per-target rather than blanket. -->
+        <key>AppleEvents</key>
+        <array>
+          <dict>
+            <key>Identifier</key><string>com.phantazein.refugio</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key>
+            <string>identifier "com.phantazein.refugio" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "REPLACE_WITH_YOUR_TEAM_ID"</string>
+            <key>AEReceiverIdentifier</key><string>com.apple.Notes</string>
+            <key>AEReceiverIdentifierType</key><string>bundleID</string>
+            <key>AEReceiverCodeRequirement</key>
+            <string>identifier "com.apple.Notes" and anchor apple</string>
+            <key>Authorization</key><string>Allow</string>
+            <key>Comment</key><string>Apple Notes connector</string>
+          </dict>
+          <dict>
+            <key>Identifier</key><string>com.phantazein.refugio</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key>
+            <string>identifier "com.phantazein.refugio" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "REPLACE_WITH_YOUR_TEAM_ID"</string>
+            <key>AEReceiverIdentifier</key><string>com.apple.reminders</string>
+            <key>AEReceiverIdentifierType</key><string>bundleID</string>
+            <key>AEReceiverCodeRequirement</key>
+            <string>identifier "com.apple.reminders" and anchor apple</string>
+            <key>Authorization</key><string>Allow</string>
+            <key>Comment</key><string>Apple Reminders connector</string>
+          </dict>
+          <dict>
+            <key>Identifier</key><string>com.phantazein.refugio</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key>
+            <string>identifier "com.phantazein.refugio" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "REPLACE_WITH_YOUR_TEAM_ID"</string>
+            <key>AEReceiverIdentifier</key><string>com.culturedcode.ThingsMac</string>
+            <key>AEReceiverIdentifierType</key><string>bundleID</string>
+            <key>AEReceiverCodeRequirement</key>
+            <string>identifier "com.culturedcode.ThingsMac" and anchor apple generic</string>
+            <key>Authorization</key><string>Allow</string>
+            <key>Comment</key><string>Things 3 connector</string>
+          </dict>
+        </array>
+
+        <!-- Full Disk Access. Needed ONLY by the Messages connector, which
+             reads ~/Library/Messages/chat.db directly because Messages has no
+             scripting interface worth the name.
+
+             This is the broadest grant macOS has. If you are not deploying the
+             Messages connector, DELETE this whole SystemPolicyAllFiles array —
+             do not ship it "just in case". -->
+        <key>SystemPolicyAllFiles</key>
+        <array>
+          <dict>
+            <key>Identifier</key><string>com.phantazein.refugio</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key>
+            <string>identifier "com.phantazein.refugio" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "REPLACE_WITH_YOUR_TEAM_ID"</string>
+            <key>Authorization</key><string>Allow</string>
+            <key>Comment</key><string>Messages connector reads chat.db</string>
+          </dict>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

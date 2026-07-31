@@ -1,0 +1,62 @@
+#!/bin/bash
+# Runs as root, after the payload lands.
+#
+# The one thing this must NOT do is set REFUGIO up for a user. Under MDM this
+# runs as root, possibly at enrolment, possibly with nobody logged in — so
+# $HOME is /var/root and "the user" does not exist yet. Everything per-user is
+# the login agent's job.
+#
+# What belongs here is only what is true of the machine: ownership, the CLI
+# symlink, and kicking the agent for anyone who happens to be logged in right
+# now (so a hands-on install works without a logout).
+
+set -u
+LOG="/var/log/refugio-install.log"
+say() { echo "$(date '+%Y-%m-%d %H:%M:%S') postinstall: $*" >> "$LOG"; }
+
+ROOT="/usr/local/refugio"
+say "payload installed at $ROOT"
+
+# Root-owned, world-readable, not world-writable. /usr/local is writable by
+# admin users on many Macs, and a world-writable directory that a LaunchAgent
+# executes from is a local privilege escalation waiting to happen.
+chown -R root:wheel "$ROOT" 2>/dev/null
+chmod -R go-w "$ROOT" 2>/dev/null
+chmod 755 "$ROOT/bin/"* 2>/dev/null
+chmod 755 "$ROOT"/runtime/darwin-*/bin/node 2>/dev/null
+say "ownership set"
+
+# `refugio` on PATH. /usr/local/bin rather than /usr/bin — the latter is
+# protected by SIP and the write silently fails.
+mkdir -p /usr/local/bin
+ln -sf "$ROOT/bin/refugio-cli" /usr/local/bin/refugio
+say "linked /usr/local/bin/refugio"
+
+# A machine-wide marker of what is installed, for the MDM's own inventory and
+# for support calls. Jamf and Intune both read receipts, but a plain file is
+# what someone on a phone can be talked through finding.
+mkdir -p /Library/Application\ Support/REFUGIO
+cat > "/Library/Application Support/REFUGIO/install-receipt.json" <<EOF
+{
+  "installedAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+  "root": "$ROOT",
+  "managedPolicy": "/Library/Managed Preferences/com.phantazein.refugio.plist"
+}
+EOF
+
+# Start the agent for anyone already logged in. Without this a hands-on install
+# appears to do nothing until the next logout, and the person watching
+# reasonably concludes it failed.
+#
+# `launchctl asuser` is required: bootstrapping a GUI domain from a root
+# context otherwise targets the wrong session and fails with a code nobody can
+# look up.
+for uid in $(ps -axo uid,args | awk '/[l]oginwindow.app/ {print $1}' | sort -u); do
+  [ "$uid" -lt 500 ] && continue
+  launchctl bootstrap "gui/$uid" /Library/LaunchAgents/com.phantazein.refugio.agent.plist 2>/dev/null \
+    && say "started agent for uid $uid" \
+    || say "could not start agent for uid $uid (it will start at next login)"
+done
+
+say "done"
+exit 0

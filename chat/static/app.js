@@ -160,6 +160,7 @@ async function refreshStatus() {
     if (!els.modelPanel.hidden) renderModelPanel();
 
     applyWebSetting(s.web);
+    applyManaged(s.managed);
   } catch {
     els.status.className = "status down";
     els.statusText.textContent = "offline";
@@ -1261,6 +1262,20 @@ els.newChat.addEventListener("click", newChat);
 // onto the window, and pasting.
 
 els.attachBtn.addEventListener("click", () => els.attachInput.click());
+
+/** Hide what an administrator has taken away.
+ *
+ *  The paperclip GOES rather than staying and returning a 403 when pressed.
+ *  A control that is present and refuses is read as a broken feature; a
+ *  control that isn't there is read as a product that doesn't have it, which
+ *  on this machine is the truth. */
+function applyManaged(managed = {}) {
+  els.attachBtn.hidden = !!managed.attachments;
+  if (managed.attachments) {
+    state.attachments = [];
+    renderTray();
+  }
+}
 els.attachInput.addEventListener("change", () => {
   attachFiles(els.attachInput.files);
   // Cleared so choosing the SAME file twice in a row still fires `change`.

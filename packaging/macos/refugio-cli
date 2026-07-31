@@ -1,0 +1,75 @@
+#!/bin/bash
+# `refugio` for a packaged install.
+#
+# The git-installed copy puts a script of this name in ~/refugio. This one
+# drives the same supervisor from /usr/local, but through launchd rather than
+# by spawning it directly — under a packaged install the agent owns the
+# process, and a second copy started by hand would fight it for port 8090 and
+# lose in a way that reads as "REFUGIO won't start".
+
+set -u
+ROOT="/usr/local/refugio"
+LABEL="com.phantazein.refugio.agent"
+DOMAIN="gui/$(id -u)"
+PLIST="/Library/LaunchAgents/${LABEL}.plist"
+
+usage() {
+  cat <<EOF
+  refugio            start REFUGIO and open it
+  refugio stop       stop it and free the memory
+  refugio restart    stop, then start
+  refugio status     is it running?
+  refugio logs       follow the supervisor log
+  refugio policy     show the settings your organisation has set
+EOF
+}
+
+running() { launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1; }
+
+case "${1:-start}" in
+  start)
+    if running; then
+      echo "REFUGIO is already running."
+    else
+      launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null || launchctl kickstart -k "${DOMAIN}/${LABEL}"
+      echo "Starting REFUGIO…"
+      sleep 2
+    fi
+    open "http://127.0.0.1:${REFUGIO_CHAT_PORT:-8090}" 2>/dev/null
+    ;;
+  stop)
+    launchctl bootout "${DOMAIN}/${LABEL}" 2>/dev/null
+    # The agent going away does not take the supervisor's children with it.
+    pkill -f "$ROOT/start-refugio.cjs" 2>/dev/null
+    echo "Stopped."
+    ;;
+  restart)
+    "$0" stop; sleep 1; "$0" start
+    ;;
+  status)
+    if running; then
+      echo "running"
+      launchctl print "${DOMAIN}/${LABEL}" 2>/dev/null | awk '/state = |pid = /{print "  " $0}'
+    else
+      echo "not running"
+      exit 1
+    fi
+    ;;
+  logs)
+    tail -f "$HOME/.refugio-logs/supervisor.log" 2>/dev/null \
+      || echo "No log yet at ~/.refugio-logs/supervisor.log — REFUGIO has not started."
+    ;;
+  policy)
+    # The question a support call actually needs answered: is a profile
+    # reaching this laptop at all?
+    P="/Library/Managed Preferences/com.phantazein.refugio.plist"
+    if [ -f "$P" ]; then
+      echo "Managed by a configuration profile:"
+      /usr/bin/plutil -p "$P" | sed 's/^/  /'
+    else
+      echo "No managed policy on this Mac — every setting is the user's to change."
+    fi
+    ;;
+  -h|--help|help) usage ;;
+  *) echo "Unknown command: $1"; echo; usage; exit 1 ;;
+esac

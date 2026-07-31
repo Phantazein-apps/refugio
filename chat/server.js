@@ -24,6 +24,7 @@ import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./c
 import { McpPool } from "./mcp.js";
 import { explain, outputLines } from "./connector-errors.js";
 import * as attachments from "./attachments.js";
+import { readPolicy, applyPolicy, describePolicy } from "./managed.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import { listModels, isUp, chatStream, complete, pullModel, OLLAMA_BASE } from "./ollama.js";
@@ -344,7 +345,31 @@ function saveSettings(settings) {
   }
 }
 
-let connectorSettings = loadSettings();
+// ── Managed policy ──────────────────────────────────────────
+//
+// Read once, at startup. A configuration profile does not change under a
+// running process, and re-reading it on every request would put a `plutil`
+// fork on the status poll.
+const POLICY = readPolicy({ log });
+const POLICY_NOTE = describePolicy(POLICY);
+if (POLICY_NOTE) log(POLICY_NOTE);
+
+/** Settings after policy, plus which of them the user may not change.
+ *
+ *  Every path that changes a setting goes through this, not just the load:
+ *  otherwise `POST /api/chat/web` would happily write `enabled: true` into a
+ *  file that policy says must be false, and the clamp would only reappear on
+ *  the next restart. */
+function clamped(settings) {
+  return applyPolicy(settings, POLICY);
+}
+
+// Names the source of the refusal. "Not allowed" would send the user looking
+// for a bug in REFUGIO; this sends them to their IT department, which is where
+// the decision actually lives.
+const MANAGED_MSG = "This is set by your organisation and cannot be changed here.";
+
+let { settings: connectorSettings, locked: LOCKED } = clamped(loadSettings());
 
 // Human-facing names for the server ids in mcpo-config.json. Anything not
 // listed falls back to its id capitalised, so a new connector reads correctly
@@ -422,6 +447,7 @@ function connectorPayload(rows) {
     starting: !connectorsSettled,
     ...countConnectors(rows),
     web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+    managed: LOCKED,
   };
 }
 
@@ -780,6 +806,10 @@ async function route(req, res, url) {
   // this widens REFUGIO's reach past the machine and enforces nothing. Making
   // it pass that validator would have meant loosening it for everything.
   if (p === "/api/chat/web" && req.method === "POST") {
+    // Refused outright rather than written and clamped back on restart. A
+    // setting that accepts a change and silently undoes it later is the worst
+    // of the three options.
+    if (LOCKED.web) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
     const body = await readBody(req);
     connectorSettings.web = { ...connectorSettings.web, enabled: !!body.enabled };
     saveSettings(connectorSettings);
@@ -814,6 +844,10 @@ async function route(req, res, url) {
       // The composer needs this on every poll: when web search is switched off
       // the per-message control must disappear, not sit there doing nothing.
       web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+      // Which controls an administrator has taken away. The chat needs it as
+      // much as Settings does — the paperclip has to go, not sit there and
+      // return a 403 when pressed.
+      managed: LOCKED,
     });
   }
 
@@ -858,6 +892,10 @@ async function route(req, res, url) {
   // — so the bytes travel over loopback and the path this returns is the one
   // REFUGIO wrote, which is a real path on this machine that the user can open.
   if (p === "/api/chat/attachments" && req.method === "POST") {
+    if (LOCKED.attachments) {
+      drain(req);
+      return sendJson(res, 403, { error: "Attaching files is turned off by your organisation.", managed: true });
+    }
     const tooBig = {
       error: `That file is larger than ${attachments.humanBytes(attachments.MAX_BYTES)}, which is more than a local model can do anything with.`,
     };
@@ -966,6 +1004,7 @@ async function route(req, res, url) {
   // check — the switch has to mean "this app makes no network requests",
   // or it means nothing.
   if (p === "/api/chat/update/settings" && req.method === "POST") {
+    if (LOCKED.updates) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
     const body = await readBody(req);
     connectorSettings.updates = { ...connectorSettings.updates, enabled: !!body.enabled };
     saveSettings(connectorSettings);
@@ -1099,7 +1138,11 @@ server.listen(PORT, "127.0.0.1", async () => {
     const pool = new McpPool();
     pool.setSettings(connectorSettings);
     mcp = pool;
-    await pool.connectAll(MCP_CONFIG);
+    // The allow-list is enforced where connectors are STARTED, not where they
+    // are drawn. A connector that is only hidden is still running, still
+    // holding an open session to the user's WhatsApp, and still one prompt
+    // away from being read.
+    await pool.connectAll(MCP_CONFIG, { only: POLICY.allowedConnectors || null });
   }
   connectorsSettled = true;
 

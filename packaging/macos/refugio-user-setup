@@ -1,0 +1,78 @@
+#!/bin/bash
+# The per-user half of the install. Runs as the logged-in user, at login, from
+# the LaunchAgent — never as root.
+#
+# This exists because a package installs a machine and a person uses one. The
+# .pkg cannot create ~/.refugio-data, because at install time there may be no
+# "~" that matters; it cannot decide whether this user wants REFUGIO running,
+# because it has never met them. Both are decided here, once per user, the
+# first time they log in after the package lands.
+#
+# Idempotent by construction: it runs at every login, and the second run must
+# be a no-op that ends with the supervisor running.
+
+set -u
+ROOT="/usr/local/refugio"
+
+# Both runtimes ship; this Mac picks its own. A package built on Apple silicon
+# with only an arm64 Node installs perfectly on an Intel Mac and then does
+# nothing, which is the exact class of silent half-fleet failure this whole
+# design exists to avoid.
+case "$(uname -m)" in
+  arm64) NODE="$ROOT/runtime/darwin-arm64/bin/node" ;;
+  *)     NODE="$ROOT/runtime/darwin-x64/bin/node" ;;
+esac
+
+DATA="${REFUGIO_DATA_DIR:-$HOME/.refugio-data}"
+LOGDIR="$HOME/.refugio-logs"
+STAMP="$DATA/.provisioned"
+
+mkdir -p "$DATA" "$LOGDIR"
+exec >> "$LOGDIR/user-setup.log" 2>&1
+echo "--- $(date '+%Y-%m-%d %H:%M:%S') user-setup for $(id -un) ---"
+
+[ -x "$NODE" ] || { echo "no bundled Node at $NODE — the payload is incomplete"; exit 1; }
+
+# ── First run for this user ─────────────────────────────────
+if [ ! -f "$STAMP" ]; then
+  echo "first login for this user — provisioning"
+
+  # A credentials file the user owns, so the connector setup in Settings has
+  # somewhere to write. No invented credentials — a managed deployment has no
+  # business making them up, and a template full of obviously-fake values is
+  # worse than nothing because it looks configured.
+  #
+  # It is not left EMPTY, though, and that matters: the supervisor treats a
+  # file with no keys in it as "the installer was never run", says so, and
+  # exits 1 — which under the login agent's KeepAlive is a restart loop every
+  # ten seconds forever. One truthful line is what stops that.
+  if [ ! -f "$HOME/.refugio.env" ]; then
+    printf '# Installed by the REFUGIO package. Connectors are configured in Settings.\nREFUGIO_INSTALL=pkg\n' > "$HOME/.refugio.env"
+    chmod 600 "$HOME/.refugio.env"
+  fi
+
+  date -u '+%Y-%m-%dT%H:%M:%SZ' > "$STAMP"
+fi
+
+# ── Ollama ──────────────────────────────────────────────────
+#
+# NOT installed by the package, and not installed here either — deliberately.
+# It is a multi-gigabyte download plus a multi-gigabyte model, and doing that
+# inside an MDM install means a package that takes an hour, fails on a captive
+# portal, and reports success either way. What happens instead: REFUGIO starts,
+# notices there is no engine, and says so in a window the user can read. An
+# admin who wants it pre-staged deploys Ollama as its own MDM package, which is
+# the thing MDM is actually good at.
+if [ ! -x "/Applications/Ollama.app/Contents/Resources/ollama" ] && ! command -v ollama >/dev/null 2>&1; then
+  echo "no local LLM engine found — REFUGIO will explain this in its window"
+fi
+
+# ── Start the supervisor ────────────────────────────────────
+#
+# Under the agent, so launchd owns the process and restarts it if it dies.
+# The agent runs THIS script and this script execs the supervisor, which means
+# launchd's KeepAlive applies to the thing that matters rather than to a
+# wrapper that exits immediately.
+echo "starting the supervisor"
+export REFUGIO_HOME="$ROOT"
+exec "$NODE" "$ROOT/start-refugio.cjs"

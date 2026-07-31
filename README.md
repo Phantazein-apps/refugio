@@ -51,6 +51,12 @@ Works on **macOS, Linux, and Windows**. No prerequisites — the installer handl
 curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
 ```
 
+> **Deploying to a fleet?** There are `.pkg` and `.msi` builds designed for MDM
+> — per-machine install, per-user runtime, silent, and configurable by
+> configuration profile or Group Policy. See **[packaging/](packaging/)**, which
+> also covers what signing costs and the one thing an installer genuinely
+> cannot do (grant itself access to Notes and Messages).
+
 ### Windows (PowerShell)
 
 ```powershell

@@ -56,6 +56,23 @@ const state = {
   update: null,
 };
 
+// ── Managed by your organisation ────────────────────────────
+//
+// On a machine deployed by MDM an administrator can take some of these
+// decisions away. Where they have, the control is DISABLED and says who set
+// it — rather than accepting a click and reverting on the next poll, which
+// reads as a bug in REFUGIO instead of as a policy.
+
+const isManaged = (key) => !!(state.connectors?.managed?.[key] ?? state.status?.managed?.[key]);
+
+/** The line under a locked control, or nothing at all when unmanaged.
+ *
+ *  Returns null rather than an empty node so the overwhelmingly common
+ *  unmanaged case adds nothing to the page — el() drops null children. */
+const managedNote = (key) => isManaged(key)
+  ? el("div.aside.managed", { text: "Set by your organisation. This cannot be changed here." })
+  : null;
+
 // ── Navigation ──────────────────────────────────────────────
 
 function showPane(name) {
@@ -676,11 +693,13 @@ function renderWeb() {
       el("input", {
         type: "checkbox",
         checked: !!web.enabled,
+        disabled: isManaged("web"),
         on: { change: (e) => setWebEnabled(e.currentTarget.checked, e.currentTarget) },
       }),
       el("span.box"),
       web.label || "Allow web search",
     ),
+    managedNote("web"),
     el("div.aside", {
       text: "Turning this on does not start searching. Every message you want searched has to be " +
         "armed on its own, in the chat, with the warning shown at the time. Off is the default, " +
@@ -858,11 +877,13 @@ function renderUpdates() {
       el("input", {
         type: "checkbox",
         checked: !!u.enabled,
+        disabled: isManaged("updates"),
         on: { change: (e) => setUpdatesEnabled(e.currentTarget.checked, e.currentTarget) },
       }),
       el("span.box"),
       "Check for updates automatically",
     ),
+    managedNote("updates"),
     el("div.aside", { text: "At most once a day, never in the first minute after launch. Switched off, " +
       "REFUGIO makes no update requests at all — including the Check now button above." }),
   ));
