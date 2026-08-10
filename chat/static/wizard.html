@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up REFUGIO</title>
+<link rel="icon" href="favicon.svg?v=2" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico?v=2">
+<!-- Before the stylesheets, as in index.html and settings.html: deciding the
+     theme after first paint means a frame of black on a light Mac. -->
+<script>
+  (function () {
+    try {
+      var p = localStorage.getItem("refugio.theme");
+      if (p !== "light" && p !== "dark") {
+        p = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.dataset.theme = p;
+    } catch (e) { document.documentElement.dataset.theme = "dark"; }
+    var native = navigator.userAgent.indexOf("REFUGIO-Native") !== -1
+      || (window.locationbar && window.locationbar.visible === false);
+    if (native) document.documentElement.classList.add("native");
+  })();
+</script>
+<link rel="stylesheet" href="phantazein.css">
+<link rel="stylesheet" href="wizard.css">
+</head>
+<body>
+<div class="titlebar" aria-hidden="true"></div>
+
+<div class="wiz">
+  <header class="wiz-head">
+    <svg class="brand-mark" width="18" height="18" viewBox="103 103 306 338" aria-hidden="true">
+      <path d="M196 424 L120 424 L120 120 L392 120 L392 424 L316 424" fill="none"
+            stroke="currentColor" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+      <g stroke="#ff0018" stroke-width="40" stroke-linecap="round">
+        <line x1="176" y1="192" x2="236" y2="252"/><line x1="336" y1="192" x2="276" y2="252"/>
+        <line x1="176" y1="352" x2="236" y2="292"/><line x1="336" y1="352" x2="276" y2="292"/>
+      </g>
+    </svg>
+    <span class="brand">REFUGIO</span>
+    <span class="stage">alpha</span>
+    <a class="wiz-exit" href="/" id="exit">Skip setup</a>
+  </header>
+
+  <main class="wiz-body" id="body" aria-live="polite">
+    <div class="waiting">Looking at this machine…</div>
+  </main>
+
+  <!-- The step rail from the design: 01 WELCOME / 02 MODEL / 03 CONNECTORS /
+       04 WEB SEARCH / 05 DONE. Rendered by wizard.js so a step that policy has
+       removed does not leave a gap in the numbering. -->
+  <nav class="wiz-steps" id="steps" aria-label="Setup progress"></nav>
+</div>
+
+<script type="module" src="wizard.js"></script>
+</body>
+</html>

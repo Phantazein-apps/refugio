@@ -1414,6 +1414,19 @@ els.gutterX.addEventListener("click", () => setGutter(false));
 // wide and then snap narrow.
 try { setRailCollapsed(localStorage.getItem(RAIL_KEY) === "1"); } catch { setRailCollapsed(false); }
 
+// A question handed over by the setup wizard's last screen. Read once and
+// cleared, so a reload doesn't re-ask it — and taken from sessionStorage
+// rather than the URL, which would leave the question sitting in the browser
+// history of a machine anyone might later open.
+try {
+  const first = sessionStorage.getItem("refugio.firstAsk");
+  if (first) {
+    sessionStorage.removeItem("refugio.firstAsk");
+    els.input.value = first;
+    els.input.dispatchEvent(new Event("input"));
+  }
+} catch { /* no sessionStorage — the box is simply empty */ }
+
 refreshStatus();
 loadConversations();
 setInterval(refreshStatus, 15000);

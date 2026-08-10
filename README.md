@@ -102,9 +102,9 @@ Only that path installs `uv`, the Python virtual environment and PyTorch, and on
 1. Installs **Node.js** and **Git** if missing (plus **[uv](https://docs.astral.sh/uv/)** only if you asked for Open WebUI)
 2. Clones REFUGIO to `~/refugio`
 3. Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM (or connects to **[LM Studio](https://lmstudio.ai/)** if you set `REFUGIO_ENGINE=lmstudio`)
-4. Walks you through optional connectors: **personal** first (WhatsApp — with a QR scan in the browser — email, Apple Reminders, Things 3, Notion, and a memory backend), then **business** (Slack, Jira, ServiceNow, Salesforce) if you opt in
+4. Downloads what connectors need to exist at all — the **WhatsApp bridge**, **email**, a **memory backend**, and **business** tools (Slack, Jira, ServiceNow, Salesforce) if you opt in. Which connectors are actually switched on is asked in the window, not here
 5. Sets up **https://refugio** as a local domain (mkcert + Caddy — asks for your admin password once)
-6. Starts everything and opens REFUGIO — a native window on macOS, your browser elsewhere
+6. Starts everything and opens REFUGIO — a native window on macOS, your browser elsewhere — on **first run, at the setup screen**
 
 > **Reinstalling?** Run the same command again. Your settings in `~/.refugio.env` are preserved.
 
@@ -125,6 +125,26 @@ On machines with comfortable RAM, REFUGIO **auto-starts on login**. On **low-RAM
 1. Open REFUGIO — the **menu-bar app** on macOS (or its Dock icon), the **tray icon** on Linux and Windows, or **http://127.0.0.1:8090** in any browser
 2. Start chatting — your local model is ready
 3. Open **Settings** to see your connectors, fix a broken one, choose how much each may read, switch or download models, and turn web search on
+
+### First run
+
+The first time REFUGIO opens it shows a short setup — welcome, model, connectors,
+web search, done — instead of the terminal asking those questions while you are
+still watching an installer scroll past. Everything in it is optional and
+everything in it is in **Settings** afterwards; "Skip setup" is on the first
+screen and is remembered.
+
+It is also the only way to configure a connector on a machine installed by MDM,
+where the terminal installer never runs at all.
+
+Two things still live in the terminal, because their setup is a live round trip
+that hasn't moved yet: **linking WhatsApp** (scan a code with your phone) and
+**email**. Both are reachable from Settings ▸ Connectors, which opens the same
+QR page the installer used to.
+
+Connectors switched on during setup are written to `~/.refugio.env`, which the
+supervisor reads **when it starts** — so they are saved but not running until
+you `refugio restart`. Setup says so rather than claiming they are connected.
 
 ### Settings
 

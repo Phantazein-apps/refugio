@@ -24,7 +24,8 @@ import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./c
 import { McpPool } from "./mcp.js";
 import { explain, outputLines } from "./connector-errors.js";
 import * as attachments from "./attachments.js";
-import { readPolicy, applyPolicy, describePolicy } from "./managed.js";
+import { readPolicy, applyPolicy, describePolicy, connectorAllowed } from "./managed.js";
+import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import { listModels, isUp, chatStream, complete, pullModel, OLLAMA_BASE } from "./ollama.js";
@@ -369,6 +370,30 @@ function clamped(settings) {
 // the decision actually lives.
 const MANAGED_MSG = "This is set by your organisation and cannot be changed here.";
 
+// ── First-run setup ─────────────────────────────────────────
+
+const ENV_PATH = process.env.REFUGIO_ENV_FILE || join(homedir(), ".refugio.env");
+
+/** Is this request coming from REFUGIO's own pages?
+ *
+ *  This server has no authentication and listens on loopback, so any page in
+ *  any other tab can aim a POST at it. That is tolerable for a switch; it is
+ *  not tolerable for the endpoint that writes ~/.refugio.env, whose values
+ *  become environment variables for every process the supervisor starts.
+ *
+ *  The allow-list in wizard.js is the real defence and this is the second one.
+ *  A cross-origin POST cannot forge `Origin`, and a request with no Origin at
+ *  all is a curl or the native window rather than a page — which is why an
+ *  absent header passes and a wrong one does not. */
+function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "refugio";
+  } catch { return false; }
+}
+
 let { settings: connectorSettings, locked: LOCKED } = clamped(loadSettings());
 
 // Human-facing names for the server ids in mcpo-config.json. Anything not
@@ -541,6 +566,7 @@ async function serveStatic(res, urlPath) {
   // the in-app link can point at something a person could also type.
   const rel = urlPath === "/" ? "index.html"
     : urlPath === "/settings" || urlPath === "/settings/" ? "settings.html"
+    : urlPath === "/setup" || urlPath === "/setup/" ? "wizard.html"
     : decodeURIComponent(urlPath).replace(/^\/+/, "");
   const full = normalize(join(STATIC_DIR, rel));
   if (!full.startsWith(STATIC_DIR) || !existsSync(full)) {
@@ -563,6 +589,60 @@ async function serveStatic(res, urlPath) {
       : "no-cache",
   });
   res.end(body);
+}
+
+// ── First-run setup ─────────────────────────────────────────
+
+/** Which env key turns each wizard connector on. Used twice: to draw the
+ *  switches, and to refuse one an administrator has excluded. */
+const SETUP_CONNECTOR_KEYS = {
+  REFUGIO_REMINDERS: "reminders",
+  REFUGIO_THINGS: "things",
+  REFUGIO_NOTES: "notes",
+};
+
+/** The connectors the wizard may offer on THIS machine.
+ *
+ *  `available` is the load-bearing field. Apple Reminders on Linux, or Things 3
+ *  on a Mac that does not have Things 3, is a switch that turns on nothing and
+ *  then reports a broken connector — so the wizard does not draw it at all,
+ *  which is also what the design says ("REFUGIO only offers what it can
+ *  actually reach"). */
+function setupConnectors(saved) {
+  const mac = process.platform === "darwin";
+  const rows = [
+    {
+      id: "reminders", key: "REFUGIO_REMINDERS", label: "Apple Reminders",
+      blurb: "Your reminder lists. macOS will ask for permission the first time REFUGIO reads them — that dialog comes from the system, not from us.",
+      available: mac, why: mac ? null : "Apple Reminders only exists on macOS.",
+    },
+    {
+      id: "things", key: "REFUGIO_THINGS", label: "Things 3",
+      blurb: "Your areas, projects and to-dos, read from its local database.",
+      available: mac && existsSync("/Applications/Things3.app"),
+      why: !mac ? "Things 3 only exists on macOS." : "Things 3 isn't installed on this Mac.",
+    },
+    {
+      id: "notes", key: "REFUGIO_NOTES", label: "Apple Notes",
+      blurb: "Search and read your notes. REFUGIO can create one; it can never delete or change one.",
+      available: mac, why: mac ? null : "Apple Notes only exists on macOS.",
+    },
+  ];
+  return rows
+    // An administrator's allow-list removes it from the wizard entirely rather
+    // than offering a switch that would be ignored.
+    .filter((r) => connectorAllowed(r.id, POLICY))
+    .map((r) => ({
+      ...r,
+      // An explicit answer in ~/.refugio.env always wins. With no answer at
+      // all, the switch is PROPOSED on for anything this machine can reach —
+      // which is what the terminal installer used to default to before these
+      // questions moved into the window. Starting them all off would have made
+      // the move a silent behaviour change for every new install, dressed up
+      // as a UI improvement.
+      value: r.key in saved ? saved[r.key] === "1" : r.available,
+      configured: r.key in saved,
+    }));
 }
 
 // ── Attachments ─────────────────────────────────────────────
@@ -885,6 +965,76 @@ async function route(req, res, url) {
     return;
   }
 
+  // ── First-run setup ───────────────────────────────────────
+  //
+  // Everything the wizard needs to draw itself: whether it should be shown at
+  // all, what is already configured, what this machine can actually offer, and
+  // what an administrator has taken off the table.
+  if (p === "/api/chat/setup" && req.method === "GET") {
+    const saved = wizard.parseEnv(existsSync(ENV_PATH) ? readFileSync(ENV_PATH, "utf-8") : "");
+    const up = await isUp();
+    const models = up ? await listModels() : [];
+    const installed = models.map((m) => m.name);
+    return sendJson(res, 200, {
+      firstRun: wizard.isFirstRun(DATA_DIR, store.historyStats().conversations),
+      state: wizard.readState(DATA_DIR),
+      platform: process.platform,
+      ollamaUp: up,
+      model: await resolveModel(),
+      models: describeModels(installed, await resolveModel()),
+      downloadable: downloadableModels(installed),
+      memory: memoryBreakdown(await resolveModel()),
+      // Only what is actually reachable is offered. A switch for Things 3 on a
+      // machine that does not have Things 3 is a switch that turns on nothing
+      // and then reports a broken connector.
+      connectors: setupConnectors(saved),
+      web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+      managed: LOCKED,
+      envPath: ENV_PATH,
+    });
+  }
+
+  // Save a step. The allow-list in wizard.js decides what may be written; this
+  // route only decides who may ask.
+  if (p === "/api/chat/setup" && req.method === "POST") {
+    if (!sameOrigin(req)) return sendJson(res, 403, { error: "cross-origin requests are not accepted here" });
+    const body = await readBody(req);
+
+    const { values, rejected } = wizard.sanitise(body.values);
+    // A connector an administrator has excluded must not be turned on by
+    // walking through the wizard — the allow-list is enforced where connectors
+    // start, but leaving the switch live would be a setup flow that quietly
+    // does nothing.
+    for (const [key, id] of Object.entries(SETUP_CONNECTOR_KEYS)) {
+      if (values[key] === "1" && !connectorAllowed(id, POLICY)) {
+        delete values[key];
+        rejected.push({ key, why: "not permitted by your organisation" });
+      }
+    }
+
+    let wrote = false;
+    if (Object.keys(values).length) {
+      try {
+        wrote = wizard.writeEnvValues(ENV_PATH, values);
+      } catch (e) {
+        return sendJson(res, 500, { error: `Could not save to ${ENV_PATH}: ${e.message}` });
+      }
+      if (wrote) log(`setup wrote ${Object.keys(values).join(", ")} to ${ENV_PATH}`);
+    }
+    for (const r of rejected) log(`setup refused "${r.key}" — ${r.why}`);
+
+    const state = wizard.writeState(DATA_DIR, {
+      step: typeof body.step === "string" ? body.step.slice(0, 40) : undefined,
+      ...(body.completed ? { completed: true, completedAt: new Date().toISOString() } : {}),
+      ...(body.skipped ? { skipped: true, skippedAt: new Date().toISOString() } : {}),
+    });
+    // `restartNeeded` is the honest part. Connectors are started by the
+    // supervisor, which read this file when it launched — so a switch flipped
+    // here does nothing until it restarts, and saying "connected" would be a
+    // lie the user discovers by asking a question and getting nothing.
+    return sendJson(res, 200, { saved: Object.keys(values), rejected, state, restartNeeded: wrote });
+  }
+
   // ── Attachments ───────────────────────────────────────────
   //
   // Raw bytes in, with the name in a header. The browser will not tell us where
@@ -1067,6 +1217,18 @@ async function route(req, res, url) {
   }
 
   if (p.startsWith("/api/")) return sendJson(res, 404, { error: "Unknown endpoint" });
+
+  // First run goes to the wizard. Server-side rather than a redirect from
+  // inside the chat page, which would flash the whole interface first.
+  //
+  // The escape hatch is the state file: "Skip setup" writes it before
+  // navigating here, so this can only send someone to /setup once. If that
+  // write fails the wizard says so rather than bouncing them back and forth.
+  if ((p === "/" || p === "/index.html") && wizard.isFirstRun(DATA_DIR, store.historyStats().conversations)) {
+    res.writeHead(302, { Location: "/setup", "Cache-Control": "no-store" });
+    return res.end();
+  }
+
   return serveStatic(res, p);
 }
 

@@ -132,15 +132,10 @@ const ACCOUNT_CONNECTOR = {
   ]
 }
 
-const PERSONAL_CONNECTORS = [
-  {
-    id: "notion", name: "Notion",
-    help: "https://www.notion.so/profile/integrations → New integration → Copy Internal Integration Secret",
-    fields: [
-      { key: "NOTION_TOKEN", prompt: "Notion integration token (ntn_...)", secret: true }
-    ]
-  }
-]
+// Notion used to be prompted for here too. Same reasoning as the toggles
+// above: a secret token pasted into a terminal, with the help URL scrolling
+// past, is worse than the same field in the setup window — which can also
+// check the token's shape before storing it.
 
 const BUSINESS_CONNECTORS = [
   {
@@ -536,7 +531,7 @@ async function hermeneiaQRAuth(dir) {
   return linked
 }
 
-async function setupHermeneia(env, existing) {
+async function setupHermeneia(env, existing, { link = true } = {}) {
   // Hermeneia is REFUGIO's flagship personal connector and runs anywhere a
   // prebuilt bridge exists: macOS (Apple Silicon + Intel), Linux (x64/arm64),
   // Windows (x64). Only bail on a platform with no bridge at all.
@@ -558,11 +553,18 @@ async function setupHermeneia(env, existing) {
     console.log(`    ${C.dim}HERMENEIA_DIR=${existing.HERMENEIA_DIR}${everPaired ? " · previously paired (not verified)" : " · not linked yet"}${C.reset}`)
     checkoutHermeneiaVersion(env.HERMENEIA_DIR)
     ensureHermeneiaBridge(env.HERMENEIA_DIR)
-    const prompt = everPaired
-      ? "  Verify / re-link your WhatsApp now (QR scan if the link is dead)?"
-      : "  Link your WhatsApp now (QR scan)?"
-    if (await confirm(prompt, !everPaired)) {
-      await hermeneiaQRAuth(env.HERMENEIA_DIR)
+    // The scan is a round trip — show a code, wait for a phone, react to four
+    // different outcomes — and a terminal is the wrong place for all of it.
+    // Hermeneia already serves that page itself, and Settings links to it.
+    if (link) {
+      const prompt = everPaired
+        ? "  Verify / re-link your WhatsApp now (QR scan if the link is dead)?"
+        : "  Link your WhatsApp now (QR scan)?"
+      if (await confirm(prompt, !everPaired)) {
+        await hermeneiaQRAuth(env.HERMENEIA_DIR)
+      }
+    } else {
+      console.log(`    ${C.dim}Link your phone from Settings \u25b8 Connectors \u2014 it shows the QR code.${C.reset}`)
     }
     console.log("")
     return
@@ -570,7 +572,16 @@ async function setupHermeneia(env, existing) {
 
   console.log(`  ${C.bold}WhatsApp (Hermeneia)${C.reset}`)
   console.log(`    ${C.dim}Read, search, and send your WhatsApp messages — everything stays on this machine.${C.reset}`)
-  if (!await confirm("Connect WhatsApp?", true)) { console.log(""); return }
+  // Asks about the DOWNLOAD, not about the connector. This is a git clone plus
+  // a Go bridge binary — a few hundred megabytes — which is a fair thing to
+  // ask before doing and is exactly the sort of work an installer is for.
+  // Whether WhatsApp is actually connected is decided later, in the window, by
+  // scanning a code with a phone. The old wording ("Connect WhatsApp?") ran
+  // the two together, which is why linking then happened in a terminal.
+  const label = link
+    ? "Connect WhatsApp?"
+    : "Download the WhatsApp bridge? (you link your phone later, in the window)"
+  if (!await confirm(label, true)) { console.log(""); return }
 
   const dir = existing.HERMENEIA_DIR || path.join(home, "hermeneia")
   try {
@@ -605,7 +616,11 @@ async function setupHermeneia(env, existing) {
   if (everPaired) {
     console.log(`    ${C.dim}A previous WhatsApp pairing was found on this machine (not verified).${C.reset}`)
   }
-  if (await confirm("  Link (or re-link) your WhatsApp now (QR scan)?", !everPaired)) {
+  if (!link) {
+    // The scan belongs in a window, not here. Hermeneia serves the QR page
+    // itself and Settings links to it, so nothing is lost by not asking.
+    console.log(`    ${C.dim}Link your phone from Settings \u25b8 Connectors \u2014 it shows the QR code.${C.reset}`)
+  } else if (await confirm("  Link (or re-link) your WhatsApp now (QR scan)?", !everPaired)) {
     await hermeneiaQRAuth(dir)
   } else {
     warn("Skipped — the QR page opens the first time REFUGIO starts")
@@ -662,46 +677,12 @@ async function setupEpistole(env, existing, targetDir) {
   console.log("")
 }
 
-// ── Personal connectors: Apple Reminders + Things 3 ──────────
-// Both are local JXA-based MCP servers vendored as npm dependencies of
-// REFUGIO (Phantazein's just-claude-reminders / just-claude-things) — no
-// credentials, no clone, no ports. macOS only: the first tool call triggers
-// the standard macOS Automation permission prompt for the target app.
-
-async function setupAppleReminders(env, existing) {
-  if (os.platform() !== "darwin") return
-  const on = existing.REFUGIO_REMINDERS === "1"
-  console.log(`  ${C.bold}Apple Reminders${C.reset}${on ? ` ${C.green}(enabled)${C.reset}` : ""}`)
-  console.log(`    ${C.dim}Read, create, and complete your reminders. macOS asks for Automation permission on first use.${C.reset}`)
-  env.REFUGIO_REMINDERS = (await confirm("Connect Apple Reminders?", true)) ? "1" : ""
-  console.log("")
-}
-
-async function setupThings(env, existing) {
-  if (os.platform() !== "darwin") return
-  const on = existing.REFUGIO_THINGS === "1"
-  const installed = fs.existsSync("/Applications/Things3.app")
-  if (!installed && !on) {
-    console.log(`    ${C.dim}Things 3 not found in /Applications — skipping that connector.${C.reset}\n`)
-    return
-  }
-  console.log(`  ${C.bold}Things 3${C.reset}${on ? ` ${C.green}(enabled)${C.reset}` : ""}`)
-  console.log(`    ${C.dim}Browse and manage your Things to-dos, projects, and areas. Automation permission on first use.${C.reset}`)
-  if (!installed) warn("Things 3 app not found in /Applications — the connector won't work until it's installed")
-  env.REFUGIO_THINGS = (await confirm("Connect Things 3?", true)) ? "1" : ""
-  console.log("")
-}
-
-async function setupNotes(env, existing) {
-  if (os.platform() !== "darwin") return
-  const on = existing.REFUGIO_NOTES === "1"
-  // No installed-check, unlike Things 3: Notes.app ships with macOS.
-  console.log(`  ${C.bold}Apple Notes${C.reset}${on ? ` ${C.green}(enabled)${C.reset}` : ""}`)
-  console.log(`    ${C.dim}Search and read your notes, and create new ones. Automation permission on first use.${C.reset}`)
-  console.log(`    ${C.dim}Never edits or deletes an existing note — it only ever adds.${C.reset}`)
-  env.REFUGIO_NOTES = (await confirm("Connect Apple Notes?", true)) ? "1" : ""
-  console.log("")
-}
+// Apple Reminders, Things 3 and Apple Notes used to be prompted for here.
+// They are switches with no credentials, no clone and no ports — exactly the
+// kind of question that belongs in a window with room to say what the
+// connector will be able to read. The first-run wizard owns them now, and on a
+// packaged install (where this script never runs) it is the only thing that
+// can. See chat/wizard.js for the allow-list of keys it may write.
 
 // ── LLM engine ───────────────────────────────────────────────
 
@@ -1227,16 +1208,22 @@ async function promptCredentials(envPath, targetDir) {
     await promptConnector(ACCOUNT_CONNECTOR)
   }
 
-  // ── Personal connectors — your own messages, mail, and notes ──
-  console.log(`  ${C.bold}── Personal connectors ──${C.reset} ${C.dim}your messages, mail, and notes${C.reset}\n`)
-  await setupHermeneia(env, existing)
+  // ── Personal connectors ───────────────────────────────────
+  //
+  // Most of what used to be here has moved into the window. "Connect Apple
+  // Reminders? [Y/n]" is a fine question asked in a terrible place: it arrives
+  // in a wall of terminal output, before the user has seen REFUGIO at all, and
+  // it cannot show what the connector will be able to read. The first-run
+  // wizard asks the same things with room to explain them — and on a packaged
+  // install, where this script never runs, it is the ONLY thing that asks.
+  //
+  // What stays here is what genuinely belongs to an installer: fetching and
+  // building the WhatsApp bridge, which is a git clone and a compile. The
+  // QR scan that used to follow it does not — Hermeneia serves its own setup
+  // page, and Settings ▸ Connectors links straight to it.
+  console.log(`  ${C.bold}── Personal connectors ──${C.reset} ${C.dim}installed here, switched on in the window${C.reset}\n`)
+  await setupHermeneia(env, existing, { link: false })
   await setupEpistole(env, existing, targetDir)
-  await setupAppleReminders(env, existing)
-  await setupThings(env, existing)
-  await setupNotes(env, existing)
-  for (const conn of PERSONAL_CONNECTORS) {
-    await promptConnector(conn)
-  }
 
   // ── Memory backend (tier-aware) ──────────────────────────
   // MemPalace runs a local ChromaDB + embedding model (~1.5 GB) — great on
@@ -2219,6 +2206,15 @@ async function main() {
   console.log(`  Installation:  ${targetDir}`)
   console.log(`  Credentials:   ${envPath}`)
   console.log("")
+  if (!flags.has("--non-interactive")) {
+    // The rest of setup happens in the window. Said here because the browser
+    // may open behind the terminal, and someone who does not know a setup
+    // screen is waiting will conclude their connectors were never configured.
+    console.log(`  ${C.bold}Finish in the window:${C.reset} choose a model and switch on your connectors.`)
+    console.log(`  ${C.dim}REFUGIO opens setup the first time it starts. It is also at /setup, and`)
+    console.log(`  everything in it is in Settings afterwards.${C.reset}`)
+    console.log("")
+  }
   if (flags.has("--non-interactive")) {
     // Headless: nothing was auto-started or launcher-installed.
     console.log(`  To start REFUGIO:`)
