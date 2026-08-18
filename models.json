@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-08-18",
+  "updated": "2026-08-19",
   "note": "REFUGIO's model catalog. Settings > Models > 'Check for better models' fetches this file from the branch you installed, so a newly-rated model reaches people WITHOUT them updating REFUGIO. scripts/mem-fit.cjs stays the installer's source of truth and the fallback when this file cannot be reached; entries here add to that ladder and override its figures by tag.",
   "fields": {
     "tag": "Ollama model name, with an explicit size tag. Required.",
@@ -89,6 +89,36 @@
       "verified": false,
       "note": "Qwen3 advertises tool calling at 4B. Listed so it can be tried; not yet observed calling a REFUGIO connector, so it is never recommended. Flip verified to true once it has been.",
       "added": "2026-08-18"
+    },
+    {
+      "tag": "lfm2.5:8b",
+      "ramGb": 6.1,
+      "tools": true,
+      "nativeTools": true,
+      "rank": 52,
+      "verified": false,
+      "note": "Liquid's edge MoE (8B total, ~1B active), built for tool calling on consumer hardware; 125K context. Tools badge on Ollama; RAM estimated from the 5.2 GB download. Not yet observed calling a REFUGIO connector.",
+      "added": "2026-08-19"
+    },
+    {
+      "tag": "gemma4:e4b",
+      "ramGb": 11.0,
+      "tools": true,
+      "nativeTools": true,
+      "rank": 58,
+      "verified": false,
+      "note": "Gemma 4 with native function calling (4.5B effective, 128K context). Tools badge on Ollama; RAM estimated from the 9.6 GB download. Not yet observed calling a REFUGIO connector.",
+      "added": "2026-08-19"
+    },
+    {
+      "tag": "muse-glimmer:30b",
+      "ramGb": 20.2,
+      "tools": true,
+      "nativeTools": true,
+      "rank": 80,
+      "verified": false,
+      "note": "Meta's 30B agentic model, tuned for tool use and failure recovery; 128K context. Tools badge on Ollama; RAM estimated from the 18 GB download, so it wants a 32 GB machine. Not yet observed calling a REFUGIO connector.",
+      "added": "2026-08-19"
     }
   ]
 }
