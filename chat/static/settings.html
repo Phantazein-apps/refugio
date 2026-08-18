@@ -87,12 +87,19 @@
       </div>
 
       <div class="memcard" id="memcard"></div>
+
+      <!-- The answer to "is there something better than what I am running?".
+           Empty, and therefore invisible, whenever there isn't. -->
+      <div id="model-advice"></div>
+
       <div class="rows" id="model-rows"></div>
 
       <div class="pane-foot">
+        <button class="btn" id="rescan-models" type="button">Check for better models</button>
         <button class="btn" id="show-downloads" type="button">Download a model</button>
-        <span class="foot-note">Downloads run in the background. Closing this window cancels one in progress.</span>
+        <span class="foot-note" id="rescan-note">A check asks GitHub for one public list of models — nothing about this machine is sent.</span>
       </div>
+      <div id="rescan-result"></div>
       <div class="downloads" id="downloads" hidden></div>
     </section>
 

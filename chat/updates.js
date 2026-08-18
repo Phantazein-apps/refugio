@@ -67,6 +67,18 @@ export function parseLsRemote(stdout, ref) {
     || null;
 }
 
+/** The URL `origin` points at, or null when there is no git or no remote.
+ *
+ *  Exported because chat/model-catalog.js needs to know which repository this
+ *  copy came from, and the git plumbing lives here. It is read, never
+ *  contacted — the catalog fetch decides for itself which hosts it will talk
+ *  to, and it is one.
+ */
+export async function originUrl(dir) {
+  try { return await git(["remote", "get-url", "origin"], { cwd: dir }); }
+  catch { return null; }
+}
+
 /** What the local checkout is. Null fields where the answer isn't knowable —
  *  someone may have installed from a zip, in which case there is no git at all
  *  and an update check is not a thing we can offer. */

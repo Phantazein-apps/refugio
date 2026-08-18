@@ -22,6 +22,39 @@ export async function listModels() {
   }
 }
 
+/**
+ * What Ollama itself knows about one installed model.
+ *
+ * The point is `capabilities`: newer Ollama reports whether a model can call
+ * tools, which lets REFUGIO rate a model nobody has added to a ladder — the
+ * one someone pulled in a terminal, which until now showed as "unrated" with
+ * no size and no fit verdict. Older builds omit the field; that is UNKNOWN,
+ * and the caller must keep it null rather than read it as "no".
+ *
+ * Null on any failure. This is enrichment — never a reason a page fails to
+ * render.
+ */
+export async function showModel(name, signal) {
+  try {
+    const res = await fetch(`${BASE}/api/show`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: name }),
+      signal: signal ?? AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return {
+      capabilities: Array.isArray(d.capabilities) ? d.capabilities : null,
+      parameterSize: d.details?.parameter_size || null,
+      quantization: d.details?.quantization_level || null,
+      family: d.details?.family || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function isUp() {
   try {
     const res = await fetch(`${BASE}/api/tags`, { signal: AbortSignal.timeout(2000) });

@@ -54,6 +54,9 @@ const state = {
   showOutput: new Set(),
   pulling: new Map(),
   update: null,
+  /** The last rescan's answer. Kept out of `status` because it is a record of
+   *  something the user DID — it must not be wiped by the next poll. */
+  rescan: null,
 };
 
 // ── Navigation ──────────────────────────────────────────────
@@ -491,9 +494,15 @@ function modelRow(m, active) {
     why.push("Selected. This is the model your questions go to.");
   } else if (m.tools === null) {
     why.push("REFUGIO has not rated this model's tool calling. It may or may not reach your connectors.");
+  } else if (m.source === "probe") {
+    // Rated by Ollama rather than by REFUGIO. Worth saying: it is the
+    // difference between "someone watched this drive a connector" and "the
+    // model file claims the capability".
+    why.push("Ollama reports this model can call tools. Nobody here has watched it drive a connector.");
   } else {
     why.push("Installed and usable.");
   }
+  if (m.note && !tooBigEver) why.push(el("span.aside", { text: m.note }));
 
   return el(`div.mrow${cls ? `.${cls}` : ""}${tooBigEver ? ".dim" : ""}`, {},
     el(`span.dot.${isActive ? "ok" : tooBigEver ? "idle" : m.tools === false ? "degraded" : "idle"}`),
@@ -506,7 +515,12 @@ function modelRow(m, active) {
     }),
     el("div.mwhy", {}, why),
     el("div.msize", {},
-      el("div.mgb", { text: m.needGb ? `${m.needGb} GB` : "—" }),
+      // A tilde, and a tooltip that says so: an estimate from the download
+      // size is useful, and presenting it as a measurement is not.
+      el("div.mgb", {
+        text: m.needGb ? `${m.estimated ? "~" : ""}${m.needGb} GB` : "—",
+        title: m.estimated ? "Estimated from the download size — nobody has measured this one." : "",
+      }),
       el("div.mfit", {
         class: tooBigEver ? "never" : tooBigNow ? "no" : "ok",
         text: tooBigEver ? "too big" : tooBigNow ? "too big now" : "fits",
@@ -530,6 +544,8 @@ function modelRow(m, active) {
 
 function renderModels() {
   renderMemory();
+  renderAdvice();
+  renderRescanNote();
   const rows = $("model-rows");
   rows.replaceChildren();
   const s = state.status;
@@ -560,6 +576,199 @@ function chooseModel(name) {
   toast(`${name} is now the model REFUGIO uses. Open chats keep their history.`);
 }
 
+// ── "Is there something better?" ────────────────────────────
+//
+// The ladder REFUGIO ships with was frozen the day this copy was installed,
+// and small models that can call tools keep getting better. Without a way to
+// look, the only person who ever finds out is the one who reads release notes
+// — everyone else runs whatever the installer picked, forever.
+//
+// Two halves, and the panel says which one ran:
+//   · Ollama is asked about every installed model. No network. Always runs.
+//   · The catalog is fetched from REFUGIO's repository — the only way a model
+//     released after this build can be offered at all. Runs only when update
+//     checks are on.
+
+function renderAdvice() {
+  const box = $("model-advice");
+  box.replaceChildren();
+  const r = state.status?.recommendation;
+  if (!r) return;
+
+  const gb = (n) => `${n} GB`;
+  const head =
+    r.kind === "tools" ? "The model you are using cannot reach your connectors"
+      : r.kind === "lighter" ? "The same capability, for less memory"
+        : "A better model fits right now";
+
+  const prose =
+    r.kind === "tools"
+      ? el("span", {}, el("strong", { text: r.replaces || "The current model" }),
+          " chats, but it cannot call tools, so every connector on this machine is doing nothing for it. ",
+          el("strong", { text: r.tag }), " can, and needs ", gb(r.needGb),
+          " — which fits in the memory free right now.")
+      : r.kind === "lighter"
+        ? el("span", {}, el("strong", { text: r.tag }), " is rated at least as capable as ",
+            el("strong", { text: r.replaces }), " and needs ", el("strong", { text: gb(r.needGb) }),
+            r.savesGb ? `, ${r.savesGb} GB less. ` : ". ",
+            "That memory goes back to the rest of your machine.")
+        : el("span", {}, el("strong", { text: r.tag }), " answers better than ",
+            el("strong", { text: r.replaces }), ", needs ", el("strong", { text: gb(r.needGb) }),
+            ", and fits in the memory free right now.");
+
+  box.append(el(`div.card${r.kind === "tools" ? ".warn" : ""}`, {},
+    el("h3", { text: head }),
+    el("div.prose", {}, prose),
+    r.note ? el("div.aside", { text: r.note }) : null,
+    el("div.field", {},
+      r.installed
+        ? el("button.btn.primary", { type: "button", text: "Use this", on: { click: () => chooseModel(r.tag) } })
+        : el("button.btn.primary", { type: "button", text: `Download ${r.tag}`, on: { click: () => startDownload(r.tag) } }),
+      el("span.aside", {
+        text: r.installed
+          ? "Already downloaded. Switching takes effect on your next message."
+          : `${gb(r.needGb)} once it is loaded. The download is roughly that size.`,
+      }),
+    ),
+    r.isNew
+      ? el("div.aside", { text: "This one is not in the list REFUGIO shipped with — it came from the catalog check." })
+      : null,
+    // Ranking is a judgement someone made, not a benchmark anyone ran, and
+    // saying so is cheaper than being asked where the number came from.
+    el("div.aside", { text: "\u201cBetter\u201d is REFUGIO\u2019s own rating of these models, kept in the catalog. It is a judgement, not a benchmark." }),
+  ));
+}
+
+/** The line under the buttons: when this was last checked, and what a check
+ *  sends. Stated before the button is pressed, not after. */
+function renderRescanNote() {
+  const c = state.status?.catalog;
+  const note = $("rescan-note");
+  if (!c) { note.textContent = "A check asks GitHub for one public list of models — nothing about this machine is sent."; return; }
+  const when = c.checkedAt ? `Last checked ${new Date(c.checkedAt).toLocaleString()}.` : "Never checked.";
+  const known = c.count ? ` ${c.count} model${c.count === 1 ? "" : "s"} in the catalog.` : "";
+  note.textContent = `${when}${known} A check asks GitHub for one public list — nothing about this machine is sent.`;
+}
+
+function renderRescan() {
+  const box = $("rescan-result");
+  box.replaceChildren();
+  const r = state.rescan;
+  if (!r) return;
+
+  const kids = [];
+  const n = r.network || {};
+
+  if (n.blocked) {
+    kids.push(el("div.card.warn", {},
+      el("h3", { text: "Only the offline half ran" }),
+      el("div.prose", { text: "Update checks are switched off, and this uses the same switch — so REFUGIO " +
+        "did not ask GitHub for the catalog. It did re-read every model installed here, which is the part " +
+        "that needs no network." }),
+      el("div.field", {},
+        el("button.btn", { type: "button", text: "Open Updates", on: { click: () => showPane("updates") } }),
+        el("span.aside", { text: "Turning checks on there makes this button able to find models released since you installed." }),
+      ),
+    ));
+  } else if (n.offline) {
+    kids.push(el("div.card", {},
+      el("h3", { text: "Couldn't reach the network" }),
+      el("div.prose", { text: "The catalog could not be fetched, so this is only what is already on this machine. " +
+        "Nothing is wrong with your models — try again when you are online." }),
+    ));
+  } else if (n.attempted && !n.ok) {
+    kids.push(el("div.card.warn", {},
+      el("h3", { text: "The catalog check failed" }),
+      el("div.prose", {}, "GitHub was asked for the model list and did not give one: ",
+        el("strong", { text: n.error || "unknown error" }), ". Everything below is from this machine."),
+      n.url ? el("div.path", { text: n.url }) : null,
+    ));
+  }
+
+  const added = r.added || [];
+  if (added.length) {
+    kids.push(el("div.card", {},
+      el("h3", { text: added.length === 1 ? "One model this build didn\u2019t know about" : `${added.length} models this build didn\u2019t know about` }),
+      el("div.prose", { text: "Added to the catalog since REFUGIO was released. They are on the download list now." }),
+      el("div.rows", {}, added.map((m) => el("div.drow", {},
+        el("div.dtag", { text: m.tag }),
+        el("div.dsize", { text: `${m.needGb} GB` }),
+        el("div.dprog", { text: m.installed ? "Already installed" : (m.note || (m.verified ? "Rated and ready to download" : "Listed, not yet verified here")) }),
+        m.installed
+          ? el("button.btn", { type: "button", text: "Use this", on: { click: () => chooseModel(m.tag) } })
+          : el("button.btn", { type: "button", text: "Download", on: { click: () => startDownload(m.tag) } }),
+      ))),
+    ));
+  } else if (n.ok) {
+    kids.push(el("div.card", {},
+      el("h3", { text: "Nothing new" }),
+      el("div.prose", {}, "REFUGIO\u2019s catalog has ",
+        el("strong", { text: String(r.catalog?.count || 0) }),
+        " models and none of them are new to this copy",
+        r.catalog?.updated ? el("span", {}, ". The list was last edited ", el("strong", { text: r.catalog.updated }), ".") : ".",
+      ),
+    ));
+  }
+
+  kids.push(el("div.card", {},
+    el("h3", { text: "What the scan read here" }),
+    el("div.kv", {},
+      el("span.k", { text: "installed models re-read" }), el("span", { text: String(r.probed || 0) }),
+      el("span.k", { text: "memory free" }), el("span", { text: r.freeGb == null ? "—" : `${r.freeGb} GB` }),
+      el("span.k", { text: "catalog" }), el("span", { text: n.ok ? "fetched just now" : (r.catalog?.checkedAt ? "from the last check" : "built-in list only") }),
+    ),
+    el("div.aside", { text: "Sizes for models nobody has measured are estimated from their download size and shown with a ~." }),
+    el("div.field", {},
+      el("button.btn.link", { type: "button", text: "Hide this", on: { click: () => { state.rescan = null; renderRescan(); } } }),
+    ),
+  ));
+
+  box.replaceChildren(...kids);
+}
+
+async function rescanModels(btn) {
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Checking\u2026";
+  try {
+    const res = await fetch("/api/chat/models/rescan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network: true }),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || `failed (${res.status})`);
+    markWrite();
+    state.rescan = d;
+    // The poll would bring these along in fifteen seconds; folding them in now
+    // is what makes the page change the moment the button is released.
+    if (state.status) {
+      state.status = { ...state.status, models: d.models, downloadable: d.downloadable,
+        recommendation: d.recommendation, catalog: d.catalog, memory: d.memory, freeGb: d.freeGb };
+    }
+    renderModels();
+    renderRescan();
+    if (!d.recommendation && !(d.added || []).length && d.network?.ok) {
+      toast("Nothing better than what you are running.");
+    }
+  } catch (e) {
+    toast(`The check didn't finish: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+}
+
+/** Reveal the download list and start one, so a "Download X" button somewhere
+ *  else on the page lands the user where the progress bar is. */
+function startDownload(name) {
+  const box = $("downloads");
+  box.hidden = false;
+  renderDownloads(true);
+  pull(name);
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
 function renderDownloads(force = false) {
   const box = $("downloads");
   const list = state.status?.downloadable || [];
@@ -570,6 +779,10 @@ function renderDownloads(force = false) {
     box.append(el("div.waiting", { text: "Nothing else on REFUGIO's list fits this machine — the models it offers are already installed." }));
     return;
   }
+  // This warning used to live in the pane footer, which the rescan note now
+  // occupies. It belongs here anyway — next to the thing it is about.
+  box.append(el("div.drow", {},
+    el("span.aside", { text: "Downloads run in the background. Closing this window cancels one in progress." })));
   for (const m of list) {
     const live = state.pulling.get(m.name);
     const prog = el("div.dprog", { text: live?.text || "Not installed" });
@@ -577,6 +790,11 @@ function renderDownloads(force = false) {
     box.append(el("div.drow", {},
       el("div.dtag", { text: m.name }),
       el("div.dsize", { text: `${m.needGb} GB download` }),
+      // Two things a row has to admit: that REFUGIO learned about this model
+      // after it shipped, and that nobody here has watched it call a
+      // connector. Both are reasons to try it, and neither is a secret.
+      m.isNew ? el("span.pill.plain", { text: "new" }) : null,
+      m.verified === false ? el("span.pill.degraded", { text: "unverified", title: m.note || "Listed, but not yet observed calling a REFUGIO connector." }) : null,
       el("div", {}, prog, bar),
       live
         ? el("button.btn", { type: "button", text: "Cancel", on: { click: () => cancelPull(m.name) } })
@@ -584,6 +802,8 @@ function renderDownloads(force = false) {
     ));
   }
 }
+
+$("rescan-models").addEventListener("click", (e) => rescanModels(e.currentTarget));
 
 $("show-downloads").addEventListener("click", () => {
   const box = $("downloads");
