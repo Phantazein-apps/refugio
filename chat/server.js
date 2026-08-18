@@ -28,7 +28,8 @@ import { readPolicy, applyPolicy, describePolicy, connectorAllowed } from "./man
 import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
-import { listModels, isUp, chatStream, complete, pullModel, OLLAMA_BASE } from "./ollama.js";
+import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
+import * as catalog from "./model-catalog.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, "static");
@@ -107,10 +108,136 @@ function memFit() {
   }
   return _memFit;
 }
+
+// ── What REFUGIO knows about models ─────────────────────────
+//
+// Three sources, merged by chat/model-catalog.js: the built-in ladder above
+// (measured, shipped, frozen the day you installed), the catalog fetched from
+// the repository (curated, and the reason a model released last week can show
+// up here at all), and what Ollama says about the models on this machine
+// (probed — the rescue for a model somebody pulled in a terminal, which used
+// to render as "unrated" with no size and no verdict).
+//
+// Everything below asks this index rather than the ladder directly, so a
+// catalog entry corrects a size and a rating in one place.
+
+const CATALOG_CACHE = join(DATA_DIR, "model-catalog.json");
+
+/** Last successful catalog, from disk at boot and replaced by a check. */
+let catalogState = null;
+/** tag → { ramGb, tools, estimated, parameterSize, quantization }, from
+ *  Ollama's /api/show. Rebuilt by a rescan; never fetched on a poll, because
+ *  /api/show is one request per installed model and the status endpoint runs
+ *  every fifteen seconds in an open window. */
+let probeState = [];
+
+function modelIndex() {
+  return catalog.mergeIndex({
+    builtin: memFit()?.MODEL_LADDER || [],
+    catalog: catalogState?.models || [],
+    probes: probeState,
+  });
+}
+
+const bareTag = (name) => String(name || "").split("@")[0];
+
+/** What a model needs, from whichever source rated it. 0 when nobody has. */
+function modelRamGb(tag) {
+  return modelIndex().get(bareTag(tag))?.ramGb || 0;
+}
+
 function modelSupportsTools(tag) {
   if (!tag) return null;
   // Bare tag ("qwen2.5:3b") vs. an Ollama name that may carry a digest suffix.
-  return memFit() ? memFit().supportsTools(tag.split("@")[0]) : null;
+  // Still null (not false) for anything unrated: unknown is not incapable.
+  return modelIndex().get(bareTag(tag))?.tools ?? null;
+}
+
+/** Load the last catalog we fetched. No network — boot must not open a socket,
+ *  and a cached list is the whole reason the check survives a restart. */
+function loadCatalogCache() {
+  try {
+    catalogState = catalog.readCatalogCache(CATALOG_CACHE);
+    if (catalogState) log(`model catalog: ${catalogState.models.length} entries, checked ${catalogState.checkedAt || "never"}`);
+  } catch { catalogState = null; }
+}
+
+/**
+ * Ask the repository for the current catalog.
+ *
+ * Gated by the SAME switch as update checks, and deliberately so: Settings ▸
+ * Updates promises that off means REFUGIO makes no requests. A second network
+ * feature that quietly ignored that switch would make the first one a lie.
+ */
+async function runCatalogCheck() {
+  const local = await updates.localState(REPO_DIR);
+  const remote = await updates.originUrl(REPO_DIR);
+  const result = await catalog.checkCatalog({ remote, branch: local.branch });
+  if (result.ok) {
+    const checkedAt = new Date().toISOString();
+    catalogState = { checkedAt, url: result.url, branch: result.branch, version: result.version, updated: result.updated, models: result.models, skipped: result.skipped };
+    catalog.writeCatalogCache(CATALOG_CACHE, catalogState);
+    log(`model catalog: ${result.models.length} entries from ${result.branch}${result.skipped ? `, ${result.skipped} skipped` : ""}`);
+  }
+  return result;
+}
+
+/**
+ * Ask Ollama about every installed model.
+ *
+ * The half of "rescan" that needs no network at all, and the half that works
+ * on a machine that has never been online: sizes come from /api/tags, tool
+ * ratings from /api/show. Bounded concurrency because this is one request per
+ * model and a user can have a dozen.
+ */
+async function probeInstalled(models) {
+  const out = [];
+  const queue = [...models];
+  const worker = async () => {
+    while (queue.length) {
+      const m = queue.shift();
+      const info = await showModel(m.name);
+      out.push({
+        tag: bareTag(m.name),
+        ramGb: catalog.estimateRamGb(m.size),
+        tools: catalog.toolsFromCapabilities(info?.capabilities),
+        parameterSize: info?.parameterSize || null,
+        quantization: info?.quantization || null,
+      });
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  probeState = out;
+  return out;
+}
+
+/** Is there something better than what is running? Computed here so the chat,
+ *  the settings page and the rescan result cannot disagree about the answer. */
+function currentRecommendation(index, installedNames, activeModel) {
+  const mf = memFit();
+  if (!mf) return null;
+  return catalog.recommend({
+    index,
+    installed: installedNames,
+    active: activeModel,
+    freeGb: mf.availableMemGb(),
+    totalGb: totalmem() / 1024 ** 3,
+  });
+}
+
+/** The summary the Models pane shows above the button. */
+function catalogSummary(index) {
+  const isNew = catalog.newModels(index);
+  return {
+    checkedAt: catalogState?.checkedAt || null,
+    updated: catalogState?.updated || null,
+    branch: catalogState?.branch || null,
+    count: catalogState?.models?.length || 0,
+    // Models this build shipped without — the answer to "did checking find
+    // anything?", which is the only reason the button exists.
+    newTags: isNew.map((m) => m.tag),
+    enabled: updateSettings().enabled,
+  };
 }
 
 /** Describe each installed model against the RAM free right now.
@@ -122,6 +249,7 @@ function modelSupportsTools(tag) {
  *  the actual question — can I run this without closing anything first. */
 function describeModels(names, activeModel) {
   const mf = memFit();
+  const index = modelIndex();
   const freeGb = mf ? mf.availableMemGb() : null;
   let budget = freeGb == null ? null : freeGb - 0.05 - 1.0;  // chat UI + headroom
 
@@ -130,11 +258,12 @@ function describeModels(names, activeModel) {
   // 2.6 GB, after which the label says "free 2.6 GB more" about the model you
   // are successfully using. Switching away returns that memory, so it belongs
   // in the budget for every other model too.
-  const activeGb = activeModel && mf ? mf.modelRamGb(activeModel.split("@")[0]) : 0;
+  const activeGb = activeModel ? modelRamGb(activeModel) : 0;
   if (budget != null && activeGb) budget += activeGb;
 
   return names.map((name) => {
-    const needGb = mf ? mf.modelRamGb(name.split("@")[0]) : 0;
+    const known = index.get(bareTag(name));
+    const needGb = known?.ramGb || 0;
     // The running model demonstrably fits — it is running.
     const isActive = !!activeModel && name === activeModel;
     const fits = isActive ? true : (needGb && budget != null ? needGb <= budget : null);
@@ -154,7 +283,12 @@ function describeModels(names, activeModel) {
       // Kept for the tooltip, where a number is useful to someone who wants
       // one. It is no longer the label.
       freeUpGb: fits === false ? Math.max(0.1, Math.round((needGb - budget) * 10) / 10) : null,
-      tools: modelSupportsTools(name),
+      tools: known?.tools ?? null,
+      // Where the numbers came from, so the row can say so. An estimate
+      // presented as a measurement is the one thing this page must not do.
+      source: known?.source || null,
+      estimated: !!known?.estimated,
+      note: known?.note || null,
     };
   });
 }
@@ -253,7 +387,7 @@ function memoryBreakdown(activeModel) {
   if (!mf) return null;
   const totalGb = totalmem() / 1024 ** 3;
   const freeGb = mf.availableMemGb();
-  const activeGb = activeModel ? mf.modelRamGb(activeModel.split("@")[0]) : 0;
+  const activeGb = activeModel ? modelRamGb(activeModel) : 0;
   const r = (n) => Math.round(n * 10) / 10;
   return {
     totalGb: r(totalGb),
@@ -279,11 +413,27 @@ function memoryBreakdown(activeModel) {
 function downloadableModels(installed) {
   const mf = memFit();
   if (!mf) return [];
-  const have = new Set(installed.map((n) => n.split("@")[0]));
+  const have = new Set(installed.map(bareTag));
   const totalGb = totalmem() / 1024 ** 3;
-  return mf.MODEL_LADDER
-    .filter((m) => !have.has(m.tag) && m.ramGb <= totalGb - 1.5 && m.tools)
-    .map((m) => ({ name: m.tag, needGb: m.ramGb, tools: true }));
+  // Read from the merged index rather than the ladder, which is what makes a
+  // model added to the catalog after this build shipped actually downloadable.
+  // This list is also the whitelist POST /api/chat/models/pull checks against,
+  // so every filter here is a filter on what Ollama can be asked to fetch.
+  return [...modelIndex().values()]
+    .filter((m) => !have.has(m.tag) && m.tools === true && m.ramGb > 0 && m.ramGb <= totalGb - 1.5)
+    // Most capable first, then lightest — the order someone reads to decide.
+    .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || a.ramGb - b.ramGb)
+    .map((m) => ({
+      name: m.tag,
+      needGb: m.ramGb,
+      tools: true,
+      rank: m.rank,
+      // Two labels the download row earns: "this build never knew about it",
+      // and "nobody here has watched it call a connector".
+      isNew: !!m.isNew,
+      verified: !!m.verified,
+      note: m.note || null,
+    }));
 }
 
 // Tool limits. A large tool surface degrades model accuracy — they pick wrong
@@ -921,6 +1071,11 @@ async function route(req, res, url) {
       // true / false / null-when-unrated. The UI warns only on an explicit
       // false — a model we've never rated is unknown, not incapable.
       modelTools: modelSupportsTools(model),
+      // Is there something better than what is running? Computed from what is
+      // already known here — no network, so it is safe on a fifteen-second
+      // poll, and it stays right after a rescan without another round trip.
+      recommendation: currentRecommendation(modelIndex(), models.map((m) => m.name), model),
+      catalog: catalogSummary(modelIndex()),
       // The composer needs this on every poll: when web search is switched off
       // the per-message control must disappear, not sit there doing nothing.
       web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
@@ -928,6 +1083,87 @@ async function route(req, res, url) {
       // much as Settings does — the paperclip has to go, not sit there and
       // return a 403 when pressed.
       managed: LOCKED,
+    });
+  }
+
+  // What the last check found. Cached only — this never opens a socket, for
+  // the same reason GET /api/chat/update doesn't: the settings page polls, and
+  // a poll that could reach github.com turns "leave the window open" into a
+  // stream of requests.
+  if (p === "/api/chat/models/catalog" && req.method === "GET") {
+    const index = modelIndex();
+    return sendJson(res, 200, {
+      ...catalogSummary(index),
+      models: [...index.values()].map((m) => ({
+        tag: m.tag, ramGb: m.ramGb, tools: m.tools, rank: m.rank,
+        verified: m.verified, source: m.source, isNew: m.isNew, note: m.note,
+      })),
+    });
+  }
+
+  // Rescan. The button this endpoint exists for is "is there something better
+  // than what I am running?", and it does two separable things:
+  //
+  //   local   — ask Ollama about every installed model (/api/show), which
+  //             re-rates anything nobody has rated and re-measures free RAM.
+  //             No network. Always runs.
+  //   network — fetch models.json from this repository, which is the only way
+  //             a model released after this build can ever be offered. Runs
+  //             only when update checks are on, and says plainly when it
+  //             didn't.
+  //
+  // POST because it does something: it opens a connection to
+  // raw.githubusercontent.com. That is not a thing to hang off a GET someone
+  // can be led into making.
+  if (p === "/api/chat/models/rescan" && req.method === "POST") {
+    const body = await readBody(req);
+    const wantNetwork = body.network !== false;
+    const before = new Set(catalogState?.models?.map((m) => m.tag) || []);
+
+    let net = null;
+    let networkBlocked = false;
+    if (wantNetwork) {
+      if (!updateSettings().enabled) networkBlocked = true;
+      else net = await runCatalogCheck();
+    }
+
+    const up = await isUp();
+    const installed = up ? await listModels() : [];
+    if (up) await probeInstalled(installed);
+
+    const index = modelIndex();
+    const model = await resolveModel();
+    const names = installed.map((m) => m.name);
+    // "New" here means new TO THIS MACHINE — entries the fetched catalog added
+    // to what was already cached. On a first check that is everything the
+    // catalog carries beyond the built-in ladder, which is exactly what
+    // someone who has never checked wants to see.
+    const added = [...index.values()].filter((m) => m.isNew && (!before.size || !before.has(m.tag)));
+
+    log(`model rescan: ${installed.length} installed, ${index.size} known${net?.ok ? `, catalog ${net.models.length}` : ""}`);
+    return sendJson(res, 200, {
+      checkedAt: new Date().toISOString(),
+      network: {
+        attempted: wantNetwork && !networkBlocked,
+        blocked: networkBlocked,
+        ok: !!net?.ok,
+        offline: !!net?.offline,
+        error: net?.error || null,
+        url: net?.url || catalogState?.url || null,
+        skipped: net?.skipped || 0,
+      },
+      probed: up ? installed.length : 0,
+      ollamaUp: up,
+      catalog: catalogSummary(index),
+      added: added.map((m) => ({
+        tag: m.tag, needGb: m.ramGb, tools: m.tools, verified: m.verified, note: m.note,
+        installed: names.map(bareTag).includes(m.tag),
+      })),
+      models: describeModels(names, model),
+      downloadable: downloadableModels(names),
+      recommendation: currentRecommendation(index, names, model),
+      memory: memoryBreakdown(model),
+      freeGb: memFit() ? Math.round(memFit().availableMemGb() * 10) / 10 : null,
     });
   }
 
@@ -1235,6 +1471,8 @@ async function route(req, res, url) {
 // ── Boot ────────────────────────────────────────────────────
 
 store.initStore(DB_PATH);
+// The catalog from the last check, read off disk. No network at boot.
+loadCatalogCache();
 
 // Sweep uploads that were chosen but never sent. A file picked and then
 // abandoned — window closed, question given up on — is a copy of the user's

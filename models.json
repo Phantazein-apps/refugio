@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "updated": "2026-08-18",
+  "note": "REFUGIO's model catalog. Settings > Models > 'Check for better models' fetches this file from the branch you installed, so a newly-rated model reaches people WITHOUT them updating REFUGIO. scripts/mem-fit.cjs stays the installer's source of truth and the fallback when this file cannot be reached; entries here add to that ladder and override its figures by tag.",
+  "fields": {
+    "tag": "Ollama model name, with an explicit size tag. Required.",
+    "ramGb": "Approximate resident RAM under Ollama at Q4 with a modest KV cache. Required.",
+    "tools": "Can it drive REFUGIO's connectors at all? Required, boolean. This is the gate the whole product hangs on.",
+    "nativeTools": "Can it drive Open WebUI's native function calling, as opposed to OWUI's prompt-based mode?",
+    "rank": "Hand-assigned capability score, higher is better. Independent of ramGb — that is the point: a newer small model can outrank an older large one. Built-in ladder entries are 10, 20, 30... so a catalog entry can land between them.",
+    "verified": "Has someone actually watched this model call a REFUGIO connector? Unverified models are listed and downloadable, and are NEVER recommended.",
+    "note": "One line shown next to the model in Settings.",
+    "added": "When this entry was added to the catalog."
+  },
+  "models": [
+    {
+      "tag": "qwen2.5:0.5b",
+      "ramGb": 0.8,
+      "tools": false,
+      "nativeTools": false,
+      "rank": 10,
+      "verified": true,
+      "note": "Chats. Ignores its tool list and asks you to paste the data in.",
+      "added": "2025-07-30"
+    },
+    {
+      "tag": "llama3.2:1b",
+      "ramGb": 1.5,
+      "tools": false,
+      "nativeTools": false,
+      "rank": 20,
+      "verified": true,
+      "note": "Fast, and cannot reach your connectors.",
+      "added": "2025-07-30"
+    },
+    {
+      "tag": "qwen2.5:3b",
+      "ramGb": 2.6,
+      "tools": true,
+      "nativeTools": false,
+      "rank": 30,
+      "verified": true,
+      "note": "The floor: the smallest model observed to enumerate its tools and call the right one.",
+      "added": "2025-07-30"
+    },
+    {
+      "tag": "llama3.2:3b",
+      "ramGb": 3.0,
+      "tools": true,
+      "nativeTools": false,
+      "rank": 40,
+      "verified": true,
+      "added": "2025-07-30"
+    },
+    {
+      "tag": "llama3.1:8b",
+      "ramGb": 5.8,
+      "tools": true,
+      "nativeTools": true,
+      "rank": 50,
+      "verified": true,
+      "note": "The first tier that drives Open WebUI's native function calling.",
+      "added": "2025-07-30"
+    },
+    {
+      "tag": "qwen2.5:14b",
+      "ramGb": 9.5,
+      "tools": true,
+      "nativeTools": true,
+      "rank": 60,
+      "verified": true,
+      "added": "2025-07-30"
+    },
+    {
+      "tag": "gpt-oss:20b",
+      "ramGb": 13.5,
+      "tools": true,
+      "nativeTools": true,
+      "rank": 70,
+      "verified": true,
+      "added": "2025-07-30"
+    },
+    {
+      "tag": "qwen3:4b",
+      "ramGb": 3.3,
+      "tools": true,
+      "nativeTools": true,
+      "rank": 55,
+      "verified": false,
+      "note": "Qwen3 advertises tool calling at 4B. Listed so it can be tried; not yet observed calling a REFUGIO connector, so it is never recommended. Flip verified to true once it has been.",
+      "added": "2026-08-18"
+    }
+  ]
+}
