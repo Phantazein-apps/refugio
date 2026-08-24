@@ -193,31 +193,12 @@ jobs:
           }
           $root = "$env:ProgramFiles\REFUGIO"
 
-          # Diagnostic only, unconditional. runtime\ goes missing from the
-          # installed payload despite the build staging it — establish whether
-          # it was ever IN the package (harvest problem) or was installed and
-          # then lost (install problem), rather than guessing.
-          Write-Host "--- what landed under $root (2 levels) ---"
-          if (Test-Path $root) {
-            Get-ChildItem $root -Depth 1 | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-          } else {
-            Write-Host "($root does not exist at all)"
+          # A 32-bit package would be WOW64-redirected to Program Files (x86)
+          # and still report a successful install, so name that case rather
+          # than reporting each redirected file as individually "missing".
+          if ((-not (Test-Path $root)) -and (Test-Path "${env:ProgramFiles(x86)}\REFUGIO")) {
+            throw "installed to Program Files (x86) — the package is 32-bit; wix build needs -arch x64"
           }
-
-          Write-Host "--- what the package CONTAINS (administrative install) ---"
-          $admin = Join-Path $env:RUNNER_TEMP "admin-extract"
-          Start-Process msiexec -ArgumentList "/a `"$msi`" /qn TARGETDIR=`"$admin`"" -Wait
-          if (Test-Path $admin) {
-            Get-ChildItem $admin -Recurse -Filter "node*.exe" | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-            Write-Host "total files in package: $((Get-ChildItem $admin -Recurse -File).Count)"
-          } else {
-            Write-Host "(administrative install produced nothing)"
-          }
-
-          Write-Host "--- install.log lines mentioning runtime/node ---"
-          Select-String -Path install.log -Pattern 'runtime|node\.exe' |
-            Select-Object -First 40 | ForEach-Object { $_.Line } | Write-Host
-
           foreach ($f in @("runtime\node.exe", "runtime\refugio-node.exe", "start-refugio.cjs",
                            "chat\server.js", "packaging\windows\user-setup.js")) {
             if (-not (Test-Path "$root\$f")) { throw "missing from the payload: $f" }
