@@ -200,7 +200,7 @@ jobs:
             throw "installed to Program Files (x86) — the package is 32-bit; wix build needs -arch x64"
           }
           foreach ($f in @("runtime\node.exe", "runtime\refugio-node.exe", "start-refugio.cjs",
-                           "chat\server.js", "packaging\windows\user-setup.js")) {
+                           "chat\server.js", "packaging\windows\user-setup.cjs")) {
             if (-not (Test-Path "$root\$f")) { throw "missing from the payload: $f" }
           }
           if (-not (Test-Path "HKLM:\SOFTWARE\Microsoft\Active Setup\Installed Components\{B4F1D6C2-3E88-4A17-9D20-6C5E8B1A7F03}")) {
@@ -220,8 +220,15 @@ jobs:
           # The per-user step has to survive being run twice: Active Setup can
           # re-run it, and a second run that throws is a crash dialog on
           # someone's first logon.
-          & "$root\runtime\node.exe" "$root\packaging\windows\user-setup.js"
-          & "$root\runtime\node.exe" "$root\packaging\windows\user-setup.js"
+          #
+          # Each run's exit code is checked. Without that this printed
+          # "idempotent" while both runs were crashing on every logon — the
+          # step only failed at all because pwsh propagates the last exit
+          # code, which pointed at the wrong line.
+          foreach ($run in 1, 2) {
+            & "$root\runtime\node.exe" "$root\packaging\windows\user-setup.cjs"
+            if ($LASTEXITCODE -ne 0) { throw "user-setup run $run exited $LASTEXITCODE" }
+          }
           Write-Host "user-setup is idempotent"
 
       - name: Check the deploy-time policy properties

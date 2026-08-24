@@ -92,7 +92,7 @@
           <RegistryValue Type="string" Value="REFUGIO per-user setup" />
           <RegistryValue Name="Version" Type="string" Value="1,0,0,0" />
           <RegistryValue Name="StubPath" Type="expandable"
-                         Value="&quot;[INSTALLFOLDER]runtime\node.exe&quot; &quot;[INSTALLFOLDER]packaging\windows\user-setup.js&quot;" />
+                         Value="&quot;[INSTALLFOLDER]runtime\node.exe&quot; &quot;[INSTALLFOLDER]packaging\windows\user-setup.cjs&quot;" />
           <!-- Runs without a console window flashing on every first logon. -->
           <RegistryValue Name="IsInstalled" Type="integer" Value="1" />
         </RegistryKey>
