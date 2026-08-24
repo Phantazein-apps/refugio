@@ -208,8 +208,15 @@ jobs:
           }
           # Load, not parse. A payload whose dependencies failed to install
           # passes a syntax check and then dies on first launch.
-          & "$root\runtime\node.exe" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')"
-          if ($LASTEXITCODE -ne 0) { throw "the payload's dependencies do not resolve" }
+          #
+          # From $root, not the workspace: -e resolves against the current
+          # directory, and the checkout this job runs in has no node_modules
+          # of its own — so without this the check reports on the wrong tree.
+          Push-Location $root
+          try {
+            & "$root\runtime\node.exe" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')"
+            if ($LASTEXITCODE -ne 0) { throw "the payload's dependencies do not resolve" }
+          } finally { Pop-Location }
           # The per-user step has to survive being run twice: Active Setup can
           # re-run it, and a second run that throws is a crash dialog on
           # someone's first logon.
