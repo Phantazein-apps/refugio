@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { callTool } from "../servers/notes.js";
+import { callTool } from "../servers/notes-tools.js";
 
 const NOTE = {
   id: "x-coredata://ABC/ICNote/p123",
