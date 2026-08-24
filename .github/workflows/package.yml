@@ -175,7 +175,22 @@ jobs:
         run: |
           $msi = (Get-ChildItem dist\*.msi | Select-Object -First 1).FullName
           $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; throw "msiexec exited $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) {
+            # The tail alone is boilerplate rollback/cleanup noise — the actual
+            # failing action is wherever a standard action logs "return value 3",
+            # which a 60-line tail on a package with several components does not
+            # reliably reach.
+            $log = Get-Content install.log
+            $hits = $log | Select-String -Pattern 'return value 3' -SimpleMatch
+            foreach ($h in $hits) {
+              $i = $h.LineNumber - 1
+              Write-Host "--- around line $($h.LineNumber) ---"
+              $log[([Math]::Max(0, $i - 20))..([Math]::Min($log.Count - 1, $i + 2))]
+            }
+            Write-Host "--- tail ---"
+            Get-Content install.log -Tail 60
+            throw "msiexec exited $($p.ExitCode)"
+          }
           $root = "$env:ProgramFiles\REFUGIO"
           foreach ($f in @("runtime\node.exe", "runtime\refugio-node.exe", "start-refugio.cjs",
                            "chat\server.js", "packaging\windows\user-setup.js")) {
