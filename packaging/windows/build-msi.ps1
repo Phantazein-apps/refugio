@@ -91,10 +91,26 @@ Say "Building the MSI"
 if ($LASTEXITCODE -ne 0) {
   Die "WiX is not installed. Run: dotnet tool install --global wix"
 }
-& wix extension add -g WixToolset.Util.wixext 2>&1 | Out-Null
+
+# WiX v7 gates every command behind acknowledging the Open Source Maintenance
+# Fee EULA (https://docs.firegiant.com/wix/osmf/) — without this, `wix
+# extension add` and `wix build` both fail with WIX7015/WIX7016. Acceptance
+# is written to the user profile and persists for the rest of this run.
+$eulaOut = & wix eula accept wix7 2>&1
+if ($LASTEXITCODE -ne 0) { Die "wix eula accept failed:`n$eulaOut" }
+
+$extOut = & wix extension add -g WixToolset.Util.wixext 2>&1
+if ($LASTEXITCODE -ne 0) { Die "wix extension add failed:`n$extOut" }
 
 $msi = Join-Path $Out "REFUGIO-$Version.msi"
+# -arch x64 is load-bearing, not a detail. wix build defaults to x86, and a
+# 32-bit package is WOW64-redirected at install time: ProgramFiles64Folder in
+# REFUGIO.wxs lands in "C:\Program Files (x86)" and every HKLM write lands
+# under WOW6432Node. The install still reports success, so the only symptom is
+# that nothing is where it is supposed to be — including the bundled 64-bit
+# node.exe.
 & wix build (Join-Path $PSScriptRoot "REFUGIO.wxs") `
+    -arch x64 `
     -d ProductVersion="$Version" -d StageDir="$Stage" `
     -ext WixToolset.Util.wixext `
     -o $msi

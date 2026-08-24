@@ -19,7 +19,7 @@ packaging/
 └── windows/
     ├── REFUGIO.wxs             WiX v4/v5, perMachine, Active Setup
     ├── build-msi.ps1           stage → wix build → signtool
-    ├── user-setup.js           the per-user half, run by Active Setup
+    ├── user-setup.cjs          the per-user half, run by Active Setup
     ├── REFUGIO.admx            Group Policy template
     └── en-US/REFUGIO.adml
 ```
@@ -42,7 +42,7 @@ So the packages replace that script's job with the standard split:
 | | macOS | Windows |
 |---|---|---|
 | **Per machine**, at install | `/usr/local/refugio`, `/Applications/REFUGIO.app`, `/Library/LaunchAgents/…` | `C:\Program Files\REFUGIO`, `HKLM` |
-| **Per user**, at first login | `/Library/LaunchAgents` agent → `refugio-user-setup` | Active Setup → `user-setup.js` |
+| **Per user**, at first login | `/Library/LaunchAgents` agent → `refugio-user-setup` | Active Setup → `user-setup.cjs` |
 
 Active Setup is the right Windows mechanism here and is under-used: its
 `StubPath` runs once per user, the first time each user logs on after the
