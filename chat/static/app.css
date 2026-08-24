@@ -656,3 +656,69 @@ textarea {
   color: var(--ink-faint); font-size: 1rem; line-height: 1; padding: 0 var(--s1);
 }
 .update-bar .ub-x:hover { color: var(--ink); }
+
+
+/* ── Discussion modes ───────────────────────────────────────
+   The composer's second control. Web arming shouts because it is the one
+   thing that leaves this machine; a mode is the opposite promise, so this
+   matches .web-arm's shape and carries none of its alarm. */
+.mode-pill {
+  flex: 0 0 auto; align-self: center;
+  border: 1px solid var(--border); background: none; color: var(--ink-faint);
+  border-radius: var(--radius-pill); font: 500 .75rem var(--font-sans);
+  padding: 4px var(--s3); cursor: pointer; white-space: nowrap;
+}
+.mode-pill:hover { color: var(--ink); border-color: var(--ink-faint); }
+/* Once the conversation has a mode the pill is a label, not a control: the
+   mode is fixed for its life, and something that cannot be clicked should
+   not invite a click. */
+.mode-pill.is-set { background: var(--bg-surface-3); color: var(--ink); cursor: default; }
+.mode-pill.is-set:hover { border-color: var(--border); }
+
+/* Belongs to the whole conversation, unlike .web-warn which belongs to the
+   next message — so it is restored from the stored mode on reopen, and what
+   the mode promised is still on screen a week later. */
+.mode-banner {
+  max-width: 46rem; margin: 0 auto var(--s2);
+  padding: var(--s2) var(--s3); border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent); background: var(--bg-surface-3);
+  font-size: .75rem; line-height: 1.1rem; color: var(--ink-muted);
+}
+
+.composer { position: relative; }
+.mode-panel {
+  position: absolute; bottom: calc(100% - var(--s2)); left: 50%; transform: translateX(-50%);
+  width: min(46rem, calc(100% - var(--s5) * 2));
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-surface-2); box-shadow: 0 12px 32px rgba(0,0,0,.22);
+  padding: var(--s2); z-index: 40; max-height: 60vh; overflow-y: auto;
+}
+.mode-panel-head {
+  font-size: .6875rem; color: var(--ink-faint);
+  padding: var(--s2) var(--s3); line-height: 1rem;
+}
+.mode-opt {
+  display: block; width: 100%; text-align: left; border: 0; background: none;
+  color: var(--ink); border-radius: var(--radius-sm);
+  padding: var(--s2) var(--s3); cursor: pointer; font: inherit;
+}
+.mode-opt:hover:not(:disabled) { background: var(--bg-surface-3); }
+.mode-opt:disabled { opacity: .55; cursor: default; }
+.mode-opt-title { font: 600 .8125rem var(--font-sans); }
+.mode-opt-hint { font-size: .75rem; color: var(--ink-faint); margin-top: 2px; line-height: 1.05rem; }
+.mode-opt-note { font-size: .6875rem; color: var(--warn); margin-top: 3px; line-height: 1rem; }
+
+/* REFUGIO speaking for itself, not the model speaking. The crisis resources
+   are appended by the server whatever the model said, so they must not read
+   as part of the reply: someone deciding whether to trust a phone number
+   should be able to see who is offering it. */
+.crisis-note {
+  border: 1px solid var(--warn); border-left: 3px solid var(--warn);
+  background: var(--bg-surface-3); border-radius: var(--radius-sm);
+  padding: var(--s2) var(--s3); margin: var(--s3) 0 var(--s2);
+  font-size: .8125rem; line-height: 1.25rem; color: var(--ink);
+}
+.crisis-note .who {
+  display: block; font: 700 .625rem var(--font-sans); color: var(--warn);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px;
+}

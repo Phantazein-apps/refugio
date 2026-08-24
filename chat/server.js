@@ -29,8 +29,8 @@ import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import {
-  MODE_DEFAULTS, armWebSearch, carriesCrisisLayer, crisisNotice, modePreamble, modeTitle,
-  modeToolFilter, toolRefusal, validateMode,
+  CRISIS_RESOURCES, MODES, MODES_UI, MODE_DEFAULTS, armWebSearch, carriesCrisisLayer, crisisNotice,
+  modePreamble, modeSummaries, modeTitle, modeToolFilter, toolRefusal, validateMode,
 } from "./modes.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
@@ -631,12 +631,40 @@ function countConnectors(rows) {
  *  Web search travels with the connectors because that panel is where the
  *  question "what can REFUGIO reach?" is answered — but as its own field, not
  *  as a row in the list, because it is the one entry that isn't local. */
+/** The modes block carried by every payload that carries `web`.
+ *
+ *  Built in one place because it appears in three, and three hand-written
+ *  copies of the same shape is how a surface ends up offering a mode the
+ *  server will refuse. `available` is only the modes this build actually
+ *  defines — an id in the defaults with no content stays invisible — and it
+ *  never includes prompt text: that is instructions to a model, and pasting it
+ *  into a window invites the reader to treat it as a promise. */
+function modesPayload(rows) {
+  const ok = new Set((rows || []).filter((r) => r.state === "ok").map((r) => r.id));
+  return {
+    ...MODES_UI,
+    // Sent so the window can tell REFUGIO's own words apart from the model's.
+    // The server appends this to a reply whatever the model said, and someone
+    // deciding whether to trust a phone number should be able to see who is
+    // offering it.
+    resources: CRISIS_RESOURCES,
+    enabled: { ...MODE_DEFAULTS, ...(connectorSettings.modes || {}) },
+    available: modeSummaries().map((m) => ({
+      ...m,
+      // A paired mode is shown and not selectable when its connector is not
+      // ready, with the connector's own state named rather than invented.
+      connectorOk: m.requiresConnector ? ok.has(m.requiresConnector) : true,
+    })),
+  };
+}
+
 function connectorPayload(rows) {
   return {
     connectors: rows,
     starting: !connectorsSettled,
     ...countConnectors(rows),
     web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+    modes: modesPayload(rows),
     managed: LOCKED,
   };
 }
@@ -1123,6 +1151,27 @@ async function route(req, res, url) {
     return sendJson(res, 200, connectorPayload(await connectorRows()));
   }
 
+  if (p === "/api/chat/modes" && req.method === "POST") {
+    // Policy is checked here and not only at load. `clamped()` runs once at
+    // startup, so without this a locked deployment would accept the write and
+    // silently undo it on the next restart — the worst of the three options,
+    // same reasoning as the web route above. `LOCKED.modes` does not exist
+    // until Session 8 adds `allowedModes`; undefined is falsy and this reads
+    // as unlocked until it does.
+    if (LOCKED.modes) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
+    const body = await readBody(req);
+    const id = typeof body.mode === "string" ? body.mode.trim() : "";
+    // Validated against the modes that have content, not against the defaults:
+    // a stale page offering an id this build never shipped should be told so,
+    // rather than have a boolean written for a mode nobody can reach.
+    if (!MODES[id]) return sendJson(res, 400, { error: `There is no discussion mode called "${id.slice(0, 40)}".` });
+    connectorSettings.modes = { ...connectorSettings.modes, [id]: !!body.enabled };
+    saveSettings(connectorSettings);
+    connectorCache = { at: 0, rows: [] };          // force a fresh read
+    log(`mode ${id} ${connectorSettings.modes[id] ? "enabled" : "disabled"}`);
+    return sendJson(res, 200, connectorPayload(await connectorRows()));
+  }
+
   if (p === "/api/chat/status") {
     const up = await isUp();
     const models = up ? await listModels() : [];
@@ -1155,6 +1204,7 @@ async function route(req, res, url) {
       // The composer needs this on every poll: when web search is switched off
       // the per-message control must disappear, not sit there doing nothing.
       web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+      modes: modesPayload(rows),
       // Which controls an administrator has taken away. The chat needs it as
       // much as Settings does — the paperclip has to go, not sit there and
       // return a 403 when pressed.
@@ -1301,6 +1351,10 @@ async function route(req, res, url) {
       // and then reports a broken connector.
       connectors: setupConnectors(saved),
       web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+      // The wizard has no connector rows of its own — it is describing a
+      // machine that may not have started any yet — so paired modes report
+      // their connector as not ready here rather than guessing it is.
+      modes: modesPayload([]),
       managed: LOCKED,
       envPath: ENV_PATH,
     });

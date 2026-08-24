@@ -6,6 +6,30 @@
 // emits tokens slowly enough that waiting for a complete reply feels broken.
 
 const $ = (id) => document.getElementById(id);
+
+/** Build an element: `el("div.a.b", {attrs}, ...children)`.
+ *
+ *  settings.js has had one of these for a while; this file has been getting by
+ *  with createElement because nothing in it built more than a div with text in
+ *  it. The mode picker does. Text goes in via `text`/textContent and never as
+ *  innerHTML — house rule, and the strings here come from the backend. */
+function el(spec, attrs = {}, ...kids) {
+  const [tag, ...classes] = spec.split(".");
+  const node = document.createElement(tag || "div");
+  if (classes.length) node.className = classes.join(" ");
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "on") { for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn); }
+    else if (k === "text") node.textContent = v;
+    else if (k in node) node[k] = v;
+    else node.setAttribute(k, String(v));
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    node.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+}
 const els = {
   convos: $("convos"), thread: $("thread"), scroll: $("scroll"), empty: $("empty"),
   input: $("input"), send: $("send"), newChat: $("new-chat"),
@@ -13,6 +37,8 @@ const els = {
   modelName: $("model-name"), modelSize: $("model-size"), themeBtn: $("theme-btn"),
   status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
+  modePill: $("mode-pill"), modePillText: $("mode-pill-text"),
+  modePanel: $("mode-panel"), modeBanner: $("mode-banner"),
   attachBtn: $("attach-btn"), attachInput: $("attach-input"),
   attachTray: $("attach-tray"), dropVeil: $("drop-veil"),
   rail: $("rail"), railToggle: $("rail-toggle"),
@@ -26,6 +52,12 @@ const state = {
   // connectors panel; `webArmed` is this one message. The second is never
   // inferred from the first — that is the whole guarantee.
   web: { enabled: false }, webArmed: false,
+  // Two facts again, and they are not the same one. `modes` is what the
+  // backend offers; `mode` is this conversation's, chosen before the first
+  // message and fixed for its life — the server reads it from the row after
+  // turn one and ignores anything the client sends, so this is a mirror of
+  // the truth rather than the truth.
+  modes: null, mode: null,
   railCollapsed: false,
   // The last /api/chat/status payload, kept so the model panel can be drawn on
   // click without a round trip — the numbers in it are at most fifteen seconds
@@ -56,6 +88,32 @@ import { resolvedTheme, setThemePreference } from "./theme.js";
 /** Model output is untrusted text; md.js escapes before adding any markup. */
 const renderContent = (text) => renderMarkdown(text);
 
+/** Separate REFUGIO's own words from the model's.
+ *
+ *  When the person's message carries a crisis signal and the model did not
+ *  point at real help, the server appends the resources to the reply itself —
+ *  a floor that does not depend on the model, because on the smaller tiers it
+ *  was measured not to hold. That text is stored in the message, so it also
+ *  comes back on reopen; both paths run through here so the two views agree.
+ *
+ *  Matched against the exact string the backend sent us rather than a pattern.
+ *  If the copy is ever reworded, an old message renders as plain text instead
+ *  of as a notice — a worse-looking answer, never a missing one. */
+function splitCrisisNote(text) {
+  const note = state.modes?.resources;
+  if (!note || typeof text !== "string") return [text, null];
+  const at = text.lastIndexOf(note);
+  if (at === -1) return [text, null];
+  return [text.slice(0, at).trimEnd(), note];
+}
+
+function crisisNoteNode(note) {
+  return el("div.crisis-note", {},
+    el("span.who", { text: "From REFUGIO, not the model" }),
+    el("div", { text: note }),
+  );
+}
+
 function addMessage(role, text, files = []) {
   els.empty?.remove();
   const wrap = document.createElement("div");
@@ -66,7 +124,9 @@ function addMessage(role, text, files = []) {
     `<div class="avatar">${role === "user" ? "You" : "R"}</div>` +
     `<div class="content"><div class="bubble"></div></div>`;
   const bubble = wrap.querySelector(".bubble");
-  bubble.innerHTML = renderContent(text);
+  const [body, note] = splitCrisisNote(text);
+  bubble.innerHTML = renderContent(body);
+  if (note) wrap.querySelector(".content").appendChild(crisisNoteNode(note));
   if (files.length) {
     const list = document.createElement("div");
     list.className = "attach-list";
@@ -160,6 +220,7 @@ async function refreshStatus() {
     if (!els.modelPanel.hidden) renderModelPanel();
 
     applyWebSetting(s.web);
+    applyModes(s.modes);
     applyManaged(s.managed);
   } catch {
     els.status.className = "status down";
@@ -365,7 +426,11 @@ function toolGuard() {
   const s = state.status;
   const name = modelFor(s);
   const info = modelInfo(s, name);
-  const blocked = info?.tools === false && !state.toolWarningOverridden;
+  // A coaching mode is offered no tools at all, so a model that cannot call
+  // them is not merely acceptable here — it is arguably the best use of one.
+  // The guard stays for paired modes, which do need their connector.
+  const pureMode = !!state.mode && !modeById(state.mode)?.requiresConnector;
+  const blocked = info?.tools === false && !state.toolWarningOverridden && !pureMode;
 
   document.getElementById("tool-guard")?.remove();
   els.input.classList.toggle("held", blocked);
@@ -529,6 +594,138 @@ async function setWebEnabled(enabled) {
     });
     if (res.ok) applyWebSetting((await res.json()).web);
   } catch { /* the next status poll will correct the control */ }
+}
+
+// ── Discussion modes ────────────────────────────────────────
+//
+// The inverse of web arming above. That control adds the one capability that
+// leaves this machine, so it is per-message, loud, and forgotten immediately.
+// A mode removes capability — no tools, no web, no generated title — and binds
+// to the conversation instead: chosen before the first message, then fixed,
+// because the system prompt is rebuilt every turn and switching mid-thread
+// would silently reframe everything already said.
+
+/** Reflect what the backend offers. Nothing enabled means no control at all —
+ *  the same doctrine as web search, where a visible switch that does nothing
+ *  is worse than no switch. */
+function applyModes(modes) {
+  state.modes = modes || null;
+  renderModeControl();
+}
+
+/** The modes this build defines, that are switched on, and whose connector (if
+ *  any) is actually ready. */
+function offerableModes() {
+  return (state.modes?.available || []).filter(
+    (m) => state.modes?.enabled?.[m.id] && (!m.requiresConnector || m.connectorOk)
+  );
+}
+
+const modeById = (id) => (state.modes?.available || []).find((m) => m.id === id) || null;
+
+/** Draw the pill, the banner, and the web control's visibility together.
+ *
+ *  One function rather than three, because they are three views of a single
+ *  fact and drifting between them is how a conversation ends up showing a
+ *  mode banner next to an armed web button that the server will refuse. */
+function renderModeControl() {
+  const active = state.mode ? modeById(state.mode) : null;
+  const started = !!state.conversationId;
+  const offerable = offerableModes();
+
+  // Visible when a mode is running, or when one could still be chosen. Not on
+  // a conversation that already has messages and no mode: that choice is gone.
+  els.modePill.hidden = !active && (started || !offerable.length);
+  els.modePill.classList.toggle("is-set", !!active);
+  els.modePillText.textContent = active ? `${active.icon || ""} ${active.label}`.trim() : "Mode";
+  els.modePill.setAttribute("aria-expanded", String(!els.modePanel.hidden));
+  els.modePill.title = active
+    ? "This conversation's mode. It cannot be changed — start a new chat to leave it."
+    : "Have this conversation in a coaching mode";
+
+  els.modeBanner.hidden = !active;
+  els.modeBanner.textContent = active?.disclosure || "";
+
+  // Courtesy, not the mechanism. The server forces web off for every mode turn
+  // and refuses the tool if the model names it anyway; hiding the button just
+  // stops the interface offering something that would be refused.
+  if (active) {
+    setWebArmed(false);
+    els.webArm.hidden = true;
+  } else if (state.web.enabled) {
+    els.webArm.hidden = false;
+  }
+  if (active) closeModePanel();
+}
+
+function closeModePanel() {
+  els.modePanel.hidden = true;
+  els.modePill.setAttribute("aria-expanded", "false");
+}
+
+function openModePanel() {
+  const offerable = offerableModes();
+  if (!offerable.length) return;
+  els.modePanel.replaceChildren();
+
+  els.modePanel.append(el("div.mode-panel-head", {
+    text: state.modes?.note
+      || "A mode belongs to one conversation and is chosen before the first message.",
+  }));
+
+  for (const m of offerable) {
+    const opt = el("button.mode-opt", {
+      type: "button",
+      on: { click: () => chooseMode(m.id) },
+    },
+      el("div.mode-opt-title", { text: `${m.icon || ""} ${m.label}`.trim() }),
+      el("div.mode-opt-hint", { text: m.hint || "" }),
+    );
+    // Honest labelling, the same as the model picker's. Not a preference for
+    // bigger models: on a smaller one this mode's safety wording was measured
+    // to hold less well, and saying so costs a line.
+    if (m.recommendedTier && !tierMet(state.model, m.recommendedTier)) {
+      opt.append(el("div.mode-opt-note", {
+        text: `Best on an ${m.recommendedTier.toUpperCase()} model or larger.`,
+      }));
+    }
+    els.modePanel.append(opt);
+  }
+
+  // Leaving is starting a new chat, so say it here rather than letting someone
+  // discover it by looking for a way out.
+  els.modePanel.append(el("div.mode-panel-head", {
+    text: "Modes get no connectors and no web search. Leaving one means starting a new chat.",
+  }));
+
+  els.modePanel.hidden = false;
+  els.modePill.setAttribute("aria-expanded", "true");
+}
+
+/** Parse a parameter count out of a model tag.
+ *
+ *  Deliberately crude — a wrong guess shows or hides one advisory line, so a
+ *  readable heuristic beats a table that needs maintaining as models ship.
+ *  Unknown means "assume it is fine" rather than nagging about a model whose
+ *  size cannot be read off its name. */
+function tierMet(model, tier) {
+  if (!model) return true;
+  const want = parseFloat(String(tier).replace(/[^0-9.]/g, ""));
+  const found = String(model).match(/(\d+(?:\.\d+)?)\s*b\b/i);
+  if (!found || !want) return true;
+  return parseFloat(found[1]) >= want;
+}
+
+function chooseMode(id) {
+  // Only before the first message. The pill stops opening the panel once the
+  // conversation exists, but the guard is repeated here because this is the
+  // function that actually changes the frame.
+  if (state.conversationId) return closeModePanel();
+  state.mode = id;
+  closeModePanel();
+  renderModeControl();
+  toolGuard();                 // a pure-prompt mode needs no tools; unblock
+  els.input.focus();
 }
 
 // ── Connectors ──────────────────────────────────────────────
@@ -750,6 +947,11 @@ async function openConversation(id) {
   try { convo = await (await fetch(`/api/chat/conversations/${id}`)).json(); }
   catch { showError("Couldn’t load that conversation."); return; }
   els.thread.innerHTML = "";
+  // Restored from the row, not remembered from the session: the mode is the
+  // conversation's, and reopening it a week later has to show the same frame
+  // and the same disclosure it was held under.
+  state.mode = convo.mode || null;
+  renderModeControl();
   // `m.content` is the display text — what was typed. The copy the model was
   // sent, with the files inlined, stays in the database where it belongs.
   for (const m of convo.messages) addMessage(m.role, m.content, m.attachments || []);
@@ -911,6 +1113,10 @@ const EMPTY_HTML = els.thread.innerHTML;
 
 function newChat() {
   state.conversationId = null;
+  // A mode belongs to a conversation. This is the only way out of one, so it
+  // is also the only place the frame is dropped.
+  state.mode = null;
+  renderModeControl();
   resetSources();
   els.thread.innerHTML = EMPTY_HTML;
   els.empty = $("empty");
@@ -1113,6 +1319,10 @@ async function send() {
         message: text,
         conversation_id: state.conversationId,
         model: state.model || undefined,
+        // First turn only. After that the server reads the conversation's mode
+        // from its row and ignores whatever arrives here, which is what makes
+        // regenerate and edit — neither of which sends one — stay in mode.
+        mode: state.mode || undefined,
         web,
         attachments: files.map((f) => f.id),
       }),
@@ -1150,7 +1360,15 @@ async function send() {
         }
         else if (ev === "token") {
           if (!acc) setThinking(bubble, false);
-          acc += data.t; bubble.innerHTML = renderContent(acc); scrollToEnd();
+          acc += data.t;
+          // The notice arrives as ordinary tokens at the end of the stream, so
+          // it is split back out here for the same reason it is on reopen.
+          const [body, note] = splitCrisisNote(acc);
+          bubble.innerHTML = renderContent(body);
+          const content = bubble.parentElement;
+          content.querySelector(".crisis-note")?.remove();
+          if (note) content.appendChild(crisisNoteNode(note));
+          scrollToEnd();
         }
         else if (ev === "error") throw new Error(data.error);
         else if (ev === "done") { state.conversationId = data.conversation_id; loadConversations(); }
@@ -1255,6 +1473,22 @@ els.thread.addEventListener("click", (e) => {
   });
 });
 els.webArm.addEventListener("click", () => setWebArmed(!state.webArmed));
+
+// Opens the picker only while the conversation is still empty. Afterwards the
+// pill is a label: the mode is fixed for the conversation's life, and a
+// control that cannot change anything should not accept a click.
+els.modePill.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (state.conversationId || state.mode) return;
+  if (els.modePanel.hidden) openModePanel(); else closeModePanel();
+});
+document.addEventListener("click", (e) => {
+  if (els.modePanel.hidden) return;
+  if (!els.modePanel.contains(e.target) && e.target !== els.modePill) closeModePanel();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !els.modePanel.hidden) closeModePanel();
+});
 els.newChat.addEventListener("click", newChat);
 
 // ── Attaching ───────────────────────────────────────────────

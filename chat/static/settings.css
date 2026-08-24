@@ -166,6 +166,14 @@ body {
   color: var(--warn); margin-top: 6px;
   border-left: 3px solid var(--warn-rule); padding-left: 8px;
 }
+/* A true-but-unwelcome fact about the current setup — a connector that is not
+   running, or a model below a mode's recommended tier. Same caution colour as
+   .managed because the shape is the same: nothing is broken, but this control
+   will not do what its label implies until something changes. */
+.aside.warn {
+  color: var(--warn); margin-top: 6px;
+  border-left: 3px solid var(--warn-rule); padding-left: 8px;
+}
 .check input:disabled ~ .box { opacity: .45; }
 .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 

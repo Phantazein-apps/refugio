@@ -956,6 +956,118 @@ async function setWebEnabled(enabled, box) {
   }
 }
 
+// ── Discussion modes ────────────────────────────────────────
+
+/** The modes pane.
+ *
+ *  Every word here comes from the backend's MODES_UI and the registry rows, not
+ *  from a copy kept in this file: two copies of a privacy promise drift, and the
+ *  one in the window is the one people read. What is deliberately NOT rendered
+ *  is a mode's prompt — that is instructions to a model, and putting it on
+ *  screen invites the reader to treat it as a guarantee of what the mode will
+ *  do. The guarantees are the ones stated below, and those are enforced in
+ *  code. */
+function renderModes() {
+  const box = $("modes-body");
+  box.replaceChildren();
+  const modes = state.connectors?.modes || state.status?.modes;
+  if (!modes) { box.append(el("div.waiting", { text: "Checking…" })); return; }
+
+  const rows = modes.available || [];
+  if (!rows.length) {
+    box.append(el("div.card", {}, el("div.prose", { text: modes.empty || "No discussion modes are available in this build yet." })));
+    return;
+  }
+
+  box.append(el("div.card", {},
+    el("div.prose", { text: modes.hint || "" }),
+    el("div.prose", {}, el("strong", { text: modes.privacy || "" })),
+    el("div.aside", { text: modes.note || "" }),
+  ));
+
+  const active = modelName();
+  for (const m of rows) {
+    // A mode whose connector is not ready is shown and not selectable, with the
+    // connector named — never hidden, or the person cannot tell the difference
+    // between "not for me" and "not working".
+    const blocked = m.requiresConnector && !m.connectorOk;
+    const card = el("div.card", {},
+      el("h3", { text: `${m.icon || ""} ${m.label}`.trim() }),
+      el("div.prose", { text: m.hint || "" }),
+      el("label.check", {},
+        el("input", {
+          type: "checkbox",
+          checked: !!modes.enabled?.[m.id],
+          disabled: isManaged("modes") || blocked,
+          on: { change: (e) => setModeEnabled(m.id, e.currentTarget.checked, e.currentTarget) },
+        }),
+        el("span.box"),
+        `Offer ${m.label} in the composer`,
+      ),
+      el("div.aside", { text: m.disclosure || "" }),
+    );
+    if (blocked) {
+      card.append(el("div.aside.warn", {
+        text: `Needs the ${m.requiresConnector} connector, which is not connected right now.`,
+      }));
+    }
+    // Honest labelling, the same as the model picker does. The tier is not a
+    // preference for bigger models: on a smaller one the mode's safety wording
+    // was measured to hold less well, and saying so is cheaper than implying
+    // every model behaves the same.
+    if (m.recommendedTier && !tierMet(active, m.recommendedTier)) {
+      card.append(el("div.aside.warn", {
+        text: `Works best on an ${m.recommendedTier.toUpperCase()} model or larger. `
+          + `You are running ${active || "a smaller model"}, where this mode's safety wording is `
+          + `less reliable — REFUGIO still shows crisis resources itself when it sees them.`,
+      }));
+    }
+    const note = managedNote("modes");
+    if (note) card.append(note);
+    box.append(card);
+  }
+}
+
+/** The active model's name, for the tier note. */
+function modelName() {
+  return state.status?.model || null;
+}
+
+/** Does the running model meet a mode's recommended tier?
+ *
+ *  Deliberately crude: parse the parameter count out of the tag. A wrong guess
+ *  here shows or hides one advisory line, so a readable heuristic beats a table
+ *  that has to be maintained as models are released. Unknown means "assume it
+ *  is fine" rather than nagging about a model we cannot size. */
+function tierMet(model, tier) {
+  if (!model) return true;
+  const want = parseFloat(String(tier).replace(/[^0-9.]/g, ""));
+  const found = String(model).match(/(\d+(?:\.\d+)?)\s*b\b/i);
+  if (!found || !want) return true;
+  return parseFloat(found[1]) >= want;
+}
+
+async function setModeEnabled(mode, enabled, box) {
+  box.disabled = true;
+  try {
+    const res = await fetch("/api/chat/modes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, enabled }),
+    });
+    if (!res.ok) throw new Error("failed");
+    // Without this the 15s poll answers with the pre-write state and visibly
+    // flips the checkbox back under the cursor.
+    markWrite();
+    state.connectors = await res.json();
+    renderModes();
+  } catch {
+    box.checked = !enabled;
+    box.disabled = false;
+    toast("That didn't save.");
+  }
+}
+
 // ── Appearance ──────────────────────────────────────────────
 
 const TEXT_KEY = "refugio.textScale";
@@ -1311,6 +1423,7 @@ async function refresh() {
   renderConnectors();
   renderModels();
   renderWeb();
+  renderModes();
   renderUpdates();
   updateBadge();
 }
@@ -1319,7 +1432,7 @@ applyAppearance();
 if (localStorage.getItem(MOTION_KEY) === "1") document.documentElement.classList.add("reduce-motion");
 renderAppearance();
 
-const PANES = ["connectors", "models", "web", "appearance", "updates", "data"];
+const PANES = ["connectors", "models", "web", "modes", "appearance", "updates", "data"];
 showPane(PANES.includes(location.hash.slice(1)) ? location.hash.slice(1) : "connectors");
 
 // A link to /settings#models has to work when this window is ALREADY open —

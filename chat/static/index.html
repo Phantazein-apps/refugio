@@ -111,6 +111,10 @@
     </div>
 
     <div class="composer">
+      <!-- What this mode is and is not. Unlike the web warning above, this one
+           belongs to the whole conversation rather than the next message, and
+           is restored from the stored mode when the conversation is reopened. -->
+      <div class="mode-banner" id="mode-banner" hidden></div>
       <!-- Shown only while web search is armed, and only for the next message. -->
       <div class="web-warn" id="web-warn" hidden></div>
       <!-- Attached files, above the box, as chips. Hidden until there is one. -->
@@ -130,10 +134,17 @@
         <button class="web-arm" id="web-arm" type="button" hidden aria-pressed="false">
           <span aria-hidden="true">🌐</span> Web
         </button>
+        <!-- Before the first message this opens the picker; afterwards it is a
+             static indicator, because a mode is fixed for a conversation's
+             life and a control that cannot be used should not look like one. -->
+        <button class="mode-pill" id="mode-pill" type="button" hidden aria-haspopup="true" aria-expanded="false">
+          <span id="mode-pill-text">Mode</span>
+        </button>
         <textarea id="input" rows="1" placeholder="Message REFUGIO…" autofocus></textarea>
         <button class="send" id="send" title="Send" disabled>↑</button>
       </div>
       <div class="hint">Enter to send · Shift+Enter for a new line · drag a file in to attach it</div>
+      <div class="mode-panel" id="mode-panel" hidden role="dialog" aria-label="Choose a discussion mode"></div>
     </div>
   </main>
 
