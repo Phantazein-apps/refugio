@@ -192,6 +192,21 @@ jobs:
             throw "msiexec exited $($p.ExitCode)"
           }
           $root = "$env:ProgramFiles\REFUGIO"
+
+          # Diagnostic only, unconditional: if a bundled binary goes missing
+          # below, Windows Defender quarantining an unsigned, renamed
+          # node.exe copy is the leading suspect on this runner image.
+          Write-Host "--- $root\runtime ---"
+          if (Test-Path "$root\runtime") {
+            Get-ChildItem "$root\runtime" -Recurse | Select-Object FullName, Length | Format-Table | Out-String | Write-Host
+          } else {
+            Write-Host "(missing entirely)"
+          }
+          try {
+            Write-Host "--- Defender detections ---"
+            Get-MpThreatDetection | Format-List | Out-String | Write-Host
+          } catch { Write-Host "(Get-MpThreatDetection unavailable: $_)" }
+
           foreach ($f in @("runtime\node.exe", "runtime\refugio-node.exe", "start-refugio.cjs",
                            "chat\server.js", "packaging\windows\user-setup.js")) {
             if (-not (Test-Path "$root\$f")) { throw "missing from the payload: $f" }
