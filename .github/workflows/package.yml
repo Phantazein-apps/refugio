@@ -193,19 +193,30 @@ jobs:
           }
           $root = "$env:ProgramFiles\REFUGIO"
 
-          # Diagnostic only, unconditional: if a bundled binary goes missing
-          # below, Windows Defender quarantining an unsigned, renamed
-          # node.exe copy is the leading suspect on this runner image.
-          Write-Host "--- $root\runtime ---"
-          if (Test-Path "$root\runtime") {
-            Get-ChildItem "$root\runtime" -Recurse | Select-Object FullName, Length | Format-Table | Out-String | Write-Host
+          # Diagnostic only, unconditional. runtime\ goes missing from the
+          # installed payload despite the build staging it — establish whether
+          # it was ever IN the package (harvest problem) or was installed and
+          # then lost (install problem), rather than guessing.
+          Write-Host "--- what landed under $root (2 levels) ---"
+          if (Test-Path $root) {
+            Get-ChildItem $root -Depth 1 | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
           } else {
-            Write-Host "(missing entirely)"
+            Write-Host "($root does not exist at all)"
           }
-          try {
-            Write-Host "--- Defender detections ---"
-            Get-MpThreatDetection | Format-List | Out-String | Write-Host
-          } catch { Write-Host "(Get-MpThreatDetection unavailable: $_)" }
+
+          Write-Host "--- what the package CONTAINS (administrative install) ---"
+          $admin = Join-Path $env:RUNNER_TEMP "admin-extract"
+          Start-Process msiexec -ArgumentList "/a `"$msi`" /qn TARGETDIR=`"$admin`"" -Wait
+          if (Test-Path $admin) {
+            Get-ChildItem $admin -Recurse -Filter "node*.exe" | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+            Write-Host "total files in package: $((Get-ChildItem $admin -Recurse -File).Count)"
+          } else {
+            Write-Host "(administrative install produced nothing)"
+          }
+
+          Write-Host "--- install.log lines mentioning runtime/node ---"
+          Select-String -Path install.log -Pattern 'runtime|node\.exe' |
+            Select-Object -First 40 | ForEach-Object { $_.Line } | Write-Host
 
           foreach ($f in @("runtime\node.exe", "runtime\refugio-node.exe", "start-refugio.cjs",
                            "chat\server.js", "packaging\windows\user-setup.js")) {
