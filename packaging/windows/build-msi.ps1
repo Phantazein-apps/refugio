@@ -92,6 +92,7 @@ if ($LASTEXITCODE -ne 0) {
   Die "WiX is not installed. Run: dotnet tool install --global wix"
 }
 & wix extension add -g WixToolset.Util.wixext 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) { Die "wix extension add failed — WixToolset.Util.wixext is not in the cache" }
 
 $msi = Join-Path $Out "REFUGIO-$Version.msi"
 & wix build (Join-Path $PSScriptRoot "REFUGIO.wxs") `

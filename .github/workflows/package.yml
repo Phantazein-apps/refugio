@@ -118,7 +118,7 @@ jobs:
           # a file and proves nothing about node_modules; a payload whose
           # dependencies failed to install passes a syntax check and then dies
           # on first launch with a module-not-found nobody sees.
-          "$NODE" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')" \
+          ( cd "$R" && "$NODE" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')" ) \
             || { echo "the payload's dependencies do not resolve"; exit 1; }
           ( cd "$R" && "$NODE" --input-type=module -e "await import('./chat/managed.js'); await import('./chat/attachments.js'); console.log('app modules import')" ) \
             || { echo "the app's own modules do not import"; exit 1; }
