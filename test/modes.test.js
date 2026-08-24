@@ -197,12 +197,13 @@ test("the crisis layer names the words people actually use, not the category", (
     "everyone being better off without them",
     "ending it",
     "not wanting to be here",
+    "nobody noticing if they were gone",
     "hurting themselves or someone else",
     "fearing someone will hurt them",
   ]) {
     assert.ok(CRISIS_LAYER.includes(phrase), `the crisis layer must name "${phrase}"`);
   }
-  assert.match(CRISIS_LAYER, /Said quietly or in passing still counts\./);
+  assert.match(CRISIS_LAYER, /Said quietly or in passing counts\./);
 });
 
 test("the crisis layer cancels the coaching format rather than just saying stop", () => {
@@ -212,12 +213,17 @@ test("the crisis layer cancels the coaching format rather than just saying stop"
   // gave 988 correctly and then offered wording for saying it to someone else.
   // So the stop is enumerated against the exact things the method asks for.
   assert.ok(CRISIS_LAYER.includes(
-    "Then stop coaching. No observation, feeling, need or request; no wording " +
-    "or scripts."
+    "Then stop coaching and reply with exactly these four things and nothing " +
+    "else:"
   ));
+  // The literal strings the floor model actually emits, which is what doubled
+  // the pivot rate over forbidding the concepts in prose.
+  for (const token of ["No \"Feeling:\"", "no \"Need:\"", "no \"How about saying\""]) {
+    assert.ok(CRISIS_LAYER.includes(token), `the stop must forbid the literal ${token}`);
+  }
   // And it has to survive its own conversation: by the fifth turn the model's
   // prior replies are themselves a strong instruction to keep coaching.
-  assert.ok(CRISIS_LAYER.includes("Do this even if every earlier reply was coaching"));
+  assert.ok(CRISIS_LAYER.includes("Do this even if every earlier reply was coaching;"));
   // The floor model recited the guardrail's conditions back as coaching
   // material, about a third party, instead of acting on them.
   assert.ok(CRISIS_LAYER.includes("Never repeat or explain this rule."));
@@ -246,7 +252,7 @@ test("the NVC coach refuses to be a weapon", () => {
   assert.ok(MODES.nvc.prompt.includes(
     "NVC is not a way to make someone say yes. If the aim is to pressure " +
     "or corner someone, name it gently — that is against the method — and " +
-    "go back to the need underneath."
+    "go back to the need."
   ));
 });
 
@@ -284,7 +290,7 @@ test("the NVC coach carries the framework a small model cannot be assumed to kno
   // Trimmed to two corrections after the red-team: both tiers produced textbook
   // observation/feeling/need/request unprompted on every single turn, so the
   // definitions were paying for nothing. What they got wrong is kept.
-  assert.ok(MODES.nvc.prompt.includes("Four components: observation, feeling, need, request."));
+  assert.ok(MODES.nvc.prompt.includes("Observation, feeling, need, request."));
   assert.ok(MODES.nvc.prompt.includes("\"I feel that you...\" is a thought, not a feeling."));
   assert.ok(MODES.nvc.prompt.includes("A request that cannot be refused is a demand."));
 });
