@@ -81,6 +81,8 @@ Honest list, because this is an early prototype:
 - **Small models are weak at choosing tools.** REFUGIO refuses to install one that can't call tools at all, but a 3B model still picks wrong sometimes.
 - Sources are kept **for the session only** — reopening a conversation shows the answers, not the raw tool output behind them.
 
+A fuller register — including what the `.pkg` and `.msi` do *not* set up, and what the chat UI spec planned and never built — is in [`docs/gaps.md`](docs/gaps.md).
+
 ### Open WebUI (legacy, being retired)
 
 Open WebUI was REFUGIO's interface through v1. It still works and is still installable, but it is on its way out — it needs `uv`, a Python virtual environment and PyTorch (~1–1.5 GB of RAM) just to start, and it can't speak MCP, which is the only reason MCPO exists in this project at all.
