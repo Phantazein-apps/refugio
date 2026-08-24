@@ -1,0 +1,288 @@
+// Private discussion modes — the promises, pinned.
+//
+// Three kinds of thing are checked here, and they fail in three different ways.
+//
+// The first is the doctrine: off by default, no web, no tools. Those are
+// promises made in the window and in the README, and every one of them is a
+// single expression somewhere in chat/modes.js — so the expressions are tested
+// rather than the sentence about them. Where the rule actually lives in
+// server.js glue (the arming conjunction, the refusal at the point a tool
+// runs), the decision was extracted into a pure function precisely so it could
+// be checked here: this project has no HTTP harness, and a promise that can
+// only be verified by hand is one that quietly stops being true.
+//
+// The second is the guardrail copy, pinned VERBATIM. Prompt text is advisory —
+// it shapes what the model says and guarantees nothing — which is exactly why
+// it should not be editable by accident. Session 3 will rewrite some of these
+// sentences; that is fine, and these tests are what make it a decision instead
+// of a drift.
+//
+// The third is the schema. Someone's chat history is the only copy there is,
+// and the mode column arrived after people already had databases.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import {
+  MODES, MODE_DEFAULTS, MODE_IDS, MODES_UI, CRISIS_LAYER,
+  armWebSearch, definedModes, modePreamble, modeSummaries, modeTitle,
+  modeToolFilter, toolRefusal, validateMode, webAllowed,
+} from "../chat/modes.js";
+import * as store from "../chat/store.js";
+
+// The whole ceiling from plan Principle 6: history is never truncated and the
+// target models have ~8k contexts, so a mode's preamble is paid again on every
+// turn of the conversation.
+const PROMPT_BUDGET = 2000;
+
+const enabledFor = (...ids) => Object.fromEntries(ids.map((id) => [id, true]));
+
+// ── Off by default ──────────────────────────────────────────
+
+test("every mode is off until someone switches it on", () => {
+  for (const [id, on] of Object.entries(MODE_DEFAULTS)) {
+    assert.equal(on, false, `${id} must default to off`);
+  }
+});
+
+test("every planned mode id has a default, so none can lose a saved choice later", () => {
+  // The settings merge keeps only the boolean keys the defaults declare. An id
+  // that shows up in MODES without one would read as off however the user set it.
+  for (const id of definedModes()) {
+    assert.ok(id in MODE_DEFAULTS, `${id} has content but no default`);
+  }
+  assert.equal(MODE_IDS.length, 7, "the plan lists seven modes");
+});
+
+test("only modes with content are offerable", () => {
+  // Declaring an id early is cheap; shipping half a coaching prompt is not.
+  assert.deepEqual(definedModes(), ["nvc"]);
+});
+
+// ── Which ids are accepted ──────────────────────────────────
+
+test("a mode id this build does not define is refused", () => {
+  const r = validateMode("hypnotherapist", enabledFor("nvc"));
+  assert.equal(r.ok, false);
+  assert.equal(r.mode, null);
+  assert.match(r.error, /no discussion mode called/);
+});
+
+test("an id that is planned but has no content yet is refused like any other unknown", () => {
+  assert.equal(validateMode("listener", { listener: true }).ok, false);
+});
+
+test("a known mode that is switched off is refused, and says where to switch it on", () => {
+  // A different refusal from the one above on purpose: this one is a trip to
+  // Settings, not a bug report.
+  const r = validateMode("nvc", { nvc: false });
+  assert.equal(r.ok, false);
+  assert.ok(r.error.includes(MODES.nvc.label));
+  assert.ok(r.error.includes(MODES_UI.label));
+});
+
+test("no mode at all is the ordinary chat, not an error", () => {
+  for (const empty of [undefined, null, "", "   ", 7]) {
+    assert.deepEqual(validateMode(empty, {}), { ok: true, mode: null });
+  }
+});
+
+test("an enabled, defined mode is accepted", () => {
+  assert.deepEqual(validateMode(" nvc ", enabledFor("nvc")), { ok: true, mode: "nvc" });
+});
+
+// ── Never the web ───────────────────────────────────────────
+
+test("no mode may reach the web", () => {
+  for (const id of MODE_IDS) assert.equal(webAllowed(id), false, `${id} must not allow web search`);
+  assert.equal(webAllowed(null), true, "an ordinary chat still can");
+});
+
+test("a mode turn refuses web search even when the user armed it and the setting is on", () => {
+  // Both of web search's own conditions satisfied. The mode still wins — this
+  // is the conjunction from streamTurn, extracted so it can be checked at all.
+  assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: "nvc" }), false);
+  // Including for a stored mode this build no longer defines: an id we cannot
+  // explain gets fewer capabilities, never more.
+  assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: "styles" }), false);
+});
+
+test("without a mode, web search still needs both the setting and the per-message arm", () => {
+  assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: null }), true);
+  assert.equal(armWebSearch({ requested: true, settingEnabled: false, mode: null }), false);
+  assert.equal(armWebSearch({ requested: false, settingEnabled: true, mode: null }), false);
+});
+
+test("a model that names web search anyway is told no, in words it can act on", () => {
+  const refusal = toolRefusal("nvc", "web__search");
+  assert.ok(refusal.startsWith("Error:"), "the model reads the leading Error: as a failed call");
+  assert.match(refusal, /never available in a discussion mode/);
+});
+
+// ── Never any tools ─────────────────────────────────────────
+
+const POOL = [
+  "whatsapp__search_messages", "whatsapp__send_message",
+  "memory__memory_save", "notes__notes_create", "email__list_messages",
+].map((name) => ({ type: "function", function: { name } }));
+
+test("a coaching mode is offered no tools at all, memory included", () => {
+  // Memory is the one that matters most: memory_save persists what was said,
+  // and its GitHub-backed variant uploads it.
+  assert.deepEqual(modeToolFilter("nvc", POOL), []);
+  assert.deepEqual(modeToolFilter("nvc", []), []);
+});
+
+test("an undefined mode id also ends up with nothing", () => {
+  assert.deepEqual(modeToolFilter("spanish", POOL), []);
+});
+
+test("no mode leaves the ordinary tool list alone-but-changed", () => {
+  assert.deepEqual(modeToolFilter(null, POOL), POOL);
+});
+
+test("every tool a model could name in a coaching mode is refused at the point it would run", () => {
+  for (const t of POOL) {
+    const refusal = toolRefusal("nvc", t.function.name);
+    assert.ok(refusal, `${t.function.name} must be refused`);
+    assert.ok(refusal.includes(t.function.name), "the refusal names what was refused");
+  }
+  assert.equal(toolRefusal(null, "whatsapp__send_message"), null, "outside a mode, nothing changes");
+});
+
+// ── The prompt ──────────────────────────────────────────────
+
+test("every mode's preamble fits the prompt budget", () => {
+  for (const id of definedModes()) {
+    const len = modePreamble(id).length;
+    assert.ok(len <= PROMPT_BUDGET, `${id} preamble is ${len} chars, over the ${PROMPT_BUDGET} budget`);
+  }
+});
+
+test("no mode means no preamble, so an ordinary chat pays nothing", () => {
+  assert.equal(modePreamble(null), "");
+  assert.equal(modePreamble("styles"), "", "an id with no content adds no instructions either");
+});
+
+test("the preamble is appended, not substituted, so a custom system prompt survives", () => {
+  assert.ok(modePreamble("nvc").startsWith("\n\n"));
+});
+
+test("the crisis layer is carried by every coaching mode, word for word", () => {
+  // Single-sourced on purpose: seven modes with seven crisis texts is seven
+  // chances for one of them to be the weak one.
+  assert.match(CRISIS_LAYER, /call or text 988/);
+  assert.match(CRISIS_LAYER, /a local crisis line or emergency number/);
+  assert.match(CRISIS_LAYER, /Do not resume coaching unless they tell you they are safe\./);
+  for (const id of definedModes()) {
+    if (MODES[id].category !== "coaching") continue;
+    assert.ok(modePreamble(id).includes(CRISIS_LAYER), `${id} must carry the crisis layer`);
+  }
+});
+
+test("the NVC coach says it is not therapy", () => {
+  assert.ok(MODES.nvc.prompt.includes(
+    "If asked what you are: communication coaching with a local model, not " +
+    "therapy and not professional advice."
+  ));
+  // And the banner the person reads says the same thing, so the window and the
+  // model cannot describe the mode differently.
+  assert.match(MODES.nvc.disclosure, /not therapy, not a professional/);
+});
+
+test("the NVC coach refuses to be a weapon", () => {
+  assert.ok(MODES.nvc.prompt.includes(
+    "NVC is not a way to make someone say yes. If the aim is to pressure, " +
+    "corner or manage another person, name that gently — it is against the " +
+    "method — and go back to the need underneath."
+  ));
+});
+
+test("the NVC coach names a safety situation instead of coaching phrasing for it", () => {
+  assert.ok(MODES.nvc.prompt.includes(
+    "NVC is not for every situation. If what is described is abuse, " +
+    "coercion, or a threat to someone's safety, say so plainly: that is a " +
+    "safety situation, not a communication-technique situation. Point " +
+    "toward people who can help, not toward better phrasing."
+  ));
+});
+
+test("the NVC coach carries the framework a small model cannot be assumed to know", () => {
+  for (const bit of ["Observation:", "Feeling:", "Need:", "Request:", "demand"]) {
+    assert.ok(MODES.nvc.prompt.includes(bit), `the prompt should name ${bit}`);
+  }
+});
+
+// ── What the window is told ─────────────────────────────────
+
+test("a mode conversation is titled from the registry, never from what was said", () => {
+  // maybeTitle() runs a completion over the first message and puts the result
+  // in the sidebar. For these conversations that is the whole problem.
+  const title = modeTitle("nvc", new Date("2026-08-24T12:00:00Z"));
+  assert.ok(title.startsWith(MODES.nvc.titleLabel));
+  assert.match(title, /Aug 24/);
+  assert.match(modeTitle("styles"), /^Private conversation/, "an unknown id still gets a quiet title");
+});
+
+test("the picker rows carry the copy but never the prompt", () => {
+  // A prompt pasted into the window invites the reader to treat instructions to
+  // the model as a description of what the mode guarantees.
+  for (const row of modeSummaries()) {
+    assert.ok(row.label && row.hint && row.disclosure, `${row.id} is missing copy`);
+    assert.ok(row.starters.length >= 2, `${row.id} needs conversation starters`);
+    assert.equal(row.prompt, undefined);
+  }
+});
+
+test("the settings copy says what a mode takes away", () => {
+  assert.match(MODES_UI.privacy, /no tools and no web search/);
+});
+
+// ── The column under it ─────────────────────────────────────
+
+test("a database from before modes existed gains the column and keeps its history", () => {
+  // The mode column arrived after people already had ~/.refugio-data/chat.db,
+  // and losing someone's chat history to a schema change would be the worst
+  // possible way to ship a feature. So: build the old schema by hand, then open
+  // it the way a running REFUGIO would.
+  const dir = mkdtempSync(join(tmpdir(), "refugio-modes-"));
+  const path = join(dir, "chat.db");
+  try {
+    const old = new DatabaseSync(path);
+    old.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY, title TEXT, created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        role TEXT NOT NULL, content TEXT NOT NULL, model TEXT, created_at TEXT NOT NULL);
+      INSERT INTO conversations VALUES ('old', 'A chat from before', '2026-01-01', '2026-01-01', 0);
+      INSERT INTO messages (conversation_id, role, content, model, created_at)
+        VALUES ('old', 'user', 'still here?', NULL, '2026-01-01');
+    `);
+    old.close();
+
+    store.initStore(path);
+    const kept = store.getConversation("old");
+    assert.equal(kept.title, "A chat from before");
+    assert.equal(kept.messages.length, 1, "the old message survived the migration");
+    assert.equal(kept.mode, null, "a conversation from before modes is an ordinary chat");
+
+    // And the new column does its job: written once, read back on every turn.
+    assert.equal(store.ensureConversation("fresh", "nvc"), "nvc");
+    assert.equal(store.ensureConversation("fresh", "spanish"), "nvc",
+      "the mode is fixed at creation — a later turn cannot change it");
+    assert.equal(store.ensureConversation("fresh"), "nvc",
+      "and a turn that sends no mode still runs in the conversation's mode");
+    assert.equal(store.getMode("fresh"), "nvc");
+    assert.equal(store.getConversation("fresh").mode, "nvc");
+    assert.equal(store.listConversations().find((c) => c.id === "fresh").mode, "nvc");
+  } finally {
+    store.closeStore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

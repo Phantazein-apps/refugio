@@ -28,6 +28,9 @@ import { readPolicy, applyPolicy, describePolicy, connectorAllowed } from "./man
 import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
+import {
+  MODE_DEFAULTS, armWebSearch, modePreamble, modeTitle, modeToolFilter, toolRefusal, validateMode,
+} from "./modes.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
 
@@ -473,7 +476,18 @@ function loadSettings() {
   // `updates` rides here for the same reason `web` does: this file is the one
   // place a person can read to answer "what may REFUGIO reach?", and an update
   // check reaches the network. Both belong in the same list.
-  const defaults = { ...defaultSettings(), web: { ...WEB_DEFAULTS }, updates: { enabled: true } };
+  // Discussion modes ride here too, and for the third time for the same
+  // reason: this file is where a person reads what REFUGIO may do. Every id
+  // this build plans is listed even when its content has not shipped, because
+  // the merge below keeps only the keys the defaults declare — an id added to
+  // this object later would discard whatever the user had already chosen for
+  // it on the very version that introduced it.
+  const defaults = {
+    ...defaultSettings(),
+    web: { ...WEB_DEFAULTS },
+    updates: { enabled: true },
+    modes: { ...MODE_DEFAULTS },
+  };
   try {
     const saved = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
     // Merge over defaults so an option added in a later version starts off,
@@ -860,7 +874,16 @@ async function maybeTitle(convoId, firstMessage, model) {
  *  array" is not the guarantee the user was given. The guarantee is that no
  *  search leaves this machine on a turn they did not arm, so it is enforced at
  *  the only place that actually sends anything. */
-async function runTool(call, webArmed) {
+async function runTool(call, webArmed, mode) {
+  // A mode's refusal comes first and outranks everything else. The tools array
+  // for a coaching mode is empty, so any call arriving here was named by the
+  // model out of history or out of thin air — which is exactly the case the
+  // offered list cannot cover, and exactly the case the promise is about.
+  const refused = toolRefusal(mode, call.name);
+  if (refused) {
+    log(`refused ${call.name} in mode "${mode}"`);
+    return { text: refused, links: [] };
+  }
   if (call.name === WEB_TOOL.function.name) {
     if (!webArmed) return { text: "Error: web search is not enabled for this message.", links: [] };
     const q = String(call.args?.query ?? "").trim();
@@ -879,7 +902,7 @@ async function runTool(call, webArmed) {
  * Run one turn and stream it to the client as SSE.
  * Events: `token` (incremental text), `done` (final metadata), `error`.
  */
-async function streamTurn(res, { conversationId, message, model, persistUser, web = false, files = [] }) {
+async function streamTurn(res, { conversationId, message, model, persistUser, web = false, files = [], mode = null }) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -889,7 +912,11 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   const send = (event, data) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-  store.ensureConversation(conversationId);
+  // First turn writes the mode onto the row; every later turn is handed back
+  // what the row already says, so `mode` from here down is the conversation's,
+  // not the caller's. That is what makes regenerate and edit — which have no
+  // UI to carry a mode and never send one — run in the right mode for free.
+  const activeMode = store.ensureConversation(conversationId, mode);
   if (persistUser) {
     // Two texts, both stored: the model gets the question with the files
     // inlined, the transcript keeps the question. See store.js — this is why
@@ -905,12 +932,28 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   // Two conditions, both required, and they mean different things: the setting
   // is "I am willing to search the web at all", the flag is "search on THIS
   // message". Neither implies the other, so the model is only handed the tool
-  // when the user has just asked for it.
-  const webArmed = !!web && !!connectorSettings.web?.enabled;
-  const tools = [...(mcp ? mcp.toolDefs(TOOL_LIMIT) : []), ...(webArmed ? [WEB_TOOL] : [])];
+  // when the user has just asked for it. In a discussion mode a third condition
+  // joins them and overrules both: never. The composer hides the arming button
+  // while a mode is active, but hiding a control is not enforcement — this is,
+  // and runTool asks the same question again at the point it would run.
+  const webArmed = armWebSearch({
+    requested: web, settingEnabled: connectorSettings.web?.enabled, mode: activeMode,
+  });
+  // Filtered here, per turn, rather than by narrowing the shared MCP pool: the
+  // pool's settings are global and two conversations can stream at once, so a
+  // mode that reached in there would strip the other conversation's tools.
+  // A coaching mode filters everything away and passes an empty array.
+  const tools = [
+    ...modeToolFilter(activeMode, mcp ? mcp.toolDefs(TOOL_LIMIT) : []),
+    ...(webArmed ? [WEB_TOOL] : []),
+  ];
 
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT + toolPreamble(tools) },
+    // Three sections, deliberately in this order and concatenated rather than
+    // substituted: the mode composes with SYSTEM_PROMPT instead of replacing
+    // it, so a user who set REFUGIO_SYSTEM_PROMPT keeps their instructions and
+    // gets the mode's on top of them.
+    { role: "system", content: SYSTEM_PROMPT + modePreamble(activeMode) + toolPreamble(tools) },
     ...store.historyFor(conversationId),
   ];
 
@@ -952,7 +995,7 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
 
       for (const call of toolCalls) {
         send("tool", { name: call.name, args: call.args });
-        const { text: result, links } = await runTool(call, webArmed);
+        const { text: result, links } = await runTool(call, webArmed, activeMode);
         toolsUsed.push(call.name);
         // The full result, not a 160-character preview. "Which of my chats did
         // this come from?" is the first question anyone asks of an answer built
@@ -972,8 +1015,18 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
 
     store.addMessage(conversationId, "assistant", acc, model);
     if (!res.writableEnded) {
-      const first = store.historyFor(conversationId).find((m) => m.role === "user");
-      const title = await maybeTitle(conversationId, first?.content ?? message, model);
+      // A generated title is a completion run over the first message, which for
+      // a private conversation puts the thing someone came here to say quietly
+      // into the sidebar. Mode conversations get the registry's label and the
+      // date instead, and never run the completion at all.
+      let title;
+      if (activeMode) {
+        title = store.getTitle(conversationId);
+        if (!title) { title = modeTitle(activeMode); store.setTitle(conversationId, title); }
+      } else {
+        const first = store.historyFor(conversationId).find((m) => m.role === "user");
+        title = await maybeTitle(conversationId, first?.content ?? message, model);
+      }
       send("done", { conversation_id: conversationId, title, model });
       res.end();
     }
@@ -1331,8 +1384,17 @@ async function route(req, res, url) {
         error: "No model available. Is Ollama running? Try: ollama pull llama3.2",
       });
     }
+    // Validated here rather than inside the turn so a bad id is an honest 400
+    // before anything is written, and so the two refusals stay distinguishable:
+    // an id this build never heard of is a stale page, a known id that is off
+    // is a trip to Settings. Only the FIRST turn of a conversation is affected
+    // by any of this — after that the stored mode wins and the body is ignored.
+    const wanted = validateMode(body.mode, connectorSettings.modes);
+    if (!wanted.ok) return sendJson(res, 400, { error: wanted.error });
     const conversationId = (body.conversation_id || "").trim() || randomUUID().replace(/-/g, "");
-    return streamTurn(res, { conversationId, message, model, persistUser: true, web: body.web, files });
+    return streamTurn(res, {
+      conversationId, message, model, persistUser: true, web: body.web, files, mode: wanted.mode,
+    });
   }
 
   // Regenerate / edit both re-run the last turn; they differ only in what the
