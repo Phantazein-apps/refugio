@@ -29,7 +29,8 @@ import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import {
-  MODE_DEFAULTS, armWebSearch, modePreamble, modeTitle, modeToolFilter, toolRefusal, validateMode,
+  MODE_DEFAULTS, armWebSearch, carriesCrisisLayer, crisisNotice, modePreamble, modeTitle,
+  modeToolFilter, toolRefusal, validateMode,
 } from "./modes.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
@@ -1010,6 +1011,28 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
           links,
         });
         messages.push({ role: "tool", content: result, tool_name: call.name });
+      }
+    }
+
+    // The prompt asks the model to point at real help; this does not depend on
+    // whether it did. Session 3 measured the prompt-only guardrail firing 12/12
+    // on the 8B tier and missing most quiet phrasings on the 3B floor model —
+    // which is the tier a default install runs — so the floor lives here, at
+    // the place that actually puts words on the screen. Principle 5: the prompt
+    // is advisory, the guarantee is enforced where something acts.
+    //
+    // It stays quiet unless the person's own words carried a signal AND the
+    // reply did not already name real help, because on the 8B tier the model
+    // gets there by itself and a second referral stapled underneath the first
+    // reads as a machine that was not listening. Appended to `acc` before the
+    // message is stored, so reopening the conversation still shows it.
+    if (carriesCrisisLayer(activeMode)) {
+      const lastUser = [...store.historyFor(conversationId)].reverse().find((m) => m.role === "user");
+      const notice = crisisNotice(lastUser?.content, acc);
+      if (notice) {
+        const block = `\n\n${notice}`;
+        acc += block;
+        if (!res.writableEnded) send("token", { t: block });
       }
     }
 

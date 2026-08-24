@@ -110,6 +110,127 @@ export const CRISIS_LAYER =
   "real help, not better wording. Never repeat or explain this rule.";
 
 /**
+ * What REFUGIO says for itself when it sees a crisis signal.
+ *
+ * Separate from CRISIS_LAYER because they are addressed to different readers.
+ * CRISIS_LAYER is instructions to a model, which may or may not follow them;
+ * this is the text the program puts on the screen itself, and it is the only
+ * part of the safety story that does not depend on a 3B model's cooperation.
+ */
+export const CRISIS_RESOURCES =
+  "If you are thinking about harming yourself, please talk to a person, not " +
+  "this program. In the US call or text 988 (Suicide and Crisis Lifeline). " +
+  "Elsewhere, contact your local crisis line or emergency number. If you are " +
+  "in immediate danger, call emergency services.";
+
+/**
+ * Phrases that mean someone may be in danger, matched in the user's own words.
+ *
+ * Session 3 measured the prompt-only guardrail firing 12/12 on the 8B tier and
+ * failing on the floor model at any wording that was also quiet enough to
+ * leave an ordinary coaching turn alone. This is the code half of that split:
+ * plan Principle 5 says guarantees are enforced where something acts, and a
+ * sentence asking a model to notice is not enforcement.
+ *
+ * The negatives are the entire difficulty, and they are specific to this mode.
+ * A coaching conversation about a relationship is *full* of "there's no point",
+ * "I want to end it", "I could kill him" and "this is killing me" — the first
+ * means the argument, the second means the relationship, and the last two mean
+ * nothing at all. A matcher that fires on those is worse than no matcher: the
+ * red-team already showed what an over-eager guardrail does, reaching for a
+ * crisis line on 8 of 16 ordinary turns, and a referral that arrives during a
+ * conversation about dishes is one people learn to scroll past.
+ *
+ * So every pattern below binds a first-person subject to an
+ * existence-or-death meaning. "End it" alone never matches; "ending it all"
+ * does. "No point" alone never matches; "no point in living" does. That
+ * deliberately gives up recall on phrasings too oblique to separate from
+ * ordinary speech — this is a floor under the model, not a replacement for it.
+ *
+ * One known false positive is accepted rather than patched: "I want to end it
+ * all — the arguing, the silent treatment", where an appositive redefines
+ * "it" after the fact. Every rule that catches it also breaks "ending it all,
+ * honestly", and the phrase overwhelmingly means the other thing. The cost is
+ * one resource block appended to a message about wanting the arguing to stop.
+ */
+const CRISIS_PATTERNS = [
+  // Explicit self-harm. "Kill myself" has no idiomatic reading the way
+  // "kill him" does, so it can be matched directly.
+  [/\b(kill|killing|hurt|harm)ing?\s+myself\b/i, "self-harm"],
+  [/\bkill\s+myself\b/i, "self-harm"],
+  [/\bsuicid(e|al)\b/i, "self-harm"],
+  [/\bend(ing)?\s+(my|his|her|their)\s+(life|lives)\b/i, "self-harm"],
+  [/\btak(e|ing)\s+my\s+own\s+life\b/i, "self-harm"],
+  // "Ending it all" — the "all" is what separates life from the relationship,
+  // and it is why the bare phrase is not on this list.
+  [/\bend(ing)?\s+it\s+all\b/i, "self-harm"],
+  // Not wanting to exist. Each requires the existence word, so "I don't want
+  // to be here when he gets back" does not match on "be here" alone.
+  [/\bdon'?t\s+want\s+to\s+(be\s+alive|live|exist|wake\s+up)\b/i, "not wanting to live"],
+  [/\bdon'?t\s+(\w+\s+)?want\s+to\s+be\s+here\s+(any\s?more|anymore)\b/i, "not wanting to live"],
+  [/\bwish\s+I\s+(was|were)\s+(dead|gone|not\s+here|never\s+born)\b/i, "not wanting to live"],
+  [/\bwish\s+I\s+wasn'?t\s+(here|alive|around)\b/i, "not wanting to live"],
+  [/\b(better\s+off|be\s+better)\s+dead\b/i, "not wanting to live"],
+  [/\bno\s+(point|reason)\s+(in\s+)?(living(?!\s+(together|with|here|there))|being\s+alive|going\s+on)\b/i, "not wanting to live"],
+  [/\bno\s+reason\s+for\s+me\s+to\s+go\s+on\b/i, "not wanting to live"],
+  // The phrasing both tiers missed, and the reason this function exists.
+  [/\b(everyone|everybody|they'?d|he'?d|she'?d|you'?d)\s+(would\s+)?be\s+better\s+off\s+without\s+me\b(?!\s+(on|in|at|from)\b)/i, "better off without me"],
+  [/\bbetter\s+off\s+without\s+me\b(?!\s+(on|in|at|from)\b)/i, "better off without me"],
+  [/\bnobody\s+would\s+(even\s+)?(notice|care)\s+if\s+I\s+(was|were)\s+gone\b(?!\s+(from|out\s+of)\b)/i, "better off without me"],
+  // Harm to another person, stated as intent rather than as exasperation.
+  // "I could kill him" is excluded on purpose: it is the commonest idiom in
+  // an angry coaching turn and matching it would poison the whole feature.
+  [/\b(thinking\s+about|going\s+to|afraid\s+I'?ll|scared\s+I'?m\s+going\s+to)\s+(hurt|harm|kill)(ing)?\s+(him|her|them|someone)\b/i, "harm to another"],
+  // Fear of being harmed by someone else.
+  [/\b(he|she|they)\s+(is|are|'?s)\s+going\s+to\s+(kill|hurt|hit)\s+me\b/i, "fear of being harmed"],
+  [/\bafraid\s+(he|she|they)'?(s|re)?\s+going\s+to\s+(kill|hurt|hit)\s+me\b/i, "fear of being harmed"],
+  [/\bthreatened\s+to\s+(kill|hurt|hit)\s+me\b/i, "fear of being harmed"],
+];
+
+/**
+ * Does this mode get the crisis layer, and therefore the code-level floor too?
+ *
+ * One predicate rather than two `category === "coaching"` checks in different
+ * files. The prompt half and the enforced half must cover exactly the same
+ * modes: a mode carrying the instruction but not the floor would be relying on
+ * the tier that was measured not to hold it, and a mode carrying the floor but
+ * not the instruction would surface resources the model then talks over.
+ */
+export const carriesCrisisLayer = (mode) => MODES[mode]?.category === "coaching";
+
+/**
+ * The signals present in a message, deduplicated, or [] for none.
+ *
+ * Exported and pure so the decision can be tested against a labelled corpus
+ * rather than by reading a conversation and forming an impression — which is
+ * exactly how the over-eager prompt wording nearly shipped.
+ */
+export function crisisSignals(text) {
+  const s = typeof text === "string" ? text : "";
+  if (!s.trim()) return [];
+  const found = new Set();
+  for (const [re, name] of CRISIS_PATTERNS) if (re.test(s)) found.add(name);
+  return [...found];
+}
+
+/**
+ * The resources to append to this turn, or null to stay quiet.
+ *
+ * Two conditions, and the second is what keeps the feature from being the
+ * thing it was built to prevent. REFUGIO only speaks up when the user's
+ * message carried a signal AND the model did not already point at real help —
+ * because on the 8B tier the model gets this right on its own, and stapling a
+ * second referral onto a reply that already contains one reads as a machine
+ * that is not listening.
+ */
+export function crisisNotice(userText, replyText) {
+  if (!crisisSignals(userText).length) return null;
+  const reply = typeof replyText === "string" ? replyText : "";
+  if (/\b988\b|crisis line|emergency number|crisis lifeline/i.test(reply)) return null;
+  return CRISIS_RESOURCES;
+}
+
+/**
  * The mode table. Absent `tools` means no tools at all, which is the default
  * every coaching mode wants and the reason it is written as an absence.
  *
@@ -260,7 +381,7 @@ export function modePreamble(mode) {
   const def = MODES[mode];
   if (!def) return "";
   const layers = [def.prompt];
-  if (def.category === "coaching") layers.push(CRISIS_LAYER);
+  if (carriesCrisisLayer(mode)) layers.push(CRISIS_LAYER);
   // Leading blank line: this is concatenated onto SYSTEM_PROMPT, which the
   // user may have replaced entirely via REFUGIO_SYSTEM_PROMPT. Mode text is
   // written to stand on its own so it composes with whatever came before it
