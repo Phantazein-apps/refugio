@@ -36,7 +36,15 @@
          REFUGIO exists for one account and no other, which is very hard to
          diagnose from a helpdesk. -->
     <Launch Condition="Privileged" Message="REFUGIO must be installed for all users. Run this installer as an administrator." />
-    <Launch Condition="VersionNT >= 1000" Message="REFUGIO requires Windows 10 or later." />
+
+    <!-- Not really ">= 1000". Windows Installer's app-compat shim caps
+         VersionNT at 603 for any unmanifested process — msiexec included —
+         on every real Windows 8.1/10/11/Server machine, not just older ones.
+         603 is therefore both the floor and the ceiling this check can see:
+         it is as strict a floor as VersionNT can express, and in practice
+         rejects only Vista and XP. A literal "Windows 10 or later" gate needs
+         a registry build-number read instead of VersionNT. -->
+    <Launch Condition="VersionNT >= 603" Message="REFUGIO requires Windows 8.1 or later." />
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of REFUGIO is already installed."
                   Schedule="afterInstallInitialize" />
@@ -84,7 +92,7 @@
           <RegistryValue Type="string" Value="REFUGIO per-user setup" />
           <RegistryValue Name="Version" Type="string" Value="1,0,0,0" />
           <RegistryValue Name="StubPath" Type="expandable"
-                         Value="&quot;[INSTALLFOLDER]runtime\node.exe&quot; &quot;[INSTALLFOLDER]packaging\windows\user-setup.js&quot;" />
+                         Value="&quot;[INSTALLFOLDER]runtime\node.exe&quot; &quot;[INSTALLFOLDER]packaging\windows\user-setup.cjs&quot;" />
           <!-- Runs without a console window flashing on every first logon. -->
           <RegistryValue Name="IsInstalled" Type="integer" Value="1" />
         </RegistryKey>

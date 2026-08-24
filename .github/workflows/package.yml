@@ -118,7 +118,7 @@ jobs:
           # a file and proves nothing about node_modules; a payload whose
           # dependencies failed to install passes a syntax check and then dies
           # on first launch with a module-not-found nobody sees.
-          "$NODE" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')" \
+          ( cd "$R" && "$NODE" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')" ) \
             || { echo "the payload's dependencies do not resolve"; exit 1; }
           ( cd "$R" && "$NODE" --input-type=module -e "await import('./chat/managed.js'); await import('./chat/attachments.js'); console.log('app modules import')" ) \
             || { echo "the app's own modules do not import"; exit 1; }
@@ -175,10 +175,32 @@ jobs:
         run: |
           $msi = (Get-ChildItem dist\*.msi | Select-Object -First 1).FullName
           $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; throw "msiexec exited $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) {
+            # The tail alone is boilerplate rollback/cleanup noise — the actual
+            # failing action is wherever a standard action logs "return value 3",
+            # which a 60-line tail on a package with several components does not
+            # reliably reach.
+            $log = Get-Content install.log
+            $hits = $log | Select-String -Pattern 'return value 3' -SimpleMatch
+            foreach ($h in $hits) {
+              $i = $h.LineNumber - 1
+              Write-Host "--- around line $($h.LineNumber) ---"
+              $log[([Math]::Max(0, $i - 20))..([Math]::Min($log.Count - 1, $i + 2))]
+            }
+            Write-Host "--- tail ---"
+            Get-Content install.log -Tail 60
+            throw "msiexec exited $($p.ExitCode)"
+          }
           $root = "$env:ProgramFiles\REFUGIO"
+
+          # A 32-bit package would be WOW64-redirected to Program Files (x86)
+          # and still report a successful install, so name that case rather
+          # than reporting each redirected file as individually "missing".
+          if ((-not (Test-Path $root)) -and (Test-Path "${env:ProgramFiles(x86)}\REFUGIO")) {
+            throw "installed to Program Files (x86) — the package is 32-bit; wix build needs -arch x64"
+          }
           foreach ($f in @("runtime\node.exe", "runtime\refugio-node.exe", "start-refugio.cjs",
-                           "chat\server.js", "packaging\windows\user-setup.js")) {
+                           "chat\server.js", "packaging\windows\user-setup.cjs")) {
             if (-not (Test-Path "$root\$f")) { throw "missing from the payload: $f" }
           }
           if (-not (Test-Path "HKLM:\SOFTWARE\Microsoft\Active Setup\Installed Components\{B4F1D6C2-3E88-4A17-9D20-6C5E8B1A7F03}")) {
@@ -186,13 +208,27 @@ jobs:
           }
           # Load, not parse. A payload whose dependencies failed to install
           # passes a syntax check and then dies on first launch.
-          & "$root\runtime\node.exe" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')"
-          if ($LASTEXITCODE -ne 0) { throw "the payload's dependencies do not resolve" }
+          #
+          # From $root, not the workspace: -e resolves against the current
+          # directory, and the checkout this job runs in has no node_modules
+          # of its own — so without this the check reports on the wrong tree.
+          Push-Location $root
+          try {
+            & "$root\runtime\node.exe" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')"
+            if ($LASTEXITCODE -ne 0) { throw "the payload's dependencies do not resolve" }
+          } finally { Pop-Location }
           # The per-user step has to survive being run twice: Active Setup can
           # re-run it, and a second run that throws is a crash dialog on
           # someone's first logon.
-          & "$root\runtime\node.exe" "$root\packaging\windows\user-setup.js"
-          & "$root\runtime\node.exe" "$root\packaging\windows\user-setup.js"
+          #
+          # Each run's exit code is checked. Without that this printed
+          # "idempotent" while both runs were crashing on every logon — the
+          # step only failed at all because pwsh propagates the last exit
+          # code, which pointed at the wrong line.
+          foreach ($run in 1, 2) {
+            & "$root\runtime\node.exe" "$root\packaging\windows\user-setup.cjs"
+            if ($LASTEXITCODE -ne 0) { throw "user-setup run $run exited $LASTEXITCODE" }
+          }
           Write-Host "user-setup is idempotent"
 
       - name: Check the deploy-time policy properties
