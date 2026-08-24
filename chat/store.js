@@ -55,6 +55,15 @@ export function initStore(dbPath) {
   addColumn("messages", "display_content", "TEXT");
   addColumn("messages", "attachments", "TEXT");
 
+  // Which private discussion mode this conversation was started in, if any.
+  //
+  // On the conversation rather than on each message because a mode is a frame
+  // around the whole exchange: the system prompt is rebuilt from scratch every
+  // turn, so a mode that could change halfway would silently reframe every
+  // earlier turn along with the new one. NULL is the ordinary chat, which is
+  // what every row that existed before this column keeps being.
+  addColumn("conversations", "mode", "TEXT");
+
   return db;
 }
 
@@ -70,13 +79,33 @@ const now = () => new Date().toISOString();
 
 const parseJson = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
-export function ensureConversation(id) {
-  const existing = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
-  if (existing) return;
+/** Create the conversation if this is its first turn, and answer which mode it
+ *  is in.
+ *
+ *  The mode argument is only read when the row is being created: a
+ *  conversation's mode is decided by its first message and fixed from then on.
+ *  Every later turn gets the STORED value back regardless of what was passed,
+ *  which is what makes the caller's job the same on every path — the ask route
+ *  hands the mode through from the request body, regenerate and edit hand
+ *  nothing, and all three end up running in the mode the conversation actually
+ *  has. The stored row, not the request, is the source of truth. */
+export function ensureConversation(id, mode = null) {
+  const existing = db.prepare("SELECT mode FROM conversations WHERE id = ?").get(id);
+  if (existing) return existing.mode ?? null;
   const t = now();
   db.prepare(
-    "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, NULL, ?, ?)"
-  ).run(id, t, t);
+    "INSERT INTO conversations (id, title, created_at, updated_at, mode) VALUES (?, NULL, ?, ?, ?)"
+  ).run(id, t, t, mode || null);
+  return mode || null;
+}
+
+/** The conversation's mode, without loading its messages.
+ *
+ *  getConversation() reads every message in the thread; a turn only needs this
+ *  one column, and it needs it before it streams. Same reason getTitle() exists
+ *  beside it. */
+export function getMode(id) {
+  return db.prepare("SELECT mode FROM conversations WHERE id = ?").get(id)?.mode ?? null;
 }
 
 export function addMessage(conversationId, role, content, model = null, extra = {}) {
@@ -101,7 +130,7 @@ export function historyFor(conversationId) {
 
 export function listConversations(limit = 200) {
   return db.prepare(
-    `SELECT id, title, created_at, updated_at, pinned
+    `SELECT id, title, created_at, updated_at, pinned, mode
      FROM conversations
      ORDER BY pinned DESC, updated_at DESC
      LIMIT ?`
@@ -110,7 +139,7 @@ export function listConversations(limit = 200) {
 
 export function getConversation(id) {
   const convo = db.prepare(
-    "SELECT id, title, created_at, updated_at, pinned FROM conversations WHERE id = ?"
+    "SELECT id, title, created_at, updated_at, pinned, mode FROM conversations WHERE id = ?"
   ).get(id);
   if (!convo) return null;
   const messages = db.prepare(
