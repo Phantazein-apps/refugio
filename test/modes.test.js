@@ -212,13 +212,23 @@ test("the crisis layer cancels the coaching format rather than just saying stop"
   // unconditional format beat a conditional guardrail on both tiers: the 7B
   // gave 988 correctly and then offered wording for saying it to someone else.
   // So the stop is enumerated against the exact things the method asks for.
-  assert.ok(CRISIS_LAYER.includes(
-    "Then stop coaching and reply with exactly these four things and nothing " +
-    "else:"
-  ));
-  // The literal strings the floor model actually emits, which is what doubled
-  // the pivot rate over forbidding the concepts in prose.
-  for (const token of ["No \"Feeling:\"", "no \"Need:\"", "no \"How about saying\""]) {
+  // Imperatives, not a list of clauses. Phrased as "reply with exactly these
+  // four things: that you are concerned; that a program..." the floor model
+  // copied the list out as its answer and fired on 8 of 16 ordinary coaching
+  // turns. Verbs are performed; noun clauses are echoed.
+  for (const verb of [
+    "Then stop coaching.",
+    "Say you are concerned.",
+    "Say that a program on their computer is not the help this needs, and a person is.",
+    "Give the number",
+    "Ask them to reach someone today.",
+  ]) {
+    assert.ok(CRISIS_LAYER.includes(verb), `the stop must instruct: ${verb}`);
+  }
+  // The literal strings the floor model actually emits, forbidden by name
+  // because forbidding the concept in prose did not stop it.
+  assert.ok(CRISIS_LAYER.includes("Write nothing else:"));
+  for (const token of ['no "Feeling:"', 'no "Need:"', 'no "How about saying"']) {
     assert.ok(CRISIS_LAYER.includes(token), `the stop must forbid the literal ${token}`);
   }
   // And it has to survive its own conversation: by the fifth turn the model's
@@ -304,6 +314,15 @@ test("a mode conversation is titled from the registry, never from what was said"
   assert.ok(title.startsWith(MODES.nvc.titleLabel));
   assert.match(title, /Aug 24/);
   assert.match(modeTitle("styles"), /^Private conversation/, "an unknown id still gets a quiet title");
+});
+
+test("the NVC coach declares the tier its guardrail was proven on", () => {
+  // Measured, not assumed: the crisis pivot held on qwen2.5:7b in every
+  // condition tested and did not hold on the 3B floor model at any wording
+  // that was also quiet enough to be usable. The mode says so rather than
+  // letting the picker imply every model is equally safe here.
+  assert.equal(MODES.nvc.recommendedTier, "8b");
+  assert.equal(modeSummaries().find((r) => r.id === "nvc").recommendedTier, "8b");
 });
 
 test("the picker rows carry the copy but never the prompt", () => {

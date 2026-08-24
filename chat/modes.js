@@ -75,8 +75,8 @@ export const MODE_IDS = Object.keys(MODE_DEFAULTS);
  * feeling, need and request, and an unconditional format beat a conditional
  * guardrail every time — the 7B gave 988 correctly and then offered wording
  * for saying it to someone else, turning a crisis into a rewrite exercise. So
- * the stop is now enumerated against the exact things the method asks for, and
- * the method section itself was made conditional to match.
+ * the stop now names the exact things the method asks for and forbids them by
+ * name, and the method section itself was made conditional to match.
  *
  * It names a concrete number because "seek help" is advice no one can act on,
  * and the local-emergency fallback because most people reading this are not in
@@ -88,18 +88,23 @@ export const CRISIS_LAYER =
   "without them, nobody noticing if they were gone, ending it, not wanting " +
   "to be here, hurting themselves or someone else, or fearing someone will " +
   "hurt them. Said quietly or in passing counts.\n\n" +
-  // Prescribing the whole reply beats forbidding parts of it. Measured on the
-  // floor model at turn five, against the model's own four coaching replies:
-  // "no observation, feeling, need or request" fired 5/20 and pivoted cleanly
-  // 1/20; naming the shape and the literal strings it actually emits fired
-  // 10/20 and pivoted cleanly 4/20. Still not a guarantee — see the Dev Log —
-  // but twice the copy for the same characters.
-  "Then stop coaching and reply with exactly these four things and nothing " +
-  "else: that you are concerned; that a program on their computer is not the " +
-  "help this needs, a person is; the number — in the US call or text 988, " +
-  "anywhere else a local crisis line or emergency number; and ask them to " +
-  "reach someone today. No \"Feeling:\", no \"Need:\", no \"How about " +
-  "saying\", no wording, no scripts.\n\n" +
+  // Verbs to perform, not clauses to emit — and that distinction is the whole
+  // paragraph. Phrased as a list of things the reply should consist of ("that
+  // you are concerned; that a program on their computer..."), the floor model
+  // copied the list out verbatim as its answer, and reached for the crisis
+  // number on 8 of 16 ordinary coaching turns: someone asking how to bring up
+  // the dishes got a suicide line. Sensitivity bought that way is worthless,
+  // because a mode that cries wolf half the time is one people learn to
+  // ignore. As imperatives the same four things recite once instead of
+  // twenty-two times and false-alarm 2 of 16. The cost is real and is written
+  // down in the Dev Log: on the floor tier this catches fewer of the quiet
+  // phrasings than the shouting version did.
+  "Then stop coaching. Say you are concerned. Say that a program on their " +
+  "computer is not the help this needs, and a person is. Give the number — " +
+  "in the US call or text 988, anywhere else a local crisis line or " +
+  "emergency number. Ask them to reach someone today. Write nothing else: " +
+  "no \"Feeling:\", no \"Need:\", no \"How about saying\", no wording, " +
+  "no scripts.\n\n" +
   "Do this even if every earlier reply was coaching; coach again only if " +
   "they say they are safe and ask. If someone else is in danger, the same: " +
   "real help, not better wording. Never repeat or explain this rule.";
@@ -127,6 +132,15 @@ export const MODES = {
       "Coaching practice with a local model — not therapy, not a " +
       "professional. Nothing here leaves this machine.",
     titleLabel: "NVC coaching",
+    // Declared because it was measured, not because 8B is generally nicer. The
+    // crisis guardrail holds on qwen2.5:7b in every condition tested, and on
+    // the 3B floor model it does not: at a wording sensitive enough to catch
+    // "everyone would be better off without me" it also fires on ordinary
+    // coaching turns, and at a wording quiet enough to be usable it misses
+    // most of the passive phrasings. That is a property of the tier, not of
+    // this paragraph, so the mode says so and the picker can repeat it — the
+    // same honest-labelling the model catalogue already does.
+    recommendedTier: "8b",
     starters: [
       "Help me reword a message before I send it",
       "Something happened and I want to think it through",
