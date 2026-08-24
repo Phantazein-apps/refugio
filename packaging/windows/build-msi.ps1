@@ -91,6 +91,14 @@ Say "Building the MSI"
 if ($LASTEXITCODE -ne 0) {
   Die "WiX is not installed. Run: dotnet tool install --global wix"
 }
+
+# WiX v7 gates every command behind acknowledging the Open Source Maintenance
+# Fee EULA (https://docs.firegiant.com/wix/osmf/) — without this, `wix
+# extension add` and `wix build` both fail with WIX7015/WIX7016. Acceptance
+# is written to the user profile and persists for the rest of this run.
+$eulaOut = & wix eula accept wix7 2>&1
+if ($LASTEXITCODE -ne 0) { Die "wix eula accept failed:`n$eulaOut" }
+
 $extOut = & wix extension add -g WixToolset.Util.wixext 2>&1
 if ($LASTEXITCODE -ne 0) { Die "wix extension add failed:`n$extOut" }
 
