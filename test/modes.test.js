@@ -28,18 +28,28 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   MODES, MODE_DEFAULTS, MODE_IDS, MODES_UI, CRISIS_LAYER, CRISIS_RESOURCES,
+  BUDGET, PAIRED_BUDGET,
   armWebSearch, carriesCrisisLayer, crisisNotice, crisisSignals, definedModes,
-  modePreamble, modeSummaries, modeTitle, modeToolFilter, toolRefusal,
-  validateMode, webAllowed,
+  enablementId, modeDef, modePreamble, modeSummaries, modeTitle, modeToolFilter,
+  pairedId, toolRefusal, validateMode, webAllowed,
 } from "../chat/modes.js";
 import * as store from "../chat/store.js";
 
 // The whole ceiling from plan Principle 6: history is never truncated and the
 // target models have ~8k contexts, so a mode's preamble is paid again on every
-// turn of the conversation.
-const PROMPT_BUDGET = 2000;
+// turn of the conversation. Read from the module rather than restated here —
+// two copies of a budget is how one of them quietly becomes the wrong one.
+const PROMPT_BUDGET = BUDGET;
 
 const enabledFor = (...ids) => Object.fromEntries(ids.map((id) => [id, true]));
+
+// Every id a surface can actually offer, base modes and paired variants alike.
+// definedModes() is only the base ones, and most of the doctrine below has to
+// hold for a paired variant too — that is the whole risk of adding one.
+const offeredIds = () => modeSummaries().map((r) => r.id);
+
+// A connector-readiness answer for validateMode, in one line.
+const ready = (...ids) => (id) => ids.includes(id);
 
 // ── Off by default ──────────────────────────────────────────
 
@@ -60,7 +70,7 @@ test("every planned mode id has a default, so none can lose a saved choice later
 
 test("only modes with content are offerable", () => {
   // Declaring an id early is cheap; shipping half a coaching prompt is not.
-  assert.deepEqual(definedModes(), ["nvc"]);
+  assert.deepEqual(definedModes(), ["nvc", "whatsapp"]);
 });
 
 // ── Which ids are accepted ──────────────────────────────────
@@ -157,10 +167,20 @@ test("every tool a model could name in a coaching mode is refused at the point i
 // ── The prompt ──────────────────────────────────────────────
 
 test("every mode's preamble fits the prompt budget", () => {
-  for (const id of definedModes()) {
+  // A paired variant is allowed the larger ceiling and nothing else is. The
+  // split is the point: the number that protects an ordinary coaching turn is
+  // unchanged, and the extra is only ever paid by a conversation that opted
+  // into a connector and is already carrying tool schemas for it.
+  for (const id of offeredIds()) {
+    const ceiling = modeDef(id).pairedFrom ? PAIRED_BUDGET : PROMPT_BUDGET;
     const len = modePreamble(id).length;
-    assert.ok(len <= PROMPT_BUDGET, `${id} preamble is ${len} chars, over the ${PROMPT_BUDGET} budget`);
+    assert.ok(len <= ceiling, `${id} preamble is ${len} chars, over the ${ceiling} budget`);
   }
+  assert.ok(PAIRED_BUDGET > PROMPT_BUDGET, "the paired allowance is an allowance, not a second budget");
+  assert.ok(
+    modePreamble("nvc").length <= PROMPT_BUDGET,
+    "pairing must not have bought headroom for the unpaired mode"
+  );
 });
 
 test("no mode means no preamble, so an ordinary chat pays nothing", () => {
@@ -464,13 +484,16 @@ test("the resources name something a person can actually do", () => {
 test("the prompt half and the enforced half cover exactly the same modes", () => {
   // A mode carrying the instruction but not the floor would be trusting the
   // tier that was measured not to hold it.
-  for (const id of definedModes()) {
+  for (const id of offeredIds()) {
     assert.equal(
       carriesCrisisLayer(id),
       modePreamble(id).includes(CRISIS_LAYER),
       `${id} must either have both halves or neither`
     );
   }
+  // Pairing a coaching mode with a connector must not lose it either half.
+  assert.equal(carriesCrisisLayer("nvc+whatsapp"), true);
+  assert.ok(modePreamble("nvc+whatsapp").includes(CRISIS_LAYER));
   assert.equal(carriesCrisisLayer(null), false);
   assert.equal(carriesCrisisLayer("styles"), false, "an id with no content gets neither");
 });
@@ -519,11 +542,21 @@ test("the settings copy states the promise, not this build's version of it", () 
   assert.match(MODES_UI.privacy, /never searches the web/);
   assert.match(MODES_UI.privacy, /never sends anything on your behalf/);
   assert.match(MODES_UI.privacy, /stays on this computer/);
-  // And the part that is only true today, kept in its own sentence so that
-  // pairing coaching modes with read-only connectors (§2.3, Session 6) reads as
-  // the planned feature it is rather than as a broken promise.
-  assert.match(MODES_UI.connectors, /In this build/);
-  assert.match(MODES_UI.connectors, /only ever be paired with connectors that read/);
+  // The sentence that used to say "in this build, coaching modes are offered no
+  // connectors at all" and promised that when that changed a mode would only
+  // ever be paired with connectors that read, and would say which. Session 6
+  // made it true, so it is now written as a standing rule rather than as a
+  // description of a build — and the two halves it promised are pinned here
+  // because they are the whole reason pairing was allowed to happen.
+  assert.doesNotMatch(MODES_UI.connectors, /In this build/);
+  assert.match(MODES_UI.connectors, /only ever paired with connectors that read/);
+  assert.match(MODES_UI.connectors, /It names which ones/);
+  assert.match(MODES_UI.connectors, /still cannot send/);
+  // Named, not gestured at. "Reads WhatsApp" is unfalsifiable copy; a list of
+  // the three things it does is checkable against the allowlist, and there is a
+  // test below that checks it.
+  assert.match(MODES_UI.connectors, /list your chats, read messages and look up contacts/);
+  assert.match(MODES_UI.connectors, /never send, reply or delete/);
   // The one that must never soften: a coaching mode that could send would be a
   // different product, and D4 says send-capable tools are never in its list.
   assert.doesNotMatch(MODES_UI.privacy, /no tools/);
@@ -573,4 +606,214 @@ test("a database from before modes existed gains the column and keeps its histor
     store.closeStore();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── Connector pairing (Session 6) ───────────────────────────
+//
+// Pairing is the first time a mode is offered anything at all, and it is the
+// change that could falsify the sentence the settings pane has always made:
+// never sends anything on your behalf, stays on this computer. So the tests
+// here are mostly about absence — what is NOT in an allowlist, and what is
+// still refused when a model names it anyway. An absence is exactly the kind
+// of promise that decays silently, because adding one tool to one list is a
+// one-line diff that no other test in this file would notice.
+
+// A pool wide enough that a filter which does nothing would be visible. It
+// contains the three tools a paired mode may have, the one from the same
+// connector it may never have, and the tools from three other connectors that
+// have no business in a coaching conversation at all.
+const WIDE_POOL = [
+  "whatsapp__list_chats", "whatsapp__list_messages", "whatsapp__search_contacts",
+  "whatsapp__send_message", "whatsapp__download_media",
+  "memory__memory_save", "notes__notes_create", "notes__notes_search",
+  "email__send_message", "reminders__reminders_create_reminder",
+].map((name) => ({ type: "function", function: { name } }));
+
+const READ_TOOLS = [
+  "whatsapp__list_chats", "whatsapp__list_messages", "whatsapp__search_contacts",
+];
+
+const namesOf = (defs) => defs.map((t) => t.function.name);
+
+test("a paired variant is one mode reached a second way, not a second mode", () => {
+  // Two registry entries would be two prompts to keep in step, and the safety
+  // copy is the half that must never drift.
+  assert.equal(pairedId("nvc"), "nvc+whatsapp");
+  assert.equal(pairedId("whatsapp"), null, "a mode with no optional connector has no paired id");
+  const paired = modeDef("nvc+whatsapp");
+  assert.equal(paired.pairedFrom, "nvc");
+  assert.equal(paired.requiresConnector, "whatsapp");
+  assert.equal(paired.titleLabel, MODES.nvc.titleLabel, "the sidebar says the same quiet thing");
+  assert.equal(paired.disclosure, MODES.nvc.disclosure);
+  assert.ok(paired.prompt.startsWith(MODES.nvc.prompt), "the coaching prompt is the same one, extended");
+});
+
+test("a paired id this build cannot explain is refused like any other unknown", () => {
+  // The safe direction for an id nobody can account for is fewer capabilities.
+  for (const id of ["nvc+slack", "whatsapp+nvc", "nvc+", "+whatsapp", "nvc+whatsapp+x", "nvc++"]) {
+    assert.equal(modeDef(id), null, `${id} must not resolve`);
+    assert.equal(validateMode(id, enabledFor("nvc", "whatsapp")).ok, false, `${id} must be refused`);
+    assert.deepEqual(modeToolFilter(id, WIDE_POOL), [], `${id} must be offered nothing`);
+  }
+});
+
+test("one switch governs both ways of holding the conversation", () => {
+  assert.equal(enablementId("nvc+whatsapp"), "nvc");
+  assert.equal(enablementId("nvc"), "nvc");
+  assert.equal(enablementId("whatsapp"), "whatsapp");
+  assert.equal(validateMode("nvc+whatsapp", enabledFor("nvc"), ready("whatsapp")).mode, "nvc+whatsapp");
+  // And switching NVC off closes both doors, with the message that sends
+  // someone to Settings rather than to a bug report.
+  const off = validateMode("nvc+whatsapp", { nvc: false }, ready("whatsapp"));
+  assert.equal(off.ok, false);
+  assert.match(off.error, /NVC Coach is switched off/);
+});
+
+test("a mode that needs a connector is refused when the connector is not ready", () => {
+  // Not started with an empty tool array: the preamble would still be telling
+  // the model it can read this person's messages, and this is a mode whose
+  // inventions would be about real people they know.
+  for (const id of ["whatsapp", "nvc+whatsapp"]) {
+    const r = validateMode(id, enabledFor("nvc", "whatsapp"), ready());
+    assert.equal(r.ok, false, `${id} must be refused with no connector`);
+    assert.equal(r.needsConnector, "whatsapp", "the caller can say which one");
+    assert.match(r.error, /whatsapp/);
+    assert.equal(validateMode(id, enabledFor("nvc", "whatsapp"), ready("whatsapp")).mode, id);
+  }
+  // The unpaired coach is unaffected by any of it, which is why it is declared
+  // as an OPTIONAL connector: a coaching mode that stopped existing when
+  // WhatsApp fell over would be a worse mode than the one that shipped.
+  assert.equal(validateMode("nvc", enabledFor("nvc"), ready()).mode, "nvc");
+});
+
+test("a paired mode is offered its three read tools and nothing else in the pool", () => {
+  for (const id of ["whatsapp", "nvc+whatsapp"]) {
+    assert.deepEqual(namesOf(modeToolFilter(id, WIDE_POOL)), READ_TOOLS, `${id} allowlist`);
+  }
+});
+
+test("send_message is in the connector and in no mode's allowlist", () => {
+  // Hermeneia's minimal profile is five tools and one of them sends. Plan D4:
+  // a send-capable tool never enters a mode's allowlist. This is the single
+  // assertion standing between that rule and a one-line diff.
+  assert.ok(namesOf(WIDE_POOL).includes("whatsapp__send_message"), "the pool must contain it or this proves nothing");
+  for (const id of offeredIds()) {
+    assert.ok(
+      !namesOf(modeToolFilter(id, WIDE_POOL)).includes("whatsapp__send_message"),
+      `${id} must never be offered whatsapp__send_message`
+    );
+    assert.ok(toolRefusal(id, "whatsapp__send_message"), `${id} must refuse it at the point it runs`);
+  }
+});
+
+test("memory and every write tool are absent from every mode's offered set", () => {
+  // Memory is the one that would falsify "the conversation stays on this
+  // computer" outright: memory_save persists what was said and its
+  // GitHub-backed variant uploads it. Apple Notes' notes_create is the near
+  // miss — "save this reframe to my notes" is a genuinely useful thing to want
+  // — and it is out for the same reason, decided rather than inherited: it
+  // writes conversation content into a store that syncs off this machine by
+  // default, and copying the words out by hand does the same job with none of
+  // that. Both are checked as an absence from the OFFERED list and again as a
+  // refusal at the point that runs, because those are two different mistakes.
+  const forbidden = ["memory__memory_save", "notes__notes_create", "email__send_message",
+                     "reminders__reminders_create_reminder"];
+  for (const id of offeredIds()) {
+    const offered = namesOf(modeToolFilter(id, WIDE_POOL));
+    for (const name of forbidden) {
+      assert.ok(!offered.includes(name), `${id} must not be offered ${name}`);
+      assert.ok(toolRefusal(id, name), `${id} must refuse ${name} at execution`);
+    }
+  }
+});
+
+test("every tool any mode may call is a read, by its own name", () => {
+  // A cheap check that catches the case the named lists above cannot: a tool
+  // nobody thought to enumerate. If a mode ever needs a verb on this list, the
+  // test is where the argument for it gets written down.
+  const writes = /(send|create|update|delete|trash|save|write|add|move|reply|forward|complete|schedule|share|download)/i;
+  for (const id of offeredIds()) {
+    for (const name of modeDef(id).tools?.allow ?? []) {
+      assert.doesNotMatch(name, writes, `${id} allows ${name}, which reads like a write`);
+    }
+  }
+});
+
+test("a tool inside the allowlist is allowed to run, or the allowlist means nothing", () => {
+  // The mirror of every refusal above. Without this, a toolRefusal() that
+  // returned a string unconditionally would pass the entire section.
+  for (const name of READ_TOOLS) {
+    assert.equal(toolRefusal("nvc+whatsapp", name), null, `${name} must run in the paired mode`);
+    assert.equal(toolRefusal("whatsapp", name), null, `${name} must run in the data mode`);
+    // But not in the unpaired coach, which was offered nothing.
+    assert.ok(toolRefusal("nvc", name), `${name} must still be refused in the unpaired coach`);
+  }
+});
+
+test("the refusal names the mode's limit, not a generic failure", () => {
+  const r = toolRefusal("whatsapp", "whatsapp__send_message");
+  assert.ok(r.startsWith("Error:"), "the model reads the leading Error: as a failed call");
+  assert.ok(r.includes("whatsapp__send_message"), "the refusal names what was refused");
+});
+
+test("pairing does not open the web, in either direction", () => {
+  // The one capability that leaves this machine stays shut whatever a mode is
+  // paired with. Connectors read files on this computer; web search does not.
+  for (const id of offeredIds()) {
+    assert.equal(webAllowed(id), false, `${id} must never reach the web`);
+    assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: id }), false);
+    assert.match(toolRefusal(id, "web__search"), /never available in a discussion mode/);
+  }
+});
+
+test("the copy in the pane matches the allowlist it describes", () => {
+  // The pane promises the WhatsApp modes can "list your chats, read messages
+  // and look up contacts — never send, reply or delete". That sentence is only
+  // worth anything if it moves when the list does, so it is checked against the
+  // list rather than against itself.
+  const allowed = MODES.whatsapp.tools.allow;
+  assert.deepEqual(allowed, READ_TOOLS);
+  assert.match(MODES_UI.connectors, /list your chats/);
+  assert.match(MODES_UI.connectors, /read messages/);
+  assert.match(MODES_UI.connectors, /look up contacts/);
+  assert.equal(allowed.length, 3, "three claims in the sentence, three tools in the list");
+});
+
+test("the WhatsApp data mode says what it is and is not, and gets no crisis layer", () => {
+  // Not "coaching": Session 3 scoped crisis interception to coaching modes on
+  // the grounds that widening it to ordinary chat is a larger product decision
+  // than anyone asked for, and a reader for the person's own files is much
+  // nearer ordinary chat than it is to sitting with someone in distress.
+  assert.equal(MODES.whatsapp.category, "data");
+  assert.equal(carriesCrisisLayer("whatsapp"), false);
+  assert.ok(!modePreamble("whatsapp").includes(CRISIS_LAYER));
+  assert.match(MODES.whatsapp.prompt, /cannot send, reply to, forward or delete anything, and must never offer to/);
+  assert.match(MODES.whatsapp.prompt, /never reconstruct what the messages probably said/);
+  assert.match(MODES.whatsapp.disclosure, /it cannot send, reply or delete/);
+});
+
+test("the paired coach names what it may read and that it still cannot send", () => {
+  // The tool array already makes sending impossible. This is the sentence that
+  // stops the model OFFERING to — which is the failure a person would actually
+  // meet, and the one no allowlist can prevent.
+  const p = MODES.nvc.pairing.prompt;
+  assert.match(p, /You can read their WhatsApp: list chats, list messages, search contacts\./);
+  assert.match(p, /read it before coaching on it/);
+  assert.match(p, /You cannot send anything and must never offer to/);
+  assert.match(p, /they copy your wording out and send it themselves/);
+});
+
+test("a picker row carries the allowlist but still never the prompt", () => {
+  const rows = modeSummaries();
+  const base = rows.find((r) => r.id === "nvc");
+  const paired = rows.find((r) => r.id === "nvc+whatsapp");
+  assert.ok(paired, "the paired variant is offered as its own row");
+  assert.deepEqual(base.tools, [], "an unpaired coaching mode advertises no tools, because it has none");
+  assert.deepEqual(paired.tools, READ_TOOLS, "and the paired one advertises exactly what it may call");
+  assert.equal(paired.pairedFrom, "nvc", "so a surface knows which switch governs it");
+  assert.equal(base.pairedFrom, null);
+  for (const row of rows) assert.equal(row.prompt, undefined);
+  // Directly behind its base, because the order a picker shows them in is the
+  // server's decision and not a second opinion held in the browser.
+  assert.equal(rows.indexOf(paired), rows.indexOf(base) + 1);
 });

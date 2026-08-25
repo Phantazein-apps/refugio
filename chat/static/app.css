@@ -739,6 +739,11 @@ textarea {
 .mode-opt-title { font: 600 .8125rem var(--font-sans); }
 .mode-opt-hint { font-size: .75rem; color: var(--ink-faint); margin-top: 2px; line-height: 1.05rem; }
 .mode-opt-note { font-size: .6875rem; color: var(--warn); margin-top: 3px; line-height: 1rem; }
+/* A paired variant is the same mode reached a second way, so it sits under the
+   row it belongs to rather than beside it as a peer. The rule is one indent
+   and a rail: enough to read as "and also this", not enough to look like a
+   different coach. */
+.mode-opt.is-paired { padding-left: 18px; border-left: 2px solid var(--bg-surface-3); }
 
 /* REFUGIO speaking for itself, not the model speaking. The crisis resources
    are appended by the server whatever the model said, so they must not read

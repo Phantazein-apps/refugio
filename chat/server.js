@@ -30,7 +30,7 @@ import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import {
   CRISIS_RESOURCES, MODES, MODES_UI, MODE_DEFAULTS, armWebSearch, carriesCrisisLayer, crisisNotice,
-  modePreamble, modeSummaries, modeTitle, modeToolFilter, toolRefusal, validateMode,
+  modePreamble, modeSummaries, modeTitle, modeToolFilter, toolRefusal, validateMode, modeDef,
 } from "./modes.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
@@ -640,7 +640,7 @@ function countConnectors(rows) {
  *  never includes prompt text: that is instructions to a model, and pasting it
  *  into a window invites the reader to treat it as a promise. */
 function modesPayload(rows) {
-  const ok = new Set((rows || []).filter((r) => r.state === "ok").map((r) => r.id));
+  const byId = new Map((rows || []).map((r) => [r.id, r]));
   return {
     ...MODES_UI,
     // Sent so the window can tell REFUGIO's own words apart from the model's.
@@ -649,13 +649,40 @@ function modesPayload(rows) {
     // offering it.
     resources: CRISIS_RESOURCES,
     enabled: { ...MODE_DEFAULTS, ...(connectorSettings.modes || {}) },
-    available: modeSummaries().map((m) => ({
-      ...m,
+    available: modeSummaries().map((m) => {
       // A paired mode is shown and not selectable when its connector is not
       // ready, with the connector's own state named rather than invented.
-      connectorOk: m.requiresConnector ? ok.has(m.requiresConnector) : true,
-    })),
+      if (!m.requiresConnector) return { ...m, connectorOk: true, connectorNote: null };
+      const row = byId.get(m.requiresConnector);
+      return {
+        ...m,
+        connectorOk: row?.state === "ok",
+        // The connector's own words for what is wrong with it, not the mode's
+        // guess. `explain()` already turns a raw MCP failure into a sentence
+        // ("is held by another program", "was refused permission"), and this
+        // is the connector-errors honesty rule applied one surface further
+        // out: a mode says the connector is not ready and says why, rather
+        // than inventing a cause or offering the blank "not connected" that
+        // sends someone looking in the wrong place. Absent entirely is its own
+        // answer, and a different one from broken.
+        connectorNote: connectorNote(m.requiresConnector, row),
+      };
+    }),
   };
+}
+
+/** Why a paired mode is not available right now, in the connector's own terms.
+ *
+ *  Kept beside modesPayload rather than in modes.js because it is the one part
+ *  of a mode's copy that is not about the mode: it is about a connector, and
+ *  connectors are the server's business. The registry stays dependency-free. */
+function connectorNote(id, row) {
+  const label = row?.label || id;
+  if (!row) return `${label} is not set up on this computer.`;
+  if (row.state === "ok") return null;
+  if (row.state === "connecting") return `${label} is still starting.`;
+  const summary = row.explanation?.summary;
+  return summary ? `${label} ${summary}.` : `${label} is not ready.`;
 }
 
 function connectorPayload(rows) {
@@ -972,10 +999,19 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   // pool's settings are global and two conversations can stream at once, so a
   // mode that reached in there would strip the other conversation's tools.
   // A coaching mode filters everything away and passes an empty array.
-  const tools = [
-    ...modeToolFilter(activeMode, mcp ? mcp.toolDefs(TOOL_LIMIT) : []),
-    ...(webArmed ? [WEB_TOOL] : []),
-  ];
+  //
+  // The allowlist runs BEFORE the cap, not after, and the difference is the
+  // whole mode. toolDefs' cap is spread round-robin across every connected
+  // server, so on a machine with four connectors the paired mode's three
+  // WhatsApp tools compete with everyone else's for forty slots — and a mode
+  // that reaches its connector only when the machine happens to have few
+  // connectors is not a feature, it is a bug that appears on other people's
+  // computers. Uncapped in, allowlist applied, then capped again, because an
+  // allowlist is a promise about the ceiling and not a replacement for one.
+  const offered = activeMode
+    ? modeToolFilter(activeMode, mcp ? mcp.toolDefs(0) : []).slice(0, TOOL_LIMIT)
+    : (mcp ? mcp.toolDefs(TOOL_LIMIT) : []);
+  const tools = [...offered, ...(webArmed ? [WEB_TOOL] : [])];
 
   const messages = [
     // Three sections, deliberately in this order and concatenated rather than
@@ -1466,7 +1502,22 @@ async function route(req, res, url) {
     // an id this build never heard of is a stale page, a known id that is off
     // is a trip to Settings. Only the FIRST turn of a conversation is affected
     // by any of this — after that the stored mode wins and the body is ignored.
-    const wanted = validateMode(body.mode, connectorSettings.modes);
+    //
+    // A mode that names a connector is also checked against that connector's
+    // real state, and only then: connectorRows() probes the pool when its
+    // cache is cold, and an ordinary send must not wait behind a WhatsApp
+    // handshake it has no use for. Refusing here rather than starting the
+    // conversation with an empty tool array is deliberate — the preamble would
+    // still be telling the model it can read this person's messages, and a
+    // mode whose inventions are about real people they know is the wrong place
+    // to let that gap open.
+    const asked = typeof body.mode === "string" ? body.mode.trim() : "";
+    let connectorReady = null;
+    if (modeDef(asked)?.requiresConnector) {
+      const rows = await connectorRows();
+      connectorReady = (id) => rows.some((r) => r.id === id && r.state === "ok");
+    }
+    const wanted = validateMode(body.mode, connectorSettings.modes, connectorReady);
     if (!wanted.ok) return sendJson(res, 400, { error: wanted.error });
     const conversationId = (body.conversation_id || "").trim() || randomUUID().replace(/-/g, "");
     return streamTurn(res, {

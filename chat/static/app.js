@@ -646,13 +646,26 @@ function applyModes(modes) {
   renderModeControl();
 }
 
-/** The modes this build defines, that are switched on, and whose connector (if
- *  any) is actually ready. */
+/** The modes this build defines that are switched on — connector ready or not.
+ *
+ *  A paired mode whose connector is down stays in the list and is not
+ *  selectable, with the connector's own state named. Hiding it would be the
+ *  kinder-looking choice and the wrong one: someone who switched on "NVC Coach
+ *  + WhatsApp" and finds nothing there cannot tell whether they imagined the
+ *  feature, whether this build has it, or whether WhatsApp is simply down —
+ *  and only the third is true and only the third is fixable. */
 function offerableModes() {
-  return (state.modes?.available || []).filter(
-    (m) => state.modes?.enabled?.[m.id] && (!m.requiresConnector || m.connectorOk)
-  );
+  return (state.modes?.available || []).filter((m) => state.modes?.enabled?.[enablementIdOf(m)]);
 }
+
+/** Which switch governs a row — the base mode, for a paired variant.
+ *
+ *  Sent by the server rather than derived from the id here, so the browser
+ *  never has to know how a paired id is spelled. */
+const enablementIdOf = (m) => m.pairedFrom || m.id;
+
+/** Can this row actually be chosen right now? */
+const modeSelectable = (m) => !m.requiresConnector || m.connectorOk;
 
 const modeById = (id) => (state.modes?.available || []).find((m) => m.id === id) || null;
 
@@ -719,17 +732,30 @@ function openModePanel() {
   }));
 
   for (const m of offerable) {
+    const usable = modeSelectable(m);
     const opt = el("button.mode-opt", {
       type: "button",
-      on: { click: () => chooseMode(m.id) },
+      disabled: !usable,
+      on: { click: () => usable && chooseMode(m.id) },
     },
       el("div.mode-opt-title", { text: `${m.icon || ""} ${m.label}`.trim() }),
       el("div.mode-opt-hint", { text: m.hint || "" }),
     );
+    opt.classList.toggle("is-paired", !!m.pairedFrom);
+    opt.classList.toggle("is-blocked", !usable);
+    // The connector's own account of itself, passed straight through. The
+    // server got it from `explain()`, which is the one place in this codebase
+    // allowed to say why a connector failed — anything composed here would be
+    // a guess wearing the connector's name.
+    if (!usable) {
+      opt.append(el("div.mode-opt-note", {
+        text: m.connectorNote || "Its connector is not ready.",
+      }));
+    }
     // Honest labelling, the same as the model picker's. Not a preference for
     // bigger models: on a smaller one this mode's safety wording was measured
     // to hold less well, and saying so costs a line.
-    if (m.recommendedTier && !tierMet(state.model, m.recommendedTier)) {
+    if (usable && m.recommendedTier && !tierMet(state.model, m.recommendedTier)) {
       opt.append(el("div.mode-opt-note", {
         text: `Best on an ${m.recommendedTier.toUpperCase()} model or larger.`,
       }));

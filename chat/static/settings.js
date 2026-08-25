@@ -987,11 +987,17 @@ function renderModes() {
   ));
 
   const active = modelName();
-  for (const m of rows) {
+  // One card per switch. A paired variant is not its own switch — turning NVC
+  // on turns on both ways of holding an NVC conversation, and whether the
+  // paired one can be reached is a question about a connector, answered in the
+  // composer at the moment of picking. Two checkboxes here would ask someone to
+  // decide something they have not been shown yet.
+  for (const m of rows.filter((r) => !r.pairedFrom)) {
     // A mode whose connector is not ready is shown and not selectable, with the
     // connector named — never hidden, or the person cannot tell the difference
     // between "not for me" and "not working".
     const blocked = m.requiresConnector && !m.connectorOk;
+    const paired = rows.find((r) => r.pairedFrom === m.id);
     const card = el("div.card", {},
       el("h3", { text: `${m.icon || ""} ${m.label}`.trim() }),
       el("div.prose", { text: m.hint || "" }),
@@ -1008,9 +1014,26 @@ function renderModes() {
       el("div.aside", { text: m.disclosure || "" }),
     );
     if (blocked) {
-      card.append(el("div.aside.warn", {
-        text: `Needs the ${m.requiresConnector} connector, which is not connected right now.`,
+      // The connector's own sentence about itself, from `explain()` on the
+      // server. "Not connected right now" was true and useless: it is the same
+      // words whether WhatsApp was never set up, is held by another program, or
+      // was refused permission, and those are three different afternoons.
+      card.append(el("div.aside.warn", { text: m.connectorNote || `Needs the ${m.requiresConnector} connector.` }));
+    }
+    // The pairing, said on the base mode's card, because this is the surface
+    // where someone decides whether to switch the mode on at all and "it can
+    // also read my real messages" is part of that decision. Named tools rather
+    // than "reads WhatsApp": the promise this pane makes two paragraphs up is
+    // that a paired mode says which connectors it uses and that they only read,
+    // and a list is checkable where an adjective is not.
+    if (paired) {
+      card.append(el("div.aside", {
+        text: `Also offered as "${paired.label}" when ${paired.requiresConnector} is connected. `
+          + `It can ${readableTools(paired.tools)} — and nothing else. It can never send.`,
       }));
+      if (!paired.connectorOk && paired.connectorNote) {
+        card.append(el("div.aside.warn", { text: `${paired.connectorNote} The unpaired mode still works.` }));
+      }
     }
     // Honest labelling, the same as the model picker does. The tier is not a
     // preference for bigger models: on a smaller one the mode's safety wording
@@ -1027,6 +1050,19 @@ function renderModes() {
     if (note) card.append(note);
     box.append(card);
   }
+}
+
+/** Tool names as something a person would read.
+ *
+ *  `whatsapp__list_messages` is the string the model is handed; it is also the
+ *  only place this pane's claim can be checked against, so the transformation
+ *  is deliberately shallow — strip the server prefix and the underscores, keep
+ *  the verb. Anything more editorial would be a paraphrase of the allowlist
+ *  rather than a rendering of it, and the paraphrase is what drifts. */
+function readableTools(names = []) {
+  const parts = names.map((n) => String(n).split("__").pop().replace(/_/g, " "));
+  if (parts.length < 2) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 /** The active model's name, for the tier note. */

@@ -24,6 +24,9 @@
 //     target models have ~8k contexts, so every mode token is paid again on
 //     every turn of the conversation. Hard budget: 2000 characters (~500
 //     tokens) for a mode's whole preamble, shared crisis layer included.
+//     A connector-paired variant may spend PAIRED_BUDGET instead — see
+//     modePreamble; the extra is what it costs to say what the mode may read
+//     and that it still cannot send.
 
 import { WEB_TOOL } from "./websearch.js";
 
@@ -195,7 +198,7 @@ const CRISIS_PATTERNS = [
  * the tier that was measured not to hold it, and a mode carrying the floor but
  * not the instruction would surface resources the model then talks over.
  */
-export const carriesCrisisLayer = (mode) => MODES[mode]?.category === "coaching";
+export const carriesCrisisLayer = (mode) => modeDef(mode)?.category === "coaching";
 
 /**
  * The signals present in a message, deduplicated, or [] for none.
@@ -348,8 +351,173 @@ export const MODES = {
       "NVC is not a way to make someone say yes. If the aim is to pressure " +
       "or corner someone, name it gently — that is against the method — and " +
       "go back to the need.",
+    // The optional half of this mode. Coaching on a remembered argument is
+    // coaching on a paraphrase — the observation the person reports is already
+    // an evaluation, which is the exact thing NVC asks them to separate out.
+    // Reading the actual exchange is the one thing that fixes that, and it is
+    // why this pairing exists rather than being a feature list item.
+    //
+    // Declared as `optionalConnector` rather than `requiresConnector` because
+    // NVC must keep working with no connectors at all — that is the mode's
+    // whole promise, and a coaching mode that stopped existing when WhatsApp
+    // fell over would be a worse mode than the one that shipped in Session 1.
+    optionalConnector: "whatsapp",
+    pairing: {
+      label: "NVC Coach + WhatsApp",
+      hint:
+        "The same coaching, with your real messages: it reads the exchange " +
+        "you mean before rewording it. It can never send anything.",
+      // Three read tools out of Hermeneia's five-tool minimal profile.
+      // `send_message` is excluded by plan D4 — a coaching mode never carries
+      // a tool that speaks to another person — and `download_media` is
+      // excluded because it writes a file to disk, which is not a thing a
+      // coaching conversation needs and not a thing this mode's disclosure
+      // says it does.
+      tools: { server: "whatsapp", allow: [
+        "whatsapp__list_chats",
+        "whatsapp__list_messages",
+        "whatsapp__search_contacts",
+      ] },
+      // Costs 236 characters of a budget that had 5 left, which is why §3.4's
+      // ceiling now states a separate paired allowance — see the Dev Log. The
+      // sentences are load-bearing and none of them could be dropped: what it
+      // may read, that it must look before coaching (a small model will
+      // otherwise coach the paraphrase and never call anything), and that the
+      // wording it produces is copied out by hand. The last one is the whole
+      // safety story of pairing a coaching mode with a messaging connector —
+      // the tool array already makes sending impossible, and this is the
+      // sentence that stops the model offering.
+      prompt:
+        "\n\nYou can read their WhatsApp: list chats, list messages, search " +
+        "contacts. If they mention a real exchange, read it before coaching " +
+        "on it. You cannot send anything and must never offer to — they copy " +
+        "your wording out and send it themselves.",
+    },
+  },
+
+  whatsapp: {
+    id: "whatsapp",
+    label: "Chat with WhatsApp",
+    icon: "💬",
+    // Not "coaching", and therefore no crisis layer and no code-level floor.
+    // Session 3's addendum scoped crisis interception to coaching modes
+    // deliberately, on the grounds that extending it to ordinary chat is a
+    // larger product decision than was asked for. This mode is a reader for
+    // the person's own files; it is much nearer ordinary chat than it is to
+    // sitting with someone in distress, so it inherits that decision rather
+    // than quietly widening it.
+    category: "data",
+    hint:
+      "Search, summarize and think about your own message history. Reads " +
+      "only — it can never send, reply to or delete anything.",
+    disclosure:
+      "Reading your own WhatsApp history with a local model. It can read; " +
+      "it cannot send, reply or delete. Nothing here leaves this machine.",
+    titleLabel: "WhatsApp",
+    requiresConnector: "whatsapp",
+    starters: [
+      "What have I been talking to Ana about lately?",
+      "Summarize my last week of messages",
+      "Find where we agreed on the date",
+    ],
+    // The same three tools the paired NVC variant gets, and for the same
+    // reasons. A data mode is where `download_media` would be most defensible
+    // — "show me the photo she sent" is a real request — but it writes a file
+    // to a path the conversation then names, and the mode's disclosure says
+    // reads only. Adding it later is a decision with a sentence attached.
+    tools: { server: "whatsapp", allow: [
+      "whatsapp__list_chats",
+      "whatsapp__list_messages",
+      "whatsapp__search_contacts",
+    ] },
+    prompt:
+      "You help the person read and think about their own WhatsApp history, " +
+      "which is stored on this computer.\n\n" +
+      // A small model asked about messages will reply "please paste them"
+      // rather than call anything — the failure toolPreamble already exists to
+      // close. Said again here because in this mode it is the entire point:
+      // an answer composed without reading is a plausible invention about
+      // real people the person knows.
+      "Read before you answer: call the tools rather than asking them to " +
+      "paste in a conversation you can fetch yourself. Say which chat and " +
+      "roughly which dates you read. If a search finds nothing, say so — " +
+      "never reconstruct what the messages probably said.\n\n" +
+      "You cannot send, reply to, forward or delete anything, and must never " +
+      "offer to. If they want to send something, write the words and let " +
+      "them copy them out.\n\n" +
+      "This is their own private history. Summarize, quote and discuss it. " +
+      "Do not speculate about what other people in it are really thinking " +
+      "beyond what the messages actually say.",
   },
 };
+
+/** How a paired mode id is written: base, a plus, the connector's id. */
+const PAIR_SEP = "+";
+
+/**
+ * The definition behind a mode id, including the synthesized paired variants.
+ *
+ * A paired mode is not its own registry entry, and that is the point. "NVC
+ * Coach" and "NVC Coach + WhatsApp" are one mode with one enablement switch,
+ * one disclosure and one set of guardrails — the connector is a thing the
+ * conversation may reach, not a different coach. Two registry entries would be
+ * two prompts to keep in step, and the safety copy is the half that must never
+ * drift; two settings checkboxes would ask a person to reason about a
+ * distinction the picker already makes at the moment it matters.
+ *
+ * So the paired id is derived (`nvc+whatsapp`), it stores into
+ * `conversations.mode` like any other id, and every helper below resolves it
+ * through here. An id whose base declares no such pairing resolves to null and
+ * is refused, exactly like an id this build has never heard of.
+ */
+export function modeDef(id) {
+  if (!id || typeof id !== "string") return null;
+  const direct = MODES[id];
+  if (direct) return direct;
+  const [base, connector, ...rest] = id.split(PAIR_SEP);
+  if (rest.length || !connector) return null;
+  const def = MODES[base];
+  if (!def || def.optionalConnector !== connector || !def.pairing) return null;
+  const p = def.pairing;
+  return {
+    ...def,
+    id,
+    label: p.label,
+    hint: p.hint,
+    // The paired variant needs its connector; the base one keeps working
+    // without it. Same field the data mode uses, so every surface that
+    // already handles gating handles this for free.
+    requiresConnector: connector,
+    tools: p.tools,
+    prompt: def.prompt + p.prompt,
+    // Which switch in Settings turns this on, and which row in a picker it
+    // belongs under. Both surfaces need it and neither should re-derive it by
+    // splitting the string.
+    pairedFrom: def.id,
+  };
+}
+
+/**
+ * The paired id for a mode that declares a pairing, or null.
+ *
+ * One place that writes the `base+connector` form, so nothing else has to know
+ * the separator.
+ */
+export function pairedId(id) {
+  const def = MODES[id];
+  return def?.optionalConnector && def.pairing
+    ? `${def.id}${PAIR_SEP}${def.optionalConnector}`
+    : null;
+}
+
+/**
+ * The enablement key for a mode id — the base mode, for a paired variant.
+ *
+ * Turning NVC on turns on both ways of holding an NVC conversation. Whether
+ * the paired one is offered is a question about the connector, answered by
+ * `connectorOk` at the moment of picking, not a second thing to switch on.
+ */
+export const enablementId = (id) => modeDef(id)?.pairedFrom ?? id;
 
 /**
  * Copy for the settings pane, served by the backend the way WEB_SEARCH_UI is.
@@ -381,10 +549,25 @@ export const MODES_UI = {
   privacy:
     "A mode never searches the web and never sends anything on your behalf. " +
     "The conversation stays on this computer.",
+  // Session 6 made the sentence this replaces true. It used to say coaching
+  // modes were offered no connectors at all "in this build", and promised that
+  // when that changed a mode would only ever be paired with connectors that
+  // read and would say which. Both halves are now discharged rather than
+  // predicted: the allowlists are read-only, they are enforced twice — once
+  // where the tools are offered and again where one would run — and the mode
+  // that has a pairing names what it reads, in the picker and here.
+  //
+  // The sentence above it did not change, and that was the constraint on this
+  // one. "Never sends anything on your behalf" is the durable promise, so
+  // pairing had to be built in a way that keeps it literally true: the tool
+  // that sends a WhatsApp message exists on the connector and is not in any
+  // mode's allowlist. Wording that read as though pairing had softened it
+  // would have been describing a different feature than the one built.
   connectors:
-    "In this build, coaching modes are also offered no connectors at all. " +
-    "When that changes, a mode will only ever be paired with connectors that " +
-    "read, and it will say which.",
+    "A mode is only ever paired with connectors that read. It names which " +
+    "ones, and it still cannot send: the WhatsApp modes can list your chats, " +
+    "read messages and look up contacts — never send, reply or delete. " +
+    "Anything you want sent, you copy out and send yourself.",
   // Shown next to the message box for the whole life of a coaching
   // conversation, rather than appended to replies. A standing line is read
   // once and then trusted; a warning that arrives inside an answer about
@@ -409,20 +592,39 @@ export const definedModes = () => MODE_IDS.filter((id) => !!MODES[id]);
  * reader to treat it as a description of what the mode guarantees.
  */
 export function modeSummaries() {
-  return definedModes().map((id) => {
-    const m = MODES[id];
-    return {
-      id: m.id,
-      label: m.label,
-      icon: m.icon,
-      hint: m.hint,
-      disclosure: m.disclosure,
-      category: m.category,
-      starters: [...m.starters],
-      requiresConnector: m.requiresConnector ?? null,
-      recommendedTier: m.recommendedTier ?? null,
-    };
-  });
+  const rows = [];
+  for (const id of definedModes()) {
+    rows.push(summarize(MODES[id]));
+    // The paired variant rides directly behind its base, because that is the
+    // order a picker should show them in and the server is where that order is
+    // decided — a surface that sorted these itself would be a second opinion
+    // about which coach comes first.
+    const paired = pairedId(id);
+    if (paired) rows.push(summarize(modeDef(paired)));
+  }
+  return rows;
+}
+
+function summarize(m) {
+  return {
+    id: m.id,
+    label: m.label,
+    icon: m.icon,
+    hint: m.hint,
+    disclosure: m.disclosure,
+    category: m.category,
+    starters: [...m.starters],
+    requiresConnector: m.requiresConnector ?? null,
+    recommendedTier: m.recommendedTier ?? null,
+    // Null on a base row. A surface uses it to know that this row is not its
+    // own switch — it is a second way to open the mode above it.
+    pairedFrom: m.pairedFrom ?? null,
+    // The names of the tools this mode may ever call, so a window can say what
+    // a paired mode reads without holding its own copy of the allowlist. Empty
+    // for every coaching mode that is not paired, which is the claim the
+    // privacy sentence makes and the one worth being able to check.
+    tools: [...(m.tools?.allow ?? [])],
+  };
 }
 
 /**
@@ -434,8 +636,29 @@ export function modeSummaries() {
  * helper here treats an unknown id as a mode, and the safe direction for an
  * id we cannot explain is fewer capabilities, not more.
  */
+/**
+ * The character ceilings, stated here because the test that enforces them
+ * should be reading the number rather than holding a second copy of it.
+ *
+ * BUDGET is plan Principle 6 unchanged: ~500 tokens for everything a mode adds
+ * to the system prompt, crisis layer included, because history is never
+ * truncated and every one of those characters is paid again on every turn.
+ *
+ * PAIRED_BUDGET is new in Session 6 and is a change to the plan, recorded
+ * there. A paired variant needs three sentences the unpaired one does not —
+ * what it may read, that it must read before coaching, and that the wording it
+ * writes is copied out by hand — and NVC had five characters spare. The extra
+ * 300 is small against what pairing already costs on the same turn: three tool
+ * schemas and the tool preamble together run to several times it. The ceiling
+ * that protects the ordinary coaching turn is unchanged, which is the one that
+ * matters, because the paired variant is opt-in per conversation and only
+ * offered when a connector is actually there.
+ */
+export const BUDGET = 2000;
+export const PAIRED_BUDGET = 2300;
+
 export function modePreamble(mode) {
-  const def = MODES[mode];
+  const def = modeDef(mode);
   if (!def) return "";
   const layers = [def.prompt];
   if (carriesCrisisLayer(mode)) layers.push(CRISIS_LAYER);
@@ -478,7 +701,7 @@ export function armWebSearch({ requested, settingEnabled, mode }) {
  */
 export function modeToolFilter(mode, toolDefs = []) {
   if (!mode) return toolDefs;
-  const allow = MODES[mode]?.tools?.allow;
+  const allow = modeDef(mode)?.tools?.allow;
   if (!allow?.length) return [];
   return toolDefs.filter((t) => allow.includes(t?.function?.name));
 }
@@ -499,7 +722,7 @@ export function toolRefusal(mode, name) {
       "This conversation stays on the user's computer. Answer from what you " +
       "have, and say plainly if you do not know something.";
   }
-  const allow = MODES[mode]?.tools?.allow ?? [];
+  const allow = modeDef(mode)?.tools?.allow ?? [];
   if (!allow.includes(name)) {
     return `Error: ${name} is not available in this mode. Answer without it.`;
   }
@@ -516,7 +739,7 @@ export function toolRefusal(mode, name) {
  * skip generation entirely.
  */
 export function modeTitle(mode, date = new Date()) {
-  const label = MODES[mode]?.titleLabel || "Private conversation";
+  const label = modeDef(mode)?.titleLabel || "Private conversation";
   return `${label} — ${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
@@ -528,17 +751,41 @@ export function modeTitle(mode, date = new Date()) {
  * id that is switched off is a settings trip. Saying "unknown mode" for both
  * would send someone looking for the wrong problem.
  */
-export function validateMode(requested, enabled = {}) {
+export function validateMode(requested, enabled = {}, connectorReady = null) {
   const id = typeof requested === "string" ? requested.trim() : "";
   if (!id) return { ok: true, mode: null };
-  if (!MODES[id]) {
+  const def = modeDef(id);
+  if (!def) {
     return { ok: false, mode: null, error: `There is no discussion mode called "${id.slice(0, 40)}".` };
   }
-  if (!enabled?.[id]) {
+  // The base mode's switch, for a paired variant. One switch governs both ways
+  // of holding the conversation; whether the paired one can be reached is a
+  // question about the connector, and the caller answers that — this function
+  // only knows what the settings file says.
+  const key = enablementId(id);
+  if (!enabled?.[key]) {
     return {
       ok: false,
       mode: null,
-      error: `${MODES[id].label} is switched off. Turn it on in Settings, under ${MODES_UI.label}.`,
+      error: `${MODES[key].label} is switched off. Turn it on in Settings, under ${MODES_UI.label}.`,
+    };
+  }
+  // A mode that needs a connector is refused when the connector is not ready,
+  // rather than started with an empty tool array. The alternative is worse than
+  // it looks: the preamble would still tell the model it can read the person's
+  // WhatsApp, so the mode would spend the whole conversation either apologizing
+  // or inventing — and this is a mode whose inventions are about real people.
+  // The composer already declines to offer it; this is the same question asked
+  // where it is answered, for a page that was open before the connector fell
+  // over. `connectorReady` is null for callers that have no connector rows to
+  // hand, which is the setup route's situation and not a licence to skip it.
+  if (def.requiresConnector && typeof connectorReady === "function"
+      && !connectorReady(def.requiresConnector)) {
+    return {
+      ok: false,
+      mode: null,
+      needsConnector: def.requiresConnector,
+      error: `${def.label} needs the ${def.requiresConnector} connector, which is not ready.`,
     };
   }
   return { ok: true, mode: id };
