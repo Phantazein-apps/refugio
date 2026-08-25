@@ -1028,7 +1028,7 @@ function renderModes() {
     // and a list is checkable where an adjective is not.
     if (paired) {
       card.append(el("div.aside", {
-        text: `Also offered as "${paired.label}" when ${paired.requiresConnector} is connected. `
+        text: `Also offered as "${paired.label}" when ${paired.connectorLabel || paired.requiresConnector} is connected. `
           + `It can ${readableTools(paired.tools)} — and nothing else. It can never send.`,
       }));
       if (!paired.connectorOk && paired.connectorNote) {

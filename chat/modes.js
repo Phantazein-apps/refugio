@@ -388,10 +388,10 @@ export const MODES = {
       // the tool array already makes sending impossible, and this is the
       // sentence that stops the model offering.
       prompt:
-        "\n\nYou can read their WhatsApp: list chats, list messages, search " +
-        "contacts. If they mention a real exchange, read it before coaching " +
-        "on it. You cannot send anything and must never offer to — they copy " +
-        "your wording out and send it themselves.",
+        "\n\nYou can read their WhatsApp. If they name a person, call " +
+        "list_chats then list_messages and read the real exchange BEFORE the " +
+        "shape above. You cannot send anything and must never offer to — " +
+        "they copy your wording out and send it themselves.",
     },
   },
 
@@ -415,6 +415,16 @@ export const MODES = {
       "it cannot send, reply or delete. Nothing here leaves this machine.",
     titleLabel: "WhatsApp",
     requiresConnector: "whatsapp",
+    // Declared for a different reason than NVC's, and measured this session.
+    // NVC's tier is about whether its safety wording holds. This one is about
+    // whether the model can call a tool correctly, and on qwen2.5:3b it often
+    // cannot: asked for a chat's messages it passes the parameter SCHEMA back
+    // as the argument — {"chat":{"type":"string","value":"Ana"}} — the
+    // connector matches nothing, and the model then tells the person there are
+    // no messages between them and Ana. A wrong answer that looks like an
+    // answer, about their own history. qwen2.5:7b passes {"chat":"Ana"} every
+    // time. That is the difference the label is for.
+    recommendedTier: "8b",
     starters: [
       "What have I been talking to Ana about lately?",
       "Summarize my last week of messages",
@@ -433,15 +443,22 @@ export const MODES = {
     prompt:
       "You help the person read and think about their own WhatsApp history, " +
       "which is stored on this computer.\n\n" +
-      // A small model asked about messages will reply "please paste them"
-      // rather than call anything — the failure toolPreamble already exists to
-      // close. Said again here because in this mode it is the entire point:
-      // an answer composed without reading is a plausible invention about
-      // real people the person knows.
-      "Read before you answer: call the tools rather than asking them to " +
-      "paste in a conversation you can fetch yourself. Say which chat and " +
-      "roughly which dates you read. If a search finds nothing, say so — " +
-      "never reconstruct what the messages probably said.\n\n" +
+      // Named as the failure that actually happens, which is not the one the
+      // draft named. "Don't ask them to paste it" is the failure toolPreamble
+      // was written for, and on qwen2.5:3b it never occurred: the model called
+      // list_chats, got back a chat with Ana in it, and then asked which dates
+      // to look at — 8 of 9 turns, one step short of the answer, with the tool
+      // to take that step sitting in front of it. Session 3's first finding is
+      // that a guardrail naming a category does not get applied to the
+      // phrasing people use; the same is true of a method. So the two steps
+      // are spelled out in order and the clarifying question it actually asks
+      // is forbidden by name.
+      "Read before you answer, and chain the calls: list the chats, then list " +
+      "that chat's messages, then answer from them. Never ask which dates — " +
+      "the name of the chat is enough, and asking is the failure. Never ask " +
+      "them to paste in something you can fetch. Say which chat you read. If " +
+      "there is nothing there, say so — never reconstruct what the messages " +
+      "probably said.\n\n" +
       "You cannot send, reply to, forward or delete anything, and must never " +
       "offer to. If they want to send something, write the words and let " +
       "them copy them out.\n\n" +

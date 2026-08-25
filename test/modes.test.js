@@ -797,8 +797,14 @@ test("the paired coach names what it may read and that it still cannot send", ()
   // stops the model OFFERING to — which is the failure a person would actually
   // meet, and the one no allowlist can prevent.
   const p = MODES.nvc.pairing.prompt;
-  assert.match(p, /You can read their WhatsApp: list chats, list messages, search contacts\./);
-  assert.match(p, /read it before coaching on it/);
+  assert.match(p, /You can read their WhatsApp\./);
+  // Named as two calls in order, not as "read the exchange". On qwen2.5:3b the
+  // descriptive form produced zero tool calls in six paired turns — the mode's
+  // own "Answer in this shape only" is an unconditional format instruction and
+  // it beat a competing one, exactly as Session 3 found. Reading is written as
+  // a precondition OF that shape rather than as a rival to it.
+  assert.match(p, /call list_chats then list_messages/);
+  assert.match(p, /BEFORE the shape above/);
   assert.match(p, /You cannot send anything and must never offer to/);
   assert.match(p, /they copy your wording out and send it themselves/);
 });
@@ -816,4 +822,16 @@ test("a picker row carries the allowlist but still never the prompt", () => {
   // Directly behind its base, because the order a picker shows them in is the
   // server's decision and not a second opinion held in the browser.
   assert.equal(rows.indexOf(paired), rows.indexOf(base) + 1);
+});
+
+test("both WhatsApp-paired modes declare the tier their tool calling was measured on", () => {
+  // Two different reasons, one label. NVC's 8B is about whether its safety
+  // wording holds (Session 3). The data mode's is about whether the model can
+  // form a tool call at all: on qwen2.5:3b it passes the parameter schema back
+  // as the argument, gets nothing, and reports that the person has no messages
+  // with someone they message every week. qwen2.5:7b does not.
+  const rows = modeSummaries();
+  for (const id of ["whatsapp", "nvc+whatsapp"]) {
+    assert.equal(rows.find((r) => r.id === id).recommendedTier, "8b", `${id} must declare its tier`);
+  }
 });

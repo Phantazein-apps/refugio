@@ -652,11 +652,16 @@ function modesPayload(rows) {
     available: modeSummaries().map((m) => {
       // A paired mode is shown and not selectable when its connector is not
       // ready, with the connector's own state named rather than invented.
-      if (!m.requiresConnector) return { ...m, connectorOk: true, connectorNote: null };
+      if (!m.requiresConnector) return { ...m, connectorOk: true, connectorNote: null, connectorLabel: null };
       const row = byId.get(m.requiresConnector);
       return {
         ...m,
         connectorOk: row?.state === "ok",
+        // The connector's display name. Copy that says "when whatsapp is
+        // connected" is reading a config key out loud; the settings pane says
+        // "WhatsApp" everywhere else and these two sentences sit next to
+        // each other.
+        connectorLabel: row?.label || m.requiresConnector,
         // The connector's own words for what is wrong with it, not the mode's
         // guess. `explain()` already turns a raw MCP failure into a sentence
         // ("is held by another program", "was refused permission"), and this
@@ -681,6 +686,13 @@ function connectorNote(id, row) {
   if (!row) return `${label} is not set up on this computer.`;
   if (row.state === "ok") return null;
   if (row.state === "connecting") return `${label} is still starting.`;
+  // Degraded is running-but-unreachable, and it needs its own sentence: the
+  // process started fine, so `explain()` has no failure to explain and returns
+  // its generic "did not start" — which is the opposite of what happened and
+  // sends someone to look at a program that is working. Observed live: after
+  // the WhatsApp session was taken over, Hermeneia was up with all five tools
+  // and simply not connected to the phone yet.
+  if (row.state === "degraded") return `${label} is running but not connected right now.`;
   const summary = row.explanation?.summary;
   return summary ? `${label} ${summary}.` : `${label} is not ready.`;
 }
@@ -1513,11 +1525,22 @@ async function route(req, res, url) {
     // to let that gap open.
     const asked = typeof body.mode === "string" ? body.mode.trim() : "";
     let connectorReady = null;
+    let whyNot = null;
     if (modeDef(asked)?.requiresConnector) {
       const rows = await connectorRows();
       connectorReady = (id) => rows.some((r) => r.id === id && r.state === "ok");
+      // Carried onto the refusal below. This 400 only reaches a page that was
+      // open before the connector fell over — the picker declines to offer the
+      // mode otherwise — and "not ready" is the same four words whether
+      // WhatsApp was never set up, is held by another program, or was refused
+      // permission. Those are three different afternoons.
+      whyNot = (id) => connectorNote(id, rows.find((r) => r.id === id));
     }
     const wanted = validateMode(body.mode, connectorSettings.modes, connectorReady);
+    if (wanted.needsConnector && whyNot) {
+      const note = whyNot(wanted.needsConnector);
+      if (note) wanted.error = `${wanted.error} ${note}`;
+    }
     if (!wanted.ok) return sendJson(res, 400, { error: wanted.error });
     const conversationId = (body.conversation_id || "").trim() || randomUUID().replace(/-/g, "");
     return streamTurn(res, {
