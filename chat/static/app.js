@@ -37,7 +37,7 @@ const els = {
   modelName: $("model-name"), modelSize: $("model-size"), themeBtn: $("theme-btn"),
   status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
-  modePill: $("mode-pill"), modePillText: $("mode-pill-text"),
+  modePill: $("mode-pill"), modePillText: $("mode-pill-text"), modeLeave: $("mode-leave"),
   modePanel: $("mode-panel"), modeBanner: $("mode-banner"),
   attachBtn: $("attach-btn"), attachInput: $("attach-input"),
   attachTray: $("attach-tray"), dropVeil: $("drop-veil"),
@@ -643,8 +643,14 @@ function renderModeControl() {
     ? "This conversation's mode. It cannot be changed — start a new chat to leave it."
     : "Have this conversation in a coaching mode";
 
+  // Only offered once the mode is actually running. Before the first message
+  // the picker is still open to you and "Leave" would mean nothing.
+  els.modeLeave.hidden = !active;
+
   els.modeBanner.hidden = !active;
-  els.modeBanner.textContent = active?.disclosure || "";
+  els.modeBanner.textContent = active
+    ? `${active.disclosure || ""} Leaving this mode starts a new chat.`.trim()
+    : "";
 
   // Courtesy, not the mechanism. The server forces web off for every mode turn
   // and refuses the tool if the model names it anyway; hiding the button just
@@ -1477,6 +1483,10 @@ els.webArm.addEventListener("click", () => setWebArmed(!state.webArmed));
 // Opens the picker only while the conversation is still empty. Afterwards the
 // pill is a label: the mode is fixed for the conversation's life, and a
 // control that cannot change anything should not accept a click.
+// Honest about what it does: it does not change this conversation's mode,
+// because nothing can. It starts a fresh one.
+els.modeLeave.addEventListener("click", () => newChat());
+
 els.modePill.addEventListener("click", (e) => {
   e.stopPropagation();
   if (state.conversationId || state.mode) return;

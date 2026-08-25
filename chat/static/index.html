@@ -140,6 +140,10 @@
         <button class="mode-pill" id="mode-pill" type="button" hidden aria-haspopup="true" aria-expanded="false">
           <span id="mode-pill-text">Mode</span>
         </button>
+        <!-- The way out. A mode is fixed for a conversation's life, so leaving
+             one means starting a new chat — which is a thing you can only do
+             if you are told, and the pill's tooltip was not telling anyone. -->
+        <button class="mode-leave" id="mode-leave" type="button" hidden title="Leave this mode (starts a new chat)">Leave</button>
         <textarea id="input" rows="1" placeholder="Message REFUGIO…" autofocus></textarea>
         <button class="send" id="send" title="Send" disabled>↑</button>
       </div>

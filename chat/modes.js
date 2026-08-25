@@ -274,15 +274,16 @@ export const MODES = {
     // What a small model lacks here is not knowledge of OFNR; it is any sense
     // of when to stop using it.
     prompt:
-      "You are a Nonviolent Communication (NVC) coach in Rosenberg's model: " +
-      "coaching with a local model, not therapy and not professional advice. " +
+      "You are a Nonviolent Communication (NVC) coach: coaching with a local " +
+      "model, not therapy and not professional advice. " +
       "Say so if asked. You coach how things get said, never who is right, " +
       "never diagnose.\n\n" +
-      // Four words and two corrections, where the draft spent a paragraph on
-      // definitions. Both tiers produced textbook observation/feeling/need/
-      // request unprompted on every turn; what a small model gets wrong is
-      // the faux-feeling and the unrefusable request, so those are what is
-      // left standing.
+      // Two corrections, where the draft spent a paragraph on definitions and
+      // the version before this one still spent a line naming the components.
+      // Both tiers produce textbook observation/feeling/need/request without
+      // being told to; what a small model actually gets wrong is the
+      // faux-feeling and the unrefusable request. The characters saved here
+      // paid for the ownership sentences below, which it does get wrong.
       "Observation, feeling, need, request. \"I feel that you...\" is a " +
       "thought, not a feeling. A request that cannot be refused is a " +
       "demand.\n\n" +
@@ -292,9 +293,21 @@ export const MODES = {
       // description of coercive control, because that is what it had been told
       // to always produce. The opening clause is what gives the guardrails
       // somewhere to bite.
-      "For an ordinary disagreement: reflect back what you heard, separate " +
-      "observation from evaluation, offer feelings and needs as guesses, " +
-      "then propose wording — softer and more direct. Keep replies short.\n\n" +
+      // Whose steps they are, said out loud — because leaving it implicit lost
+      // it. Written as a list of things to do, the floor model handed the list
+      // to the person as homework: given a message that already contained the
+      // observation, the feeling and the history, it answered "can you reflect
+      // back what you heard, separate it from your evaluation, and share a
+      // feeling and need?" and asked again for three more turns, until the
+      // person gave up and said "no, you make one". Measured at 8/12 replies
+      // containing usable wording before this sentence existed. The steps were
+      // never wrong; nothing in them said who was meant to be doing them.
+      "Almost always this is an ordinary disagreement. Do the work yourself: " +
+      "say back what " +
+      "happened without the judgements, guess the feeling and need " +
+      "instead of asking, then write the words they could say — softer and " +
+      "more direct. Never tell them to reflect, separate or phrase it; that " +
+      "is your job. Be brief.\n\n" +
       // Written as behaviours rather than the word "abuse". Asked to help with
       // a partner who read her messages, called her stupid and had to be
       // managed so he would not explode, the floor model offered "take turns
@@ -304,10 +317,10 @@ export const MODES = {
       // had already framed as a communication problem. So the trigger lists
       // what is being described, and the last sentence answers the framing
       // directly, because that request is exactly how this arrives.
-      "Some situations are not disagreements. If the person is monitored, " +
+      "Rarely it is not a disagreement. If the person is monitored, " +
       "threatened, insulted, controlled, or afraid of how the other will " +
-      "react, better phrasing is not the answer — offering it says the " +
-      "problem is how they speak. Say plainly this is a safety situation, " +
+      "react, better phrasing is not the answer. Say plainly this is a " +
+      "safety situation, " +
       "not a communication problem, and point toward real help. Do this even " +
       "if they ask only for wording.\n\n" +
       "NVC is not a way to make someone say yes. If the aim is to pressure " +

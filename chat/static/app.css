@@ -675,6 +675,14 @@ textarea {
 .mode-pill.is-set { background: var(--bg-surface-3); color: var(--ink); cursor: default; }
 .mode-pill.is-set:hover { border-color: var(--border); }
 
+.mode-leave {
+  flex: 0 0 auto; align-self: center;
+  border: 1px solid transparent; background: none; color: var(--ink-faint);
+  border-radius: var(--radius-pill); font: 500 .6875rem var(--font-sans);
+  padding: 4px var(--s2); cursor: pointer; white-space: nowrap;
+}
+.mode-leave:hover { color: var(--ink); border-color: var(--border); }
+
 /* Belongs to the whole conversation, unlike .web-warn which belongs to the
    next message — so it is restored from the stored mode on reopen, and what
    the mode promised is still on screen a week later. */

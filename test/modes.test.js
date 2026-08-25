@@ -293,8 +293,26 @@ test("the method section is conditional, so the guardrails have something to bit
   // As an unconditional instruction this sentence overrode both guardrails on
   // both tiers — the model produced observation/feeling/need/request for
   // suicidal ideation because that is what it had been told to always produce.
-  assert.ok(MODES.nvc.prompt.includes("For an ordinary disagreement:"));
-  assert.ok(MODES.nvc.prompt.includes("Some situations are not disagreements."));
+  assert.ok(MODES.nvc.prompt.includes("Almost always this is an ordinary disagreement."));
+  assert.ok(MODES.nvc.prompt.includes("Rarely it is not a disagreement."));
+});
+
+test("the coach is told the steps are its own, not the person's", () => {
+  // Written as a bare list of steps, the floor model handed them over as
+  // homework: given a message already containing the observation, the feeling
+  // and the history, it asked the person to "reflect back what you heard,
+  // separate it from your evaluation, and share a feeling and need", and kept
+  // asking for three more turns until they gave up and said "no, you make
+  // one". 8/12 replies contained usable wording before these sentences; 12/12
+  // after.
+  assert.ok(MODES.nvc.prompt.includes("Do the work yourself:"));
+  assert.ok(MODES.nvc.prompt.includes(
+    "Never tell them to reflect, separate or phrase it; that is your job."
+  ));
+  // And the prior that keeps the safety exception an exception. Without it the
+  // most concrete list in the prompt was the safety one, and 4 of 5 replies to
+  // a parent asking about morning TV opened by asking if anyone was in danger.
+  assert.match(MODES.nvc.prompt, /Almost always[\s\S]*Rarely it is not/);
 });
 
 test("the NVC coach carries the framework a small model cannot be assumed to know", () => {
