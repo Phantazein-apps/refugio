@@ -275,7 +275,7 @@ export const MODES = {
     // of when to stop using it.
     prompt:
       "You are a Nonviolent Communication (NVC) coach: coaching with a local " +
-      "model, not therapy and not professional advice. " +
+      "model, not therapy, not professional advice. " +
       "Say so if asked. You coach how things get said, never who is right, " +
       "never diagnose.\n\n" +
       // Two corrections, where the draft spent a paragraph on definitions and
@@ -284,9 +284,8 @@ export const MODES = {
       // being told to; what a small model actually gets wrong is the
       // faux-feeling and the unrefusable request. The characters saved here
       // paid for the ownership sentences below, which it does get wrong.
-      "Observation, feeling, need, request. \"I feel that you...\" is a " +
-      "thought, not a feeling. A request that cannot be refused is a " +
-      "demand.\n\n" +
+      "\"I feel that you...\" is a thought, not a feeling. A request that " +
+      "cannot be refused is a demand.\n\n" +
       // Conditional on purpose. As an unconditional instruction this section
       // overrode both guardrails below it on both tiers: the model produced
       // observation/feeling/need/request for suicidal ideation and for a
@@ -302,12 +301,23 @@ export const MODES = {
       // person gave up and said "no, you make one". Measured at 8/12 replies
       // containing usable wording before this sentence existed. The steps were
       // never wrong; nothing in them said who was meant to be doing them.
-      "Almost always this is an ordinary disagreement. Do the work yourself: " +
-      "say back what " +
-      "happened without the judgements, guess the feeling and need " +
-      "instead of asking, then write the words they could say — softer and " +
-      "more direct. Never tell them to reflect, separate or phrase it; that " +
-      "is your job. Be brief.\n\n" +
+      // The deliverable is the sentence they can say, not the analysis that
+      // produced it. Shown the four components as labelled headings — twice
+      // over, for one question about morning television — a person is reading
+      // the coach's working rather than getting an answer. The reasoning still
+      // has to exist, because it is what makes the wording NVC and not just
+      // politeness, so it goes behind a "Why:" the window folds away.
+      //
+      // Naming the four components inside this sentence also keeps the anchor
+      // that used to sit in its own line above: without OFNR named anywhere,
+      // the most concrete list in the prompt is the safety one, and the model
+      // starts reaching for that first.
+      "Almost always this is an ordinary disagreement. Answer in this shape " +
+      "only: a softer line they could say, in quotation marks; a more direct " +
+      "line, in quotation marks; then a line beginning Why: naming the " +
+      "observation, feeling, need and request. Never ask them to reflect, " +
+      "separate or phrase it — that is your job. No safety advice in an " +
+      "ordinary turn.\n\n" +
       // Written as behaviours rather than the word "abuse". Asked to help with
       // a partner who read her messages, called her stupid and had to be
       // managed so he would not explode, the floor model offered "take turns
@@ -363,6 +373,16 @@ export const MODES_UI = {
     "In this build, coaching modes are also offered no connectors at all. " +
     "When that changes, a mode will only ever be paired with connectors that " +
     "read, and it will say which.",
+  // Shown next to the message box for the whole life of a coaching
+  // conversation, rather than appended to replies. A standing line is read
+  // once and then trusted; a warning that arrives inside an answer about
+  // morning television is the cry-wolf failure this project has already paid
+  // for twice. The model is now told to keep safety advice out of an ordinary
+  // turn, so this is where the number lives when nothing is wrong — and
+  // crisisNotice() still speaks up in the reply itself when something is.
+  standing:
+    "If you are in crisis or thinking of harming yourself, call or text 988 " +
+    "in the US, or your local emergency number.",
   empty: "No discussion modes are available in this build yet.",
 };
 

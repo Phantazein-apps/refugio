@@ -693,6 +693,30 @@ textarea {
   font-size: .75rem; line-height: 1.1rem; color: var(--ink-muted);
 }
 
+/* Deliberately the alarm colour, and deliberately always there. It is the one
+   line in a coaching conversation that should be findable without reading. */
+.mode-safety {
+  max-width: 46rem; margin: 0 auto var(--s2);
+  padding: var(--s2) var(--s3); border-radius: var(--radius-sm);
+  border: 1px solid var(--warn); border-left: 3px solid var(--warn);
+  background: var(--bg-surface-3);
+  font: 600 .75rem/1.1rem var(--font-sans); color: var(--warn);
+}
+
+/* The reasoning behind the wording. It has to exist — it is what makes the
+   sentence NVC rather than just polite — but it is the coach's working, and
+   the person asked for something to say. */
+.why { margin-top: var(--s3); border-top: 1px solid var(--border-subtle); padding-top: var(--s2); }
+.why > summary {
+  cursor: pointer; list-style: none; color: var(--ink-faint);
+  font: 500 .6875rem var(--font-sans); padding: 2px 0;
+}
+.why > summary::-webkit-details-marker { display: none; }
+.why > summary::before { content: "▸ "; }
+.why[open] > summary::before { content: "▾ "; }
+.why > summary:hover { color: var(--ink); }
+.why-body { font-size: .75rem; line-height: 1.15rem; color: var(--ink-muted); padding-top: var(--s2); }
+
 .composer { position: relative; }
 .mode-panel {
   position: absolute; bottom: calc(100% - var(--s2)); left: 50%; transform: translateX(-50%);

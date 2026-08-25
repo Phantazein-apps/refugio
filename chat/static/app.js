@@ -37,7 +37,7 @@ const els = {
   modelName: $("model-name"), modelSize: $("model-size"), themeBtn: $("theme-btn"),
   status: $("status"), statusText: $("status-text"),
   webArm: $("web-arm"), webWarn: $("web-warn"),
-  modePill: $("mode-pill"), modePillText: $("mode-pill-text"), modeLeave: $("mode-leave"),
+  modePill: $("mode-pill"), modePillText: $("mode-pill-text"), modeLeave: $("mode-leave"), modeSafety: $("mode-safety"),
   modePanel: $("mode-panel"), modeBanner: $("mode-banner"),
   attachBtn: $("attach-btn"), attachInput: $("attach-input"),
   attachTray: $("attach-tray"), dropVeil: $("drop-veil"),
@@ -107,6 +107,34 @@ function splitCrisisNote(text) {
   return [text.slice(0, at).trimEnd(), note];
 }
 
+/** Split the wording from the reasoning behind it.
+ *
+ *  The coach is asked for a line the person can say and then a line beginning
+ *  "Why:". Both matter, but only one of them is what was asked for — shown the
+ *  four components as headings, twice over, for a question about morning
+ *  television, a person is reading the coach's working instead of getting an
+ *  answer. So the working folds.
+ *
+ *  Tolerant of how a small model actually writes it: bold, quoted, or bare.
+ *  No match means no fold and the reply renders whole, which is the right
+ *  failure — a missing expander, never a missing answer. */
+function splitWhy(text) {
+  if (typeof text !== "string") return [text, null];
+  const m = text.match(/(^|\n)\s*["'*_]*\s*Why\b\s*:?["'*_]*\s*/i);
+  if (!m || m.index === 0) return [text, null];
+  const body = text.slice(0, m.index).trimEnd();
+  const why = text.slice(m.index + m[0].length).trim();
+  if (!body || !why) return [text, null];
+  return [body, why];
+}
+
+function whyNode(why) {
+  return el("details.why", {},
+    el("summary", { text: "Why this wording" }),
+    el("div.why-body", { text: why }),
+  );
+}
+
 function crisisNoteNode(note) {
   return el("div.crisis-note", {},
     el("span.who", { text: "From REFUGIO, not the model" }),
@@ -124,8 +152,10 @@ function addMessage(role, text, files = []) {
     `<div class="avatar">${role === "user" ? "You" : "R"}</div>` +
     `<div class="content"><div class="bubble"></div></div>`;
   const bubble = wrap.querySelector(".bubble");
-  const [body, note] = splitCrisisNote(text);
+  const [afterNote, note] = splitCrisisNote(text);
+  const [body, why] = role === "assistant" ? splitWhy(afterNote) : [afterNote, null];
   bubble.innerHTML = renderContent(body);
+  if (why) bubble.appendChild(whyNode(why));
   if (note) wrap.querySelector(".content").appendChild(crisisNoteNode(note));
   if (files.length) {
     const list = document.createElement("div");
@@ -646,6 +676,12 @@ function renderModeControl() {
   // Only offered once the mode is actually running. Before the first message
   // the picker is still open to you and "Leave" would mean nothing.
   els.modeLeave.hidden = !active;
+
+  // Standing for the conversation's life. The model is told to keep safety
+  // advice out of an ordinary turn, so this is where the number lives when
+  // nothing is wrong; crisisNotice() still speaks in the reply when something is.
+  els.modeSafety.hidden = !active;
+  els.modeSafety.textContent = active ? (state.modes?.standing || "") : "";
 
   els.modeBanner.hidden = !active;
   els.modeBanner.textContent = active
@@ -1370,8 +1406,10 @@ async function send() {
           acc += data.t;
           // The notice arrives as ordinary tokens at the end of the stream, so
           // it is split back out here for the same reason it is on reopen.
-          const [body, note] = splitCrisisNote(acc);
+          const [afterNote, note] = splitCrisisNote(acc);
+          const [body, why] = splitWhy(afterNote);
           bubble.innerHTML = renderContent(body);
+          if (why) bubble.appendChild(whyNode(why));
           const content = bubble.parentElement;
           content.querySelector(".crisis-note")?.remove();
           if (note) content.appendChild(crisisNoteNode(note));

@@ -247,7 +247,7 @@ test("the crisis rule claims precedence over everything else in the prompt", () 
 
 test("the NVC coach says it is not therapy, and never diagnoses", () => {
   assert.ok(MODES.nvc.prompt.includes(
-    "coaching with a local model, not therapy and not professional advice. " +
+    "coaching with a local model, not therapy, not professional advice. " +
     "Say so if asked."
   ));
   // Added after the red-team: the draft said "not a therapist" but never
@@ -305,10 +305,19 @@ test("the coach is told the steps are its own, not the person's", () => {
   // asking for three more turns until they gave up and said "no, you make
   // one". 8/12 replies contained usable wording before these sentences; 12/12
   // after.
-  assert.ok(MODES.nvc.prompt.includes("Do the work yourself:"));
   assert.ok(MODES.nvc.prompt.includes(
-    "Never tell them to reflect, separate or phrase it; that is your job."
+    "Never ask them to reflect, separate or phrase it — that is your job."
   ));
+  // The deliverable is the sentence they can say, not the analysis behind it.
+  // Shown the four components as labelled headings — twice over, for one
+  // question about morning television — a person is reading the coach's
+  // working rather than getting an answer. The shape puts the words first and
+  // the reasoning behind a Why: the window folds away.
+  assert.ok(MODES.nvc.prompt.includes("Answer in this shape only:"));
+  assert.ok(MODES.nvc.prompt.includes("a line beginning Why:"));
+  // And no crisis hedging stapled to a conversation about chores: the standing
+  // line by the message box carries that when nothing is wrong.
+  assert.ok(MODES.nvc.prompt.includes("No safety advice in an ordinary turn."));
   // And the prior that keeps the safety exception an exception. Without it the
   // most concrete list in the prompt was the safety one, and 4 of 5 replies to
   // a parent asking about morning TV opened by asking if anyone was in danger.
@@ -319,9 +328,14 @@ test("the NVC coach carries the framework a small model cannot be assumed to kno
   // Trimmed to two corrections after the red-team: both tiers produced textbook
   // observation/feeling/need/request unprompted on every single turn, so the
   // definitions were paying for nothing. What they got wrong is kept.
-  assert.ok(MODES.nvc.prompt.includes("Observation, feeling, need, request."));
   assert.ok(MODES.nvc.prompt.includes("\"I feel that you...\" is a thought, not a feeling."));
   assert.ok(MODES.nvc.prompt.includes("A request that cannot be refused is a demand."));
+  // The four components are still named, inside the shape sentence rather than
+  // in a line of their own. That matters beyond tidiness: with OFNR named
+  // nowhere, the most concrete list left in the prompt is the safety one, and
+  // 4 of 5 replies to a parent asking about morning TV opened by asking
+  // whether anyone was in danger.
+  assert.ok(MODES.nvc.prompt.includes("observation, feeling, need and request"));
 });
 
 // ── The floor under the model ───────────────────────────────
@@ -465,6 +479,15 @@ test("the picker rows carry the copy but never the prompt", () => {
     assert.ok(row.starters.length >= 2, `${row.id} needs conversation starters`);
     assert.equal(row.prompt, undefined);
   }
+});
+
+test("the standing safety line is single-sourced and names something actionable", () => {
+  // Lives by the message box for the life of a coaching conversation instead of
+  // being appended to replies. A standing line is read once and trusted; a
+  // warning inside an answer about morning television is the cry-wolf failure
+  // this project has already paid for twice.
+  assert.match(MODES_UI.standing, /988/);
+  assert.match(MODES_UI.standing, /local emergency number/);
 });
 
 test("the settings copy states the promise, not this build's version of it", () => {
