@@ -41,6 +41,31 @@ function Die  ($m) { Write-Host "  [x] $m" -ForegroundColor Red; exit 1 }
 $Version = (Get-Content (Join-Path $Root "package.json") | ConvertFrom-Json).version
 if (-not $Version) { $Version = "0.0.0" }
 
+# An MSI package version is NOT semver. It is major.minor.build, all numeric,
+# major and minor < 256, build < 65536, with no prerelease label and no build
+# metadata. package.json is semver ("2.0.0-alpha.1"), so the label is stripped
+# here instead of being passed through: WiX warns WIX1148 on an invalid
+# version, calls the resulting behaviour undefined, and says a future WiX may
+# reject it outright.
+#
+# Stripping the label makes every 2.0.0-alpha.N look like plain 2.0.0 to
+# Windows Installer, which is exactly why REFUGIO.wxs sets
+# AllowSameVersionUpgrades. Without that, MSI treats an install over an equal
+# version as a SECOND product rather than an upgrade, and the machine ends up
+# with two REFUGIOs.
+#
+# The full semver is kept for the filename and for the install receipt, so
+# nothing that a human or an inventory tool reads loses the prerelease label.
+$MsiVersion = ($Version -split '[-+]')[0]
+if ($MsiVersion -notmatch '^\d+\.\d+(\.\d+)?$') {
+  Die "package.json version '$Version' is not a numeric major.minor[.build] once its prerelease label is removed"
+}
+$vparts = $MsiVersion -split '\.'
+if ([int]$vparts[0] -gt 255 -or [int]$vparts[1] -gt 255 -or
+    ($vparts.Count -gt 2 -and [int]$vparts[2] -gt 65535)) {
+  Die "version '$MsiVersion' is out of range for an MSI package version (major/minor < 256, build < 65536)"
+}
+
 Remove-Item -Recurse -Force $Build -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage, $Out | Out-Null
 
@@ -111,7 +136,7 @@ $msi = Join-Path $Out "REFUGIO-$Version.msi"
 # node.exe.
 & wix build (Join-Path $PSScriptRoot "REFUGIO.wxs") `
     -arch x64 `
-    -d ProductVersion="$Version" -d StageDir="$Stage" `
+    -d ProductVersion="$MsiVersion" -d DisplayVersion="$Version" -d StageDir="$Stage" `
     -ext WixToolset.Util.wixext `
     -o $msi
 if ($LASTEXITCODE -ne 0) { Die "wix build failed" }

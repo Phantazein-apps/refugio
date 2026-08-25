@@ -231,6 +231,36 @@ jobs:
           }
           Write-Host "user-setup is idempotent"
 
+          # What the machine reports it has. ProductVersion cannot carry a
+          # prerelease label, so the receipt carries the full semver instead —
+          # assert that, or the plumbing that keeps them apart can rot back
+          # into reporting "2.0.0" for an alpha build.
+          $semver = (Get-Content package.json | ConvertFrom-Json).version
+          $receipt = (Get-ItemProperty "HKLM:\SOFTWARE\Phantazein\REFUGIO" -Name Version).Version
+          if ($receipt -ne $semver) { throw "install receipt says '$receipt', package.json says '$semver'" }
+          Write-Host "install receipt reports $receipt"
+
+          # The supervisor has to survive being started. Backgrounded and then
+          # killed: what is being tested is that it does not exit immediately,
+          # which is what a broken payload does. The .pkg job has always done
+          # this and this job did not — which is how a payload that installs
+          # cleanly and then dies on first launch would ship unnoticed.
+          #
+          # Launched through refugio-node.exe because that is what the Start
+          # Menu shortcut runs; nothing else exercises that copy.
+          $sup = Start-Process -FilePath "$root\runtime\refugio-node.exe" `
+                               -ArgumentList "`"$root\start-refugio.cjs`"" `
+                               -WorkingDirectory $root -PassThru `
+                               -RedirectStandardOutput sup.out -RedirectStandardError sup.err
+          Start-Sleep -Seconds 12
+          if ($sup.HasExited) {
+            Write-Host "--- stdout ---"; Get-Content sup.out -ErrorAction SilentlyContinue | Write-Host
+            Write-Host "--- stderr ---"; Get-Content sup.err -ErrorAction SilentlyContinue | Write-Host
+            throw "the supervisor died on startup (exit $($sup.ExitCode))"
+          }
+          Stop-Process -Id $sup.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "supervisor stayed up"
+
       - name: Check the deploy-time policy properties
         shell: pwsh
         run: |
