@@ -246,8 +246,7 @@ test("the crisis rule claims precedence over everything else in the prompt", () 
 
 test("the NVC coach says it is not therapy, and never diagnoses", () => {
   assert.ok(MODES.nvc.prompt.includes(
-    "coaching with a local model, not therapy, not professional advice. " +
-    "Say so if asked."
+    "coaching with a local model, not therapy, not professional advice."
   ));
   // Added after the red-team: the draft said "not a therapist" but never
   // forbade the act, and diagnosis-fishing is the way the question actually
@@ -316,8 +315,21 @@ test("the coach is told the steps are its own, not the person's", () => {
   // is Y, say this" gives the person one word to correct instead of an
   // interview. Two register variants were tried first and produced filler when
   // the model had nothing to say.
+  // Described, not exemplified. A worked example ("Assuming you felt hurt and
+  // needed respect") was copied verbatim into every reply — the dishes
+  // scenario came back as hurt and needing respect — and X/Y placeholders were
+  // copied as the literal letters. Describing the line leaks a few words of
+  // the description into a minority of replies, which is cosmetic; asserting
+  // the wrong feeling at someone is not.
   assert.ok(MODES.nvc.prompt.includes("a line beginning Assuming you felt"));
-  assert.ok(MODES.nvc.prompt.includes("then what to say to them, in quotation marks"));
+  // All four components have to be in the words themselves. Stopping at
+  // observation and feeling is the commonest way this goes wrong: "I feel
+  // frustrated when you watch TV before everyone is up" is a complaint, and
+  // the person asked how to handle it.
+  assert.ok(MODES.nvc.prompt.includes("carrying all four"));
+  assert.ok(MODES.nvc.prompt.includes(
+    "what happened, how they feel, what they need, and one concrete request"
+  ));
   // And no crisis hedging stapled to a conversation about chores: the standing
   // line by the message box carries that when nothing is wrong.
   assert.ok(MODES.nvc.prompt.includes("No safety advice in an ordinary turn."));
@@ -332,13 +344,22 @@ test("the NVC coach carries the framework a small model cannot be assumed to kno
   // observation/feeling/need/request unprompted on every single turn, so the
   // definitions were paying for nothing. What they got wrong is kept.
   assert.ok(MODES.nvc.prompt.includes("\"I feel that you...\" is a thought, not a feeling."));
-  assert.ok(MODES.nvc.prompt.includes("A request that cannot be refused is a demand."));
+  // The demand test, stated as something to produce rather than a definition
+  // to remember. It moved into the shape when the words had to carry it.
+  assert.ok(MODES.nvc.prompt.includes("one concrete request the other person can refuse"));
   // The four components are still named, inside the shape sentence rather than
   // in a line of their own. That matters beyond tidiness: with OFNR named
   // nowhere, the most concrete list left in the prompt is the safety one, and
   // 4 of 5 replies to a parent asking about morning TV opened by asking
   // whether anyone was in danger.
-  assert.ok(MODES.nvc.prompt.includes("observation, feeling, need and request"));
+  // The four are named as the content of the words rather than as a list
+  // above them. That naming is load-bearing beyond tidiness: with them named
+  // nowhere, the most concrete list left in the prompt is the safety one, and
+  // 4 of 5 replies to a parent asking about morning TV opened by asking
+  // whether anyone was in danger.
+  assert.ok(MODES.nvc.prompt.includes(
+    "what happened, how they feel, what they need, and one concrete request"
+  ));
 });
 
 // ── The floor under the model ───────────────────────────────

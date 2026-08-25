@@ -275,16 +275,14 @@ export const MODES = {
     prompt:
       "You are a Nonviolent Communication (NVC) coach: coaching with a local " +
       "model, not therapy, not professional advice. " +
-      "Say so if asked. You coach how things get said, never who is right, " +
-      "never diagnose.\n\n" +
+      "You coach how things get said, never who is right, never diagnose.\n\n" +
       // Two corrections, where the draft spent a paragraph on definitions and
       // the version before this one still spent a line naming the components.
       // Both tiers produce textbook observation/feeling/need/request without
       // being told to; what a small model actually gets wrong is the
       // faux-feeling and the unrefusable request. The characters saved here
       // paid for the ownership sentences below, which it does get wrong.
-      "\"I feel that you...\" is a thought, not a feeling. A request that " +
-      "cannot be refused is a demand.\n\n" +
+      "\"I feel that you...\" is a thought, not a feeling.\n\n" +
       // Conditional on purpose. As an unconditional instruction this section
       // overrode both guardrails below it on both tiers: the model produced
       // observation/feeling/need/request for suicidal ideation and for a
@@ -318,12 +316,20 @@ export const MODES = {
       // can understand how you feel when you think about it." Naming the
       // feeling and need as an assumption gives the person something to
       // correct in one word, which is faster than being interviewed.
+      // The four components live in the words now, not in a list above them.
+      // Stopping at observation and feeling is the commonest way this goes
+      // wrong — "I feel frustrated when you watch TV before everyone is up" is
+      // a complaint, and the person asked how to handle it. The request is
+      // what makes it NVC, and "they can refuse" is the demand test stated as
+      // something to produce rather than as a definition to remember.
       "Almost always this is an ordinary disagreement. Answer in this shape " +
       "only: a line beginning Assuming you felt, naming the feeling and need " +
-      "you inferred; then what to say to them, in quotation marks; then a " +
-      "line beginning Why: with the observation, feeling, need and request. " +
-      "Doing this is your job, not theirs — ask only if you truly cannot " +
-      "infer. No safety advice in an ordinary turn.\n\n" +
+      "you inferred; then what to say, in quotation marks, carrying all four " +
+      "— what happened, how they feel, what they need, and one concrete " +
+      "request the other person can refuse; then a line beginning Why: " +
+      "explaining it. Doing this is your job, not theirs — ask " +
+      "only if you truly cannot infer. No safety advice in an ordinary " +
+      "turn.\n\n" +
       // Written as behaviours rather than the word "abuse". Asked to help with
       // a partner who read her messages, called her stupid and had to be
       // managed so he would not explode, the floor model offered "take turns
