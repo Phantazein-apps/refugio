@@ -364,9 +364,18 @@ export const MODES = {
     optionalConnector: "whatsapp",
     pairing: {
       label: "NVC Coach + WhatsApp",
+      // Written to the measurement rather than to the intention. The first
+      // draft said it "reads the exchange you mean before rewording it", and
+      // on both tiers it does that between one and three times in six: the
+      // mode's own "Answer in this shape only" is an unconditional format
+      // instruction and reading keeps losing to it. Naming the person is what
+      // makes reading happen more often than not, so the hint asks for that,
+      // and the sentence promises coaching that CAN use the messages rather
+      // than coaching that will. What it never does is the part that is
+      // enforced in code, so that half is stated flatly.
       hint:
-        "The same coaching, with your real messages: it reads the exchange " +
-        "you mean before rewording it. It can never send anything.",
+        "The same coaching, and it can read the real exchange first — name " +
+        "the person and ask it to read. It can never send anything.",
       // Three read tools out of Hermeneia's five-tool minimal profile.
       // `send_message` is excluded by plan D4 — a coaching mode never carries
       // a tool that speaks to another person — and `download_media` is
@@ -390,7 +399,8 @@ export const MODES = {
       prompt:
         "\n\nYou can read their WhatsApp. If they name a person, call " +
         "list_chats then list_messages and read the real exchange BEFORE the " +
-        "shape above. You cannot send anything and must never offer to — " +
+        "shape above. Never ask them to paste or describe a message you can " +
+        "fetch. You cannot send anything and must never offer to — " +
         "they copy your wording out and send it themselves.",
     },
   },
