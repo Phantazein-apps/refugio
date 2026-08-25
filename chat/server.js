@@ -661,7 +661,7 @@ function modesPayload(rows) {
         // connected" is reading a config key out loud; the settings pane says
         // "WhatsApp" everywhere else and these two sentences sit next to
         // each other.
-        connectorLabel: row?.label || m.requiresConnector,
+        connectorLabel: row?.label || labelFor(m.requiresConnector),
         // The connector's own words for what is wrong with it, not the mode's
         // guess. `explain()` already turns a raw MCP failure into a sentence
         // ("is held by another program", "was refused permission"), and this
@@ -682,7 +682,11 @@ function modesPayload(rows) {
  *  of a mode's copy that is not about the mode: it is about a connector, and
  *  connectors are the server's business. The registry stays dependency-free. */
 function connectorNote(id, row) {
-  const label = row?.label || id;
+  // labelFor() rather than the raw id when there is no row at all: the
+  // no-row case is exactly the one with nothing to read a label off, and
+  // "whatsapp is not set up" reads as a config key said out loud next to a
+  // pane that says WhatsApp everywhere else.
+  const label = row?.label || labelFor(id);
   if (!row) return `${label} is not set up on this computer.`;
   if (row.state === "ok") return null;
   if (row.state === "connecting") return `${label} is still starting.`;
