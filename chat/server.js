@@ -24,7 +24,7 @@ import { CONNECTOR_OPTIONS, defaultSettings, optionsFor, setupUrlFor } from "./c
 import { McpPool } from "./mcp.js";
 import { explain, outputLines } from "./connector-errors.js";
 import * as attachments from "./attachments.js";
-import { readPolicy, applyPolicy, describePolicy, connectorAllowed } from "./managed.js";
+import { readPolicy, applyPolicy, describePolicy, connectorAllowed, modeAllowed } from "./managed.js";
 import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
@@ -660,9 +660,16 @@ function modesPayload(rows) {
     available: modeSummaries().map((summary) => {
       // The registry says what the option is; only the server knows whether it
       // is on, because only the server has read the settings file.
-      const m = summary.option
+      const withOption = summary.option
         ? { ...summary, option: { ...summary.option, enabled: modeOptionOn(summary.id, connectorSettings) } }
         : summary;
+      // Whether policy permits this row, decided here rather than in the
+      // browser. `managed` in the payload is the whole locked map and
+      // `locked.modes` is an allow LIST — a surface reading that as a boolean
+      // would grey out every mode the moment an administrator permitted one.
+      // Asking the same predicate the route asks keeps the pane and the
+      // refusal on the same answer.
+      const m = { ...withOption, managed: !modeAllowed(summary.id, POLICY) };
       // A paired mode is shown and not selectable when its connector is not
       // ready, with the connector's own state named rather than invented.
       if (!m.requiresConnector) return { ...m, connectorOk: true, connectorNote: null, connectorLabel: null };
@@ -1225,16 +1232,20 @@ async function route(req, res, url) {
     // Policy is checked here and not only at load. `clamped()` runs once at
     // startup, so without this a locked deployment would accept the write and
     // silently undo it on the next restart — the worst of the three options,
-    // same reasoning as the web route above. `LOCKED.modes` does not exist
-    // until Session 8 adds `allowedModes`; undefined is falsy and this reads
-    // as unlocked until it does.
-    if (LOCKED.modes) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
+    // same reasoning as the web route above.
+    //
+    // Per mode id rather than for the feature: `allowedModes` narrows, so an
+    // administrator who permits one mode has permitted exactly that one and
+    // refusing the rest is the whole behaviour. The unknown-id check runs
+    // FIRST, so a stale page naming a mode this build never shipped is told
+    // that rather than being told its organisation forbade it.
     const body = await readBody(req);
     const id = typeof body.mode === "string" ? body.mode.trim() : "";
     // Validated against the modes that have content, not against the defaults:
     // a stale page offering an id this build never shipped should be told so,
     // rather than have a boolean written for a mode nobody can reach.
     if (!MODES[id]) return sendJson(res, 400, { error: `There is no discussion mode called "${id.slice(0, 40)}".` });
+    if (!modeAllowed(id, POLICY)) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
     connectorSettings.modes = { ...connectorSettings.modes, [id]: !!body.enabled };
     saveSettings(connectorSettings);
     connectorCache = { at: 0, rows: [] };          // force a fresh read
@@ -1248,13 +1259,16 @@ async function route(req, res, url) {
   // connector's scope, and this is not that. The registry is the validator
   // here, so an option can only ever be written for a mode that declares one.
   if (p === "/api/chat/modes/option" && req.method === "POST") {
-    if (LOCKED.modes) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
     const body = await readBody(req);
     const id = typeof body.mode === "string" ? body.mode.trim() : "";
     const opt = MODES[id] ? modeOption(id) : null;
     if (!opt) {
       return sendJson(res, 400, { error: `${id ? `"${id.slice(0, 40)}"` : "That mode"} has no option to set.` });
     }
+    // An option is locked with the mode it belongs to, not with the feature:
+    // it is that mode's setting, and a mode nobody may switch on has no
+    // setting anyone needs to change.
+    if (!modeAllowed(id, POLICY)) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
     connectorSettings[opt.block] = { ...connectorSettings[opt.block], [opt.key]: !!body.enabled };
     saveSettings(connectorSettings);
     connectorCache = { at: 0, rows: [] };          // force a fresh read
@@ -1577,6 +1591,19 @@ async function route(req, res, url) {
       // WhatsApp was never set up, is held by another program, or was refused
       // permission. Those are three different afternoons.
       whyNot = (id) => connectorNote(id, rows.find((r) => r.id === id));
+    }
+    // Policy before "switched off", because the clamp has already turned a
+    // forbidden mode off and validateMode would otherwise send this person to
+    // Settings to switch on something Settings will not let them switch on.
+    // Two refusals that read as two different problems, and only one of them
+    // is theirs to fix.
+    //
+    // But AFTER "is this a mode at all": an id this build never shipped is a
+    // stale page or a typo, and answering it with "your organisation set this"
+    // sends someone to their IT department over a bug.
+    const askedFor = typeof body.mode === "string" ? body.mode.trim() : "";
+    if (askedFor && modeDef(askedFor) && !modeAllowed(askedFor, POLICY)) {
+      return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
     }
     const wanted = validateMode(body.mode, connectorSettings.modes, connectorReady);
     if (wanted.needsConnector && whyNot) {

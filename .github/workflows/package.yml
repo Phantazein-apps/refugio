@@ -266,10 +266,15 @@ jobs:
         run: |
           $msi = (Get-ChildItem dist\*.msi | Select-Object -First 1).FullName
           Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait
-          Start-Process msiexec -ArgumentList "/i `"$msi`" /qn WEBSEARCH=off UPDATECHECKS=off" -Wait
+          Start-Process msiexec -ArgumentList "/i `"$msi`" /qn WEBSEARCH=off UPDATECHECKS=off ALLOWEDMODES=`"nvc,career`"" -Wait
           $k = "HKLM:\SOFTWARE\Policies\Phantazein\REFUGIO"
           if ((Get-ItemProperty $k -Name webSearch).webSearch -ne "off") { throw "WEBSEARCH=off did not write the policy" }
           if ((Get-ItemProperty $k -Name updateChecks).updateChecks -ne "off") { throw "UPDATECHECKS=off did not write the policy" }
+          # A list property as well as the two enums, because they take
+          # different paths through the WXS: the enums are conditioned on a
+          # literal value and this one on the property being set at all.
+          $modes = (Get-ItemProperty $k -Name allowedModes).allowedModes
+          if ($modes -ne "nvc,career") { throw "ALLOWEDMODES wrote '$modes'" }
           Write-Host "deploy-time policy works"
 
       - uses: actions/upload-artifact@v4

@@ -30,6 +30,19 @@ Enabled: the attach control is removed from the chat. It disappears rather than 
 
 Disabled or Not Configured: the user may attach files.</string>
 
+      <string id="AllowedModes">Limit which discussion modes may be offered</string>
+      <string id="AllowedModes_Help">A comma-separated list of discussion mode ids. Discussion modes are built-in coaching frames for one conversation — NVC Coach, Style Coach, Career Coach, Life Coach, the Spanish Tutor, and a read-only mode for the user's own WhatsApp history. Every one of them is off until the user switches it on, and the conversation stays on the computer: a mode never searches the web and never sends anything on the user's behalf.
+
+The ids are:  nvc, styles, whatsapp, spanish, career, life
+
+For example:  nvc, career
+
+Only the modes listed here may be switched on. Any other mode is forced off and its control in Settings is disabled, saying it was set by your organisation.
+
+Leave this policy Not Configured to allow all of them. To take the feature away entirely, set a list that names no real mode — for example:  none
+
+There is deliberately no policy that switches a mode ON. A coaching conversation is one a person chooses to have.</string>
+
       <string id="AllowedConnectors">Limit which connectors may run</string>
       <string id="AllowedConnectors_Help">A comma-separated list of connector ids. Only these are started; anything else in the configuration is never launched.
 
@@ -41,6 +54,13 @@ This is enforced where connectors are started, not where they are displayed — 
     </stringTable>
 
     <presentationTable>
+      <presentation id="AllowedModes">
+        <textBox refId="AllowedModesText">
+          <label>Mode ids, comma-separated</label>
+          <defaultValue>nvc, career</defaultValue>
+        </textBox>
+      </presentation>
+
       <presentation id="AllowedConnectors">
         <textBox refId="AllowedConnectorsText">
           <label>Connector ids, comma-separated</label>

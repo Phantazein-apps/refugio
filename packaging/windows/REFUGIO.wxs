@@ -71,6 +71,7 @@
     <Property Id="UPDATECHECKS" Secure="yes" />
     <Property Id="ATTACHMENTS" Secure="yes" />
     <Property Id="ALLOWEDCONNECTORS" Secure="yes" />
+    <Property Id="ALLOWEDMODES" Secure="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="REFUGIO" />
@@ -129,6 +130,16 @@
       <Component Id="PolicyConnectors" Guid="4A6D773B-42F5-4E64-BAD3-5C71F9A448BB" Condition="ALLOWEDCONNECTORS">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Policies\Phantazein\REFUGIO"
                        Name="allowedConnectors" Type="string" Value="[ALLOWEDCONNECTORS]" KeyPath="yes" />
+      </Component>
+      <!-- Which discussion modes a person may switch on. A comma-separated
+           list, read by the same normalise() that reads the connector one, so
+           ALLOWEDMODES="nvc, career" and a MULTI_SZ set by Group Policy end up
+           as the same thing. Written only when the admin asked: absent means
+           all of them, which is also the state every mode is already in until
+           someone switches it on. -->
+      <Component Id="PolicyModes" Guid="7D2A118E-95C4-4B79-9E51-8F14D6B2C733" Condition="ALLOWEDMODES">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Policies\Phantazein\REFUGIO"
+                       Name="allowedModes" Type="string" Value="[ALLOWEDMODES]" KeyPath="yes" />
       </Component>
 
       <!-- Where the machine says what it has. Read by inventory tooling, and

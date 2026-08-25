@@ -66,6 +66,18 @@
       <disabledValue><string>user</string></disabledValue>
     </policy>
 
+    <policy name="AllowedModes" class="Machine"
+            displayName="$(string.AllowedModes)"
+            explainText="$(string.AllowedModes_Help)"
+            key="SOFTWARE\Policies\Phantazein\REFUGIO"
+            presentation="$(presentation.AllowedModes)">
+      <parentCategory ref="REFUGIO" />
+      <supportedOn ref="windows:SUPPORTED_Windows10" />
+      <elements>
+        <text id="AllowedModesText" valueName="allowedModes" required="true" />
+      </elements>
+    </policy>
+
     <policy name="AllowedConnectors" class="Machine"
             displayName="$(string.AllowedConnectors)"
             explainText="$(string.AllowedConnectors_Help)"

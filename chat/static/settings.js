@@ -68,12 +68,22 @@ const state = {
 
 const isManaged = (key) => !!(state.connectors?.managed?.[key] ?? state.status?.managed?.[key]);
 
+const MANAGED_TEXT = "Set by your organisation. This cannot be changed here.";
+
 /** The line under a locked control, or nothing at all when unmanaged.
  *
  *  Returns null rather than an empty node so the overwhelmingly common
  *  unmanaged case adds nothing to the page — el() drops null children. */
-const managedNote = (key) => isManaged(key)
-  ? el("div.aside.managed", { text: "Set by your organisation. This cannot be changed here." })
+const managedNote = (key) => isManaged(key) ? managedRowNote(true) : null;
+
+/** The same line, for a control whose locked state is decided per row.
+ *
+ *  Discussion modes need this: `allowedModes` is an allow list, so one card can
+ *  be locked while the next is not, and `managed.modes` is that list rather
+ *  than a boolean. The server answers per row and this renders the answer;
+ *  reading the list here would be a second opinion about policy. */
+const managedRowNote = (managed) => managed
+  ? el("div.aside.managed", { text: MANAGED_TEXT })
   : null;
 
 // ── Navigation ──────────────────────────────────────────────
@@ -1005,7 +1015,7 @@ function renderModes() {
         el("input", {
           type: "checkbox",
           checked: !!modes.enabled?.[m.id],
-          disabled: isManaged("modes") || blocked,
+          disabled: !!m.managed || blocked,
           on: { change: (e) => setModeEnabled(m.id, e.currentTarget.checked, e.currentTarget) },
         }),
         el("span.box"),
@@ -1047,7 +1057,7 @@ function renderModes() {
         el("input", {
           type: "checkbox",
           checked: !!m.option.enabled,
-          disabled: isManaged("modes"),
+          disabled: !!m.managed,
           on: { change: (e) => setModeOption(m.id, e.currentTarget.checked, e.currentTarget) },
         }),
         el("span.box"),
@@ -1072,7 +1082,11 @@ function renderModes() {
           + `You are running ${active || "a smaller model"}, ${m.tierReason}.`,
       }));
     }
-    const note = managedNote("modes");
+    // On the card whose mode policy forbids, not on all of them: an
+    // administrator who permitted three modes and blocked four has said
+    // something specific, and a note on every card would report it as a
+    // blanket lock.
+    const note = managedRowNote(m.managed);
     if (note) card.append(note);
     box.append(card);
   }

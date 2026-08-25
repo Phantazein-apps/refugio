@@ -17,8 +17,9 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
-  readPolicy, normalise, applyPolicy, connectorAllowed, describePolicy, POLICY_KEYS,
+  readPolicy, normalise, applyPolicy, connectorAllowed, modeAllowed, describePolicy, POLICY_KEYS,
 } from "../chat/managed.js";
+import { MODE_DEFAULTS, MODE_IDS } from "../chat/modes.js";
 
 const SETTINGS = { web: { enabled: true }, updates: { enabled: true }, notes: { read_only: false } };
 
@@ -160,6 +161,76 @@ test("no allow-list means every connector runs", () => {
   assert.equal(connectorAllowed("anything", {}), true);
 });
 
+// ── Discussion modes (Session 8) ────────────────────────────
+//
+// The mode allow-list differs from the connector one in the way that matters:
+// a connector is a process you decline to start, and a mode is a boolean
+// somebody already saved. So this list has to CLAMP as well as lock, or a
+// laptop that had NVC Coach switched on last month keeps it after the policy
+// lands — visible, working, and forbidden.
+
+const MODE_SETTINGS = () => ({
+  web: { enabled: true },
+  modes: { ...MODE_DEFAULTS, nvc: true, career: true, life: true },
+});
+
+test("a mode allow-list turns off the modes it does not name", () => {
+  const { settings, locked } = applyPolicy(MODE_SETTINGS(), { allowedModes: ["nvc"] });
+  assert.equal(settings.modes.nvc, true, "a permitted mode keeps whatever the user chose");
+  assert.equal(settings.modes.career, false, "a forbidden mode is turned off, not merely hidden");
+  assert.equal(settings.modes.life, false);
+  // The allow list itself, not `true`. A surface reading this as a boolean
+  // would grey out every mode the moment an administrator permitted one.
+  assert.deepEqual(locked.modes, ["nvc"]);
+});
+
+test("an empty allow-list takes the feature away entirely", () => {
+  // `allowedModes: none` in a registry string, or an empty array in a plist.
+  // An empty list is still a list, so this must not read as "no policy".
+  const { settings, locked } = applyPolicy(MODE_SETTINGS(), { allowedModes: [] });
+  for (const id of MODE_IDS) assert.equal(settings.modes[id], false, `${id} must be off`);
+  assert.deepEqual(locked.modes, []);
+});
+
+test("no mode policy leaves every mode to the user", () => {
+  const { settings, locked } = applyPolicy(MODE_SETTINGS(), {});
+  assert.equal(settings.modes.nvc, true);
+  assert.equal(settings.modes.career, true);
+  assert.equal(locked.modes, undefined, "unmanaged must be absent, not an empty list");
+});
+
+test("a paired variant is governed by the mode it is a variant of", () => {
+  // "NVC Coach + WhatsApp" is not a second mode with a second switch; it is a
+  // way of holding an NVC conversation, and which connectors it may reach is
+  // already `allowedConnectors`' answer.
+  const policy = { allowedModes: ["nvc"] };
+  assert.equal(modeAllowed("nvc", policy), true);
+  assert.equal(modeAllowed("nvc+whatsapp", policy), true);
+  assert.equal(modeAllowed("styles", policy), false);
+  assert.equal(modeAllowed("spanish", policy), false);
+});
+
+test("no mode allow-list means every mode may be switched on", () => {
+  for (const id of MODE_IDS) assert.equal(modeAllowed(id, {}), true);
+  assert.equal(modeAllowed("nvc+whatsapp", {}), true);
+});
+
+test("the mode policy is a list, and a misspelled one is dropped by name", () => {
+  const said = [];
+  assert.deepEqual(normalise({ allowedModes: ["nvc", "career"] }).allowedModes, ["nvc", "career"]);
+  // What a Windows administrator types into the Group Policy text box.
+  assert.deepEqual(normalise({ allowedModes: "nvc, career" }).allowedModes, ["nvc", "career"]);
+  assert.deepEqual(normalise({ allowedModes: 42 }, (m) => said.push(m)), {});
+  assert.match(said.join(" "), /allowedModes/);
+  // A mode id that does not exist is NOT rejected here on purpose: this file
+  // does not know the registry, and an admin who writes "nvc, listener" on a
+  // build where Listener has not shipped should get the mode that exists
+  // rather than a policy that fails whole. It narrows, so an unknown id
+  // permits nothing.
+  assert.deepEqual(normalise({ allowedModes: "nvc, hypnotherapist" }).allowedModes,
+    ["nvc", "hypnotherapist"]);
+});
+
 // ── The templates admins actually edit ──────────────────────
 //
 // Three files have to agree on the key names: this reader, the .mobileconfig a
@@ -222,4 +293,8 @@ test("a managed machine says so at startup", () => {
   const line = describePolicy({ webSearch: "off", allowedConnectors: ["notes"] });
   assert.match(line, /web search off/);
   assert.match(line, /connectors limited to notes/);
+  assert.match(describePolicy({ allowedModes: ["nvc"] }), /discussion modes limited to nvc/);
+  // An empty list is the one policy whose meaning is not obvious from the
+  // list, so it gets its own sentence rather than "limited to ".
+  assert.match(describePolicy({ allowedModes: [] }), /discussion modes all locked off/);
 });

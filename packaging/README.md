@@ -209,6 +209,7 @@ An admin can take decisions away from the user. `chat/managed.js` reads:
 | `updateChecks` | `off` \| `user` | No contact with github.com, including "Check now". |
 | `attachments` | `off` \| `user` | The paperclip is removed from the chat. |
 | `allowedConnectors` | list | Only these connectors are **started**. |
+| `allowedModes` | list | Only these discussion modes may be switched on; the rest are forced off. |
 
 Three properties worth stating plainly:
 
@@ -222,6 +223,13 @@ Three properties worth stating plainly:
 - **`allowedConnectors` is enforced where connectors are started**, not where
   they are drawn. A connector merely hidden is still running, still holding an
   open session to the user's WhatsApp, and still one prompt away from being read.
+- **`allowedModes` clamps as well as locks.** A discussion mode is a saved
+  boolean, not a process, so a mode the user switched on before the policy
+  arrived is turned **off** and greyed — not left on and hidden. The ids are
+  `nvc`, `styles`, `whatsapp`, `spanish`, `career`, `life`; a list naming none
+  of them (`allowedModes: none`) takes the feature away entirely. There is no
+  value that switches a mode *on* for someone: modes are off by default and a
+  coaching conversation is one a person chooses to have.
 
 A malformed policy never stops REFUGIO starting — an admin pushes to 400
 machines and does not watch them boot, so a typo must not be a fleet outage.

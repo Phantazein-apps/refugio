@@ -89,6 +89,21 @@
                   <string>reminders</string>
                 </array>
 
+                <!-- Only these discussion modes may be switched on; any
+                     other is forced off and greyed out in Settings. Modes
+                     are off by default anyway, so this is for saying which
+                     ones a person is allowed to reach at all.
+
+                     ids: nvc, styles, whatsapp, spanish, career, life
+
+                     Omit the key entirely to allow all of them. There is no
+                     value that switches a mode on for someone. -->
+                <key>allowedModes</key>
+                <array>
+                  <string>nvc</string>
+                  <string>career</string>
+                </array>
+
               </dict>
             </dict>
           </array>

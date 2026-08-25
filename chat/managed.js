@@ -54,6 +54,16 @@ export const POLICY_KEYS = {
     type: "list", default: null,
     describes: "If set, only these connector ids may run. Anything else is not started.",
   },
+  // A list rather than an on/off, and narrowing rather than choosing: absent
+  // means every built-in mode may be switched on, present means only these may.
+  // There is deliberately no key that switches a mode ON for a fleet. A
+  // coaching conversation is a thing a person decides to have, and an
+  // administrator arriving in the composer with one already selected would be
+  // the opposite of what these modes are.
+  allowedModes: {
+    type: "list", default: null,
+    describes: "If set, only these discussion modes may be switched on. Others are locked off.",
+  },
 };
 
 /** Read the policy the OS is publishing, or `{}` if there is none.
@@ -184,7 +194,38 @@ export function applyPolicy(settings, policy = {}) {
     const allow = new Set(policy.allowedConnectors);
     locked.connectors = [...allow];
   }
+
+  // Modes are clamped rather than merely locked, because a mode is a saved
+  // boolean and a connector is a process. A user who switched NVC Coach on
+  // last month, on a laptop that has since had a policy pushed to it, must
+  // find it OFF and greyed — not on and quietly still working. `locked.modes`
+  // is the allow list itself, not `true`: the pane has to grey one row and
+  // leave the next one alone, and the route has to refuse one id and accept
+  // another. Anything that reads it as a boolean would lock the whole feature
+  // the moment an administrator permitted a single mode.
+  if (policy.allowedModes) {
+    const allow = new Set(policy.allowedModes);
+    const modes = { ...next.modes };
+    for (const id of Object.keys(modes)) if (!allow.has(id)) modes[id] = false;
+    next.modes = modes;
+    locked.modes = [...allow];
+  }
   return { settings: next, locked };
+}
+
+/** May this discussion mode be switched on?
+ *
+ *  Mirrors connectorAllowed, and is asked in the two places that act: the route
+ *  that writes the switch, and the payload that offers the row. The paired
+ *  variants (`nvc+whatsapp`) are governed by their base mode's id, because that
+ *  is the id the switch belongs to — an administrator permitting "nvc" is
+ *  permitting NVC coaching, and which connectors a conversation may reach is
+ *  already answered by allowedConnectors.
+ */
+export function modeAllowed(id, policy = {}) {
+  if (!policy.allowedModes) return true;
+  const base = String(id || "").split("+")[0];
+  return policy.allowedModes.includes(base);
 }
 
 /** Is this connector permitted to run at all?
@@ -206,5 +247,10 @@ export function describePolicy(policy = {}) {
   if (policy.updateChecks === "off") parts.push("update checks off");
   if (policy.attachments === "off") parts.push("attachments off");
   if (policy.allowedConnectors) parts.push(`connectors limited to ${policy.allowedConnectors.join(", ")}`);
+  if (policy.allowedModes) {
+    parts.push(policy.allowedModes.length
+      ? `discussion modes limited to ${policy.allowedModes.join(", ")}`
+      : "discussion modes all locked off");
+  }
   return parts.length ? `managed policy in effect — ${parts.join("; ")}` : null;
 }
