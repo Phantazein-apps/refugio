@@ -1121,7 +1121,7 @@ test("the tutor is written to what the model does instead of tutoring", () => {
   // the two things it did instead are forbidden by name.
   const p = MODES.spanish.prompt;
   assert.match(p, /the corrected sentence alone, never theirs, never a note that there was a mistake/);
-  assert.match(p, /never ask them to say it again or to find the mistake/);
+  assert.match(p, /never ask them to say it again or find the mistake/);
   // The level rule as two behaviours rather than a level name: neither tier did
   // anything with "at the learner's level", and CEFR letters are worse.
   assert.match(p, /short sentences for a beginner, ordinary Spanish for someone fluent/);
@@ -1129,7 +1129,7 @@ test("the tutor is written to what the model does instead of tutoring", () => {
   // qwen2.5:7b told a learner to change "vivía" to "viví" and called the result
   // correct — so the explanation is made rare and the banner says the mode is
   // not a grammar reference.
-  assert.match(p, /Explain a rule only when they ask, in one sentence\./);
+  assert.match(p, /Explain a rule only if asked, in one sentence\./);
   assert.match(MODES.spanish.disclosure, /not a reliable grammar reference/);
 });
 
@@ -1145,12 +1145,18 @@ test("the tutor says the sentence that stops it correcting a person in trouble",
   );
 });
 
-test("the register rule names the forms, not the pronoun to address them with", () => {
-  // Measured on its own, three wordings, four samples each, three turns per
-  // sample. "Address them as tú. From the moment they ask for usted…" put the
-  // bare word in the reply — "Sí, tú." — and held the switch 2 times in 4.
-  // This wording held it 3 times in 4 on the floor tier.
-  assert.match(MODES.spanish.prompt, /If they ask you to speak formally, use usted and its forms/);
+test("the register rule names the forms to use and the ones to stop using", () => {
+  // Six wordings, measured on both tiers, and this is the only one that held
+  // the switch on either. "Address them as tú. From the moment they ask for
+  // usted…" put the bare word in the reply — "Sí, tú." Naming the third-person
+  // rule held it on qwen2.5:7b and wrecked the floor tier, which started
+  // answering an ordinary turn with "Usted aún lo echaba de menos" and read
+  // "speak formally" as a topic about how to dress for an interview.
+  //
+  // The last clause is the failure both tiers actually have: they answer
+  // "Claro, usaré usted" and then write "¿cómo estás preparándote?". Naming
+  // what to stop using took the 8B tier from 0 of 3 to 2 of 3.
+  assert.match(MODES.spanish.prompt, /use usted and its forms — su, le, está — and never te or tu/);
   assert.doesNotMatch(MODES.spanish.prompt, /Address them as tú/);
 });
 
@@ -1242,6 +1248,7 @@ test("a second language is a spec, not a second prompt", () => {
     language: "French",
     formal: "vous",
     formalForms: "votre, vous, êtes",
+    informalForms: "te or ton",
     recommendedTier: "8b",
     tierReason: "unmeasured",
     starters: ["Je voudrais pratiquer mon français", "Parlez-moi de vous"],
@@ -1250,7 +1257,7 @@ test("a second language is a spec, not a second prompt", () => {
   assert.equal(french.titleLabel, "French practice");
   assert.equal(french.category, "coaching");
   assert.match(french.prompt, /You are a French tutor/);
-  assert.match(french.prompt, /use vous and its forms — votre, vous, êtes/);
+  assert.match(french.prompt, /use vous and its forms — votre, vous, êtes — and never te or ton/);
   assert.doesNotMatch(french.prompt, /Spanish/, "the template must not leak the language it was written in");
   assert.doesNotMatch(french.disclosure, /Spanish/);
   // And it costs what the shipped one costs, so a language cannot arrive over

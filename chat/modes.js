@@ -270,7 +270,7 @@ export function crisisNotice(userText, replyText) {
  * and no second language ships unmeasured.
  */
 export function tutorMode(spec) {
-  const { language, formal, formalForms } = spec;
+  const { language, formal, formalForms, informalForms } = spec;
   return {
     id: spec.id,
     label: `${language} Tutor`,
@@ -349,7 +349,7 @@ export function tutorMode(spec) {
       // level name: "at the learner's level" meant nothing to either tier, and
       // CEFR letters mean less. Short sentences and ordinary speech are the two
       // behaviours, so they are what it says.
-      `Speak ${language}, in words they can follow — short sentences for a ` +
+      `Speak ${language} in words they can follow — short sentences for a ` +
       `beginner, ordinary ${language} for someone fluent. English only for a ` +
       "word they ask about.\n\n" +
       // The correction, written to the three things the floor model does
@@ -371,12 +371,12 @@ export function tutorMode(spec) {
       "never theirs, never a note that there was a mistake; then answer what " +
       "they " +
       "told you and ask one thing about it. Doing this is your job, not " +
-      "theirs: never ask them to say it again or to find the mistake.\n\n" +
+      "theirs: never ask them to say it again or find the mistake.\n\n" +
       // The sentence that exists because of what a tutor does to a sentence it
       // cannot parse. Action first, absence second — Session 4's finding, and
       // this branch is the one where it matters most, because the absence on
       // its own leaves the crisis script as the only concrete thing to copy.
-      `Read them as a person talking, not only as ${language}. When they tell ` +
+      "A phrase they ask how to say is vocabulary, not news. When they tell " +
       "you " +
       "something is wrong in their life, answer the person; that sentence is " +
       "not one to correct.\n\n" +
@@ -385,15 +385,15 @@ export function tutorMode(spec) {
       // as tú, the floor model opened replies with the bare word "Sí, tú."
       // Asking for formality and naming only the forms held the register
       // through three turns 3 times in 4.
-      `If they ask you to speak formally, use ${formal} and its forms — ` +
-      `${formalForms} — until they ask you to stop.\n\n` +
+      `If they ask to speak formally, use ${formal} and its forms — ` +
+      `${formalForms} — and never ${informalForms}, until they ask to stop.\n\n` +
       // Both tiers explain grammar unprompted and both explain it wrongly —
       // qwen2.5:7b told a learner to change "vivía" to "viví" and called the
       // result correct. The explanation cannot be made right from here, so it
       // is made rare, and the disclosure says the mode is not a grammar
       // reference.
-      "Explain a rule only when they ask, in one sentence. To drill " +
-      "something, give one sentence at a time and wait.\n\n" +
+      "Explain a rule only if asked, in one sentence. To drill, give one " +
+      "sentence at a time and wait.\n\n" +
       "No safety advice in an ordinary turn.",
   };
 }
@@ -844,8 +844,19 @@ export const MODES = {
     // The formal register and three of its forms. This is the field French and
     // German would fill with vous/votre and Sie/Ihnen; naming the forms rather
     // than the pronoun alone is what made the switch hold.
+    // The formal register, three of its forms, and the familiar forms it must
+    // stop using. All three are fields because the grammar is not shared:
+    // Spanish's usted takes third-person verbs, French's vous is second-person
+    // plural, German's Sie is third-person plural — a template that described
+    // any one of those would be describing Spanish and calling it a template.
+    //
+    // The last clause is there because of the failure both tiers actually
+    // have: they say "Claro, usaré usted" and then write "¿cómo estás
+    // preparándote?". Naming the forms to stop using took qwen2.5:7b from 0 of
+    // 3 to 2 of 3.
     formal: "usted",
     formalForms: "su, le, está",
+    informalForms: "te or tu",
     // Measured on Spanish, on this machine, this session. Not copied from the
     // modes above: their 8B is about whether a guardrail holds, and this one is
     // about whether the tutoring is true. On qwen2.5:3b a correction comes back
