@@ -551,6 +551,25 @@ test("the NVC coach declares the tier its guardrail was proven on", () => {
   assert.equal(modeSummaries().find((r) => r.id === "nvc").recommendedTier, "8b");
 });
 
+test("a mode that may touch a connector says so on its own banner", () => {
+  // Found by reading the panes rather than by any test: the paired NVC variant
+  // inherited the base mode's disclosure, which says what it is not — not
+  // therapy, not a professional — and never mentions that this conversation
+  // can read the person's messages. Both halves are true and the banner is the
+  // thing still on screen a week later, so the row that has tools has to name
+  // them. Same shape as the tier note Session 4 had to split.
+  for (const row of modeSummaries()) {
+    if (!row.tools.length) continue;
+    assert.match(row.disclosure, /can read/i, `${row.id} may read and does not say so`);
+    assert.match(row.disclosure, /cannot send/i, `${row.id} must say what it cannot do with them`);
+  }
+  // And a mode with no tools must not imply it has any.
+  for (const row of modeSummaries()) {
+    if (row.tools.length) continue;
+    assert.doesNotMatch(row.disclosure, /can read your/i, `${row.id} has no tools and must not suggest it reads anything`);
+  }
+});
+
 test("the picker rows carry the copy but never the prompt", () => {
   // A prompt pasted into the window invites the reader to treat instructions to
   // the model as a description of what the mode guarantees.
@@ -679,7 +698,16 @@ test("a paired variant is one mode reached a second way, not a second mode", () 
   assert.equal(paired.pairedFrom, "nvc");
   assert.equal(paired.requiresConnector, "whatsapp");
   assert.equal(paired.titleLabel, MODES.nvc.titleLabel, "the sidebar says the same quiet thing");
-  assert.equal(paired.disclosure, MODES.nvc.disclosure);
+  // Session 6 asserted these two disclosures were the identical string, which
+  // is a stronger claim than D11 needs and turned out to be the wrong one: the
+  // base mode's banner says what the coaching is not, and never mentioned that
+  // this variant may read the person's messages. What must not drift is the
+  // promise, so the promise is what is checked — the paired banner carries the
+  // base's boundary and its "nothing leaves" clause, and adds the sentence
+  // about what it can and cannot do with a connector.
+  assert.ok(paired.disclosure.startsWith("Coaching practice with a local model — not therapy, not a professional."));
+  assert.match(paired.disclosure, /Nothing here leaves this machine\.$/);
+  assert.match(paired.disclosure, /can read your WhatsApp history on this computer; it cannot send, reply or delete/);
   assert.ok(paired.prompt.startsWith(MODES.nvc.prompt), "the coaching prompt is the same one, extended");
 });
 

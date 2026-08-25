@@ -558,6 +558,17 @@ export const MODES = {
       hint:
         "The same coaching, and it can read the real exchange first — name " +
         "the person and ask it to read. It can never send anything.",
+      // The banner, and it needs its own because the base mode's does not
+      // mention the one thing this variant adds. "Nothing here leaves this
+      // machine" is true of both — WhatsApp history is a local database — but
+      // a person reopening this conversation a week later should be told what
+      // it could reach, not only what it could not. This is the Session 4
+      // finding about the tier note in another place: a sentence shared by two
+      // modes is a sentence that is accurate for one of them.
+      disclosure:
+        "Coaching practice with a local model — not therapy, not a " +
+        "professional. It can read your WhatsApp history on this computer; it " +
+        "cannot send, reply or delete. Nothing here leaves this machine.",
       // Both halves apply here and neither base sentence covers the other, so
       // the paired variant says its own.
       tierReason:
@@ -1041,6 +1052,7 @@ export function modeDef(id) {
     id,
     label: p.label,
     hint: p.hint,
+    disclosure: p.disclosure ?? def.disclosure,
     // The paired variant needs its connector; the base one keeps working
     // without it. Same field the data mode uses, so every surface that
     // already handles gating handles this for free.
