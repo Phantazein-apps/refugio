@@ -53,9 +53,10 @@
          two REFUGIOs on the machine, neither aware of the other — rather than
          an upgrade. This makes it an upgrade.
 
-         It costs an ICE61 warning at build time: ICE61 exists to say "do not
-         remove an equal version of yourself", which is precisely and
-         deliberately what is being asked for here. -->
+         Where ICE validation runs, this can raise ICE61 — which exists to
+         say "do not remove an equal version of yourself", precisely and
+         deliberately what is being asked for here. The current toolchain
+         emits nothing for it. -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of REFUGIO is already installed."
                   AllowSameVersionUpgrades="yes"
                   Schedule="afterInstallInitialize" />
