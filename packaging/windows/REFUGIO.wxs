@@ -46,7 +46,19 @@
          a registry build-number read instead of VersionNT. -->
     <Launch Condition="VersionNT >= 603" Message="REFUGIO requires Windows 8.1 or later." />
 
+    <!-- AllowSameVersionUpgrades because ProductVersion cannot carry a
+         prerelease label: build-msi.ps1 strips it, so 2.0.0-alpha.1 and
+         2.0.0-alpha.2 both arrive here as plain "2.0.0". MSI's default for an
+         install over an equal version is to treat it as a SECOND product —
+         two REFUGIOs on the machine, neither aware of the other — rather than
+         an upgrade. This makes it an upgrade.
+
+         Where ICE validation runs, this can raise ICE61 — which exists to
+         say "do not remove an equal version of yourself", precisely and
+         deliberately what is being asked for here. The current toolchain
+         emits nothing for it. -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of REFUGIO is already installed."
+                  AllowSameVersionUpgrades="yes"
                   Schedule="afterInstallInitialize" />
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
@@ -124,7 +136,11 @@
       <Component Id="InstallReceipt" Guid="5B8E884C-63A6-4F75-8BE4-6D82FAB559CC">
         <RegistryKey Root="HKLM" Key="SOFTWARE\Phantazein\REFUGIO">
           <RegistryValue Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
-          <RegistryValue Name="Version" Type="string" Value="$(var.ProductVersion)" />
+          <!-- The full semver, not ProductVersion: ProductVersion has had its
+               prerelease label stripped to satisfy MSI, and "2.0.0" on a
+               machine actually running 2.0.0-alpha.1 is the kind of answer
+               that wastes a support call. -->
+          <RegistryValue Name="Version" Type="string" Value="$(var.DisplayVersion)" />
         </RegistryKey>
       </Component>
 
