@@ -70,6 +70,7 @@ This installs the **v2 alpha** — REFUGIO's own chat window. It replaces Open W
 - **Fewer moving parts.** MCPO exists only because Open WebUI can't speak MCP. The chat UI can, so it isn't started.
 - **Sources.** Every answer built from your data can show exactly which tool calls produced it — which chats were read, which reminders listed.
 - **Web search, off by default.** The one thing that leaves your machine. It has to be switched on, and then armed for each individual message, with a warning saying what is sent.
+- **Discussion modes, also off by default.** Six built-in frames for one conversation — NVC, communication styles, career, life, a Spanish tutor, and reading your own WhatsApp history. They *remove* capability rather than adding it: no web search, no tools, no generated titles. See below.
 
 ### Known rough edges
 
@@ -157,9 +158,35 @@ Everything that used to be a terminal prompt is a page now: **http://127.0.0.1:8
 | **Connectors** | Which of your local programs are working, and what to do about the ones that aren't. Each connector states its condition once — ready, connecting, degraded, or failed. A failure names the thing that refused and what wasn't read, with the connector's own output quoted verbatim beside it; where REFUGIO can't explain the output it shows the quotation alone rather than inventing a cause. Scope options ("today's reminders only") appear only on connectors that work, because *off* must always mean narrower. |
 | **Models** | What's installed, what's selected, and what fits in the memory free right now. A model that can't call tools is marked as such — that failure is otherwise invisible, because the model answers fluently and simply never reads your data. Downloads run from here, and **Check for better models** asks two questions at once: Ollama, about every model already installed (no network), and this repository's [`models.json`](models.json), for models rated after your copy was released — so a newer, lighter model can reach you without updating REFUGIO. The catalog fetch is one GET for one public file, sends nothing about your machine, and obeys the same switch as update checks. |
 | **Web search** | The one thing in REFUGIO that leaves your machine. Off by default, and switching it on still doesn't start searching — each message has to be armed on its own, in the chat, with the warning shown at the time. |
+| **Discussion modes** | Which coaching modes are offered in the chat, and what each one is and is not. Every one is off until you switch it on, and nothing appears in the composer until something is on. |
 | **Appearance** | Light, dark, or follow the system — which is the default, and switches with your Mac as it does. Plus text size and motion. |
 | **Updates** | Whether a newer REFUGIO exists, and the command to apply it. The second thing here that reaches the network — see below. |
 | **Data & reset** | How many conversations exist, how many files you've attached and what they weigh, where both live on disk, and an erase that requires typing the word `delete`. Nothing is synced anywhere, so that file is the only copy. |
+
+### Discussion modes
+
+A mode is a named frame around **one conversation**: a system prompt, a set of guardrails, and a smaller set of capabilities. You switch one on in **Settings ▸ Discussion modes**, then pick it in the composer *before the first message*. After that it is fixed — the system prompt is rebuilt on every turn, so changing it mid-thread would silently reframe everything already said. Leaving a mode means starting a new chat, and there is a **Leave** button that says so.
+
+| Mode | What it is for |
+|---|---|
+| **NVC Coach** | Nonviolent Communication. Think a situation through, or get a message reworded into observation, feeling, need and a request the other person can refuse. |
+| **Style Coach** | Communication styles (Merrill-Reid, 1981): how you come across, what you do under pressure, and how to reach one difficult person. |
+| **Career Coach** | Interview practice, negotiation wording, and decisions with their costs. No internet, so any number is one to check. |
+| **Life Coach** | One step small enough that you will do it, with the day and the place. Stops proposing steps when what you wanted was to be heard. |
+| **Spanish Tutor** | Conversation in Spanish at your level, corrected as you go, with a register switch (tú / usted) and drills on request. |
+| **Chat with WhatsApp** | Search, summarize and discuss your own message history. Read-only, and needs the WhatsApp connector. |
+
+**What a mode takes away.** Web search is refused on a mode turn in two places, not hidden in one: the composer drops the arming button, the server forces it off, and the tool is refused again at the point it would run. A coaching mode is handed **no tools at all** — including memory, whose whole job is to persist and, in its GitHub-backed variant, upload what was said. And the sidebar title comes from the mode, not from what you typed: `NVC coaching — Aug 24`, never a summary of the thing you came here to say quietly.
+
+**Two modes may read, and only read.** NVC Coach can be opened as *NVC Coach + WhatsApp* when that connector is working, and the data mode reads it directly. Both are limited to `list_chats`, `list_messages` and `search_contacts` — the tool that sends a WhatsApp message is on the connector and in no mode's list, and a model that names it anyway is refused with an error it can read. Anything you want sent, you copy out and send yourself.
+
+**Safety, and what is prompt versus what is enforced.** Every coaching mode carries the same crisis text, and the copy in it was rewritten from measurements rather than written from intent. But prompt text is advisory: when your own words carry a signal and the reply did not already point at real help, **REFUGIO adds crisis resources itself**, in a separate box labelled *"From REFUGIO, not the model"* — because the floor exists precisely for the case where the model got it wrong, and a phone number should not inherit the model's authorship.
+
+**Each mode says which model size it was measured on.** All of them recommend an 8B model or larger, and each says why in its own terms — for NVC it is whether the safety wording holds; for the WhatsApp modes it is whether the model can form a tool call at all; for the Spanish Tutor it is that a smaller model will hand your own mistake back to you as the correction. On a smaller model the picker and Settings say so rather than implying every model behaves the same.
+
+**No mode remembers anything across conversations.** Within one conversation history is never truncated, so an assessment or a correction holds for as long as that chat does. Come back tomorrow and nothing was kept — the modes that would obviously want it (Style Coach, the tutor) say so in their own copy rather than letting you discover it by being asked the same questions again.
+
+On a machine deployed by MDM an administrator can narrow which modes may be switched on at all — see `allowedModes` in [`packaging/README.md`](packaging/README.md). Policy can only ever narrow: there is no setting that switches a mode on for someone.
 
 ### Attaching files
 

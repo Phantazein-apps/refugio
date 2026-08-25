@@ -22,7 +22,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1285,4 +1285,49 @@ test("the tutor is pure prompt: no tools, no connector, no pairing", () => {
   assert.equal(pairedId("spanish"), null);
   assert.equal(modeSummaries().find((r) => r.id === "spanish").tools.length, 0);
   assert.equal(toolRefusal("spanish", "whatsapp__send_message"), "Error: whatsapp__send_message is not available in this mode. Answer without it.");
+});
+
+// ── What the README promises (Session 8) ────────────────────
+//
+// The README is the only description of this feature most people will ever
+// read, and it is the copy furthest from the code — nothing renders it, so
+// nothing catches it drifting. These check the claims that would be worst to
+// get wrong: which modes exist, and what the paired ones may touch.
+
+const readme = () => readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+
+test("the README names every mode that ships, and none that does not", () => {
+  const doc = readme();
+  for (const id of definedModes()) {
+    assert.ok(doc.includes(MODES[id].label), `the README does not mention ${MODES[id].label}`);
+  }
+  // The count is stated in prose, so it has to be the count.
+  assert.match(doc, new RegExp(`\\*\\*Discussion modes, also off by default\\.\\*\\* ${["Zero","One","Two","Three","Four","Five","Six","Seven"][definedModes().length]} built-in`),
+    "the README's count of modes is not the number that ship");
+  // A mode with no content must not be advertised before it exists.
+  for (const id of MODE_IDS.filter((i) => !MODES[i])) {
+    assert.ok(!doc.includes(`**${id}`), `the README advertises ${id}, which has no content`);
+  }
+});
+
+test("the README quotes the read-only allowlist rather than describing it", () => {
+  // "Read-only" is an adjective and adjectives drift. The three tool names are
+  // checkable, and they are the whole of what a paired mode may ever call.
+  const doc = readme();
+  const allow = MODES.whatsapp.tools.allow.map((n) => n.split("__").pop());
+  for (const name of allow) {
+    assert.ok(doc.includes(`\`${name}\``), `the README does not name ${name}`);
+  }
+  // And the promise that outlives any of them.
+  assert.match(doc, /the tool that sends a WhatsApp message is on the connector and in no mode's list/);
+});
+
+test("the README's tier claim is true of every mode that ships", () => {
+  // "All of them recommend an 8B model or larger" is a sentence about six
+  // registry entries, and a seventh mode declaring something else would make
+  // it false in a way nobody would notice.
+  assert.match(readme(), /All of them recommend an 8B model or larger/);
+  for (const row of modeSummaries()) {
+    assert.equal(row.recommendedTier, "8b", `${row.id} would make the README's tier sentence false`);
+  }
 });
