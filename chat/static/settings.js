@@ -1035,6 +1035,26 @@ function renderModes() {
         card.append(el("div.aside.warn", { text: `${paired.connectorNote} The unpaired mode still works.` }));
       }
     }
+    // The mode's own option, on the mode's own card, worded by the backend.
+    // A second checkbox here is a different kind of thing from the one above
+    // it — that one decides whether the mode exists in the composer at all,
+    // this one only changes a sentence the model is given — so the note under
+    // it says so. Every other switch in this pane narrows what REFUGIO may
+    // reach and is enforced where it acts; this one is not enforced anywhere,
+    // and copy that let it look the same would be claiming something untrue.
+    if (m.option) {
+      card.append(el("label.check", {},
+        el("input", {
+          type: "checkbox",
+          checked: !!m.option.enabled,
+          disabled: isManaged("modes"),
+          on: { change: (e) => setModeOption(m.id, e.currentTarget.checked, e.currentTarget) },
+        }),
+        el("span.box"),
+        m.option.label,
+      ));
+      card.append(el("div.aside", { text: `${m.option.hint} ${m.option.note}` }));
+    }
     // Honest labelling, the same as the model picker does. The tier is not a
     // preference for bigger models: on a smaller one something about the mode
     // was measured to hold less well, and saying so is cheaper than implying
@@ -1055,6 +1075,29 @@ function renderModes() {
     const note = managedNote("modes");
     if (note) card.append(note);
     box.append(card);
+  }
+}
+
+/** Write a mode's option. Its own route, because it writes its own settings
+ *  block — see the comment on POST /api/chat/modes/option in the server. */
+async function setModeOption(mode, enabled, box) {
+  box.disabled = true;
+  try {
+    const res = await fetch("/api/chat/modes/option", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, enabled }),
+    });
+    if (!res.ok) throw new Error("failed");
+    // Same reason as every other write in this file: without it the 15s poll
+    // answers with the pre-write state and flips the box back under the cursor.
+    markWrite();
+    state.connectors = await res.json();
+    renderModes();
+  } catch {
+    box.checked = !enabled;
+    box.disabled = false;
+    toast("That didn't save.");
   }
 }
 

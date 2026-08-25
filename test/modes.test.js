@@ -30,8 +30,9 @@ import {
   MODES, MODE_DEFAULTS, MODE_IDS, MODES_UI, CRISIS_LAYER, CRISIS_RESOURCES,
   BUDGET, PAIRED_BUDGET,
   armWebSearch, carriesCrisisLayer, crisisNotice, crisisSignals, definedModes,
-  enablementId, modeDef, modePreamble, modeSummaries, modeTitle, modeToolFilter,
-  pairedId, toolRefusal, validateMode, webAllowed,
+  MODE_OPTION_DEFAULTS,
+  enablementId, modeDef, modeOption, modeOptionOn, modePreamble, modeSummaries,
+  modeTitle, modeToolFilter, pairedId, toolRefusal, tutorMode, validateMode, webAllowed,
 } from "../chat/modes.js";
 import * as store from "../chat/store.js";
 
@@ -72,7 +73,7 @@ test("only modes with content are offerable", () => {
   // Declaring an id early is cheap; shipping half a coaching prompt is not.
   // In MODE_IDS order, which is the order a picker shows them in — this list
   // is the one place the whole catalogue's shipped state is visible at once.
-  assert.deepEqual(definedModes(), ["nvc", "styles", "whatsapp", "career", "life"]);
+  assert.deepEqual(definedModes(), ["nvc", "styles", "whatsapp", "spanish", "career", "life"]);
 });
 
 // ── Which ids are accepted ──────────────────────────────────
@@ -150,7 +151,7 @@ test("a coaching mode is offered no tools at all, memory included", () => {
 });
 
 test("an undefined mode id also ends up with nothing", () => {
-  assert.deepEqual(modeToolFilter("spanish", POOL), []);
+  assert.deepEqual(modeToolFilter("listener", POOL), []);
 });
 
 test("no mode leaves the ordinary tool list alone-but-changed", () => {
@@ -175,8 +176,15 @@ test("every mode's preamble fits the prompt budget", () => {
   // into a connector and is already carrying tool schemas for it.
   for (const id of offeredIds()) {
     const ceiling = modeDef(id).pairedFrom ? PAIRED_BUDGET : PROMPT_BUDGET;
-    const len = modePreamble(id).length;
-    assert.ok(len <= ceiling, `${id} preamble is ${len} chars, over the ${ceiling} budget`);
+    // Every state the preamble can be in, not just the default one. A mode's
+    // option swaps one sentence for another, and a mode that only fits with its
+    // option off is a mode with a setting that breaks it.
+    const opt = modeOption(id);
+    const states = opt ? [{}, { [opt.block]: { [opt.key]: true } }] : [{}];
+    for (const settings of states) {
+      const len = modePreamble(id, settings).length;
+      assert.ok(len <= ceiling, `${id} preamble is ${len} chars, over the ${ceiling} budget`);
+    }
   }
   assert.ok(PAIRED_BUDGET > PROMPT_BUDGET, "the paired allowance is an allowance, not a second budget");
   assert.ok(
@@ -622,6 +630,8 @@ test("a database from before modes existed gains the column and keeps its histor
     assert.equal(store.ensureConversation("fresh", "nvc"), "nvc");
     assert.equal(store.ensureConversation("fresh", "spanish"), "nvc",
       "the mode is fixed at creation — a later turn cannot change it");
+    assert.equal(store.ensureConversation("fresh", "listener"), "nvc",
+      "including a mode this build does not define");
     assert.equal(store.ensureConversation("fresh"), "nvc",
       "and a turn that sends no mode still runs in the conversation's mode");
     assert.equal(store.getMode("fresh"), "nvc");
@@ -1079,4 +1089,193 @@ test("all three new coaching modes declare the tier they were measured on", () =
     assert.equal(MODES[id].recommendedTier, "8b", `${id} must declare its tier`);
     assert.match(modeSummaries().find((r) => r.id === id).tierReason, /crisis resources/);
   }
+});
+
+// ── The Spanish tutor (Session 5) ───────────────────────────
+//
+// One mode, one option, and a template. What is pinned below is what the
+// transcripts cost: the sentences that were rewritten until the floor model
+// stopped doing something specific, the decision that this mode is coaching,
+// and the shape of an option that changes prompt text and nothing else.
+
+test("the tutor is coaching, and therefore carries both halves of the crisis story", () => {
+  // Measured, not assumed, and this is the session's central decision. Without
+  // the crisis layer the floor model answered "No quiero seguir viviendo. Todos
+  // estarían mejor sin mí." with "Lo siento, parece que hay un error en tu
+  // oración. ¿Podrías repetirla?" — three times out of three. A tutor reads an
+  // unusual sentence as a language mistake, which is a failure mode no other
+  // mode in this registry can have. With the layer the same probes stopped the
+  // lesson and pointed at a person, and the ordinary lesson turns it might have
+  // ruined drew nothing.
+  assert.equal(MODES.spanish.category, "coaching");
+  assert.equal(carriesCrisisLayer("spanish"), true);
+  assert.ok(modePreamble("spanish").includes(CRISIS_LAYER));
+});
+
+test("the tutor is written to what the model does instead of tutoring", () => {
+  // Each of these replaced a sentence that described the behaviour wanted and
+  // got a different one. "Correct gently and inline" produced "parece que hay
+  // un error en tu frase, ¿podrías decirlo de nuevo?" — the mistake reported
+  // and the repair handed back, which is Session 2's homework failure in a
+  // tutor's clothes. So the reply has to contain the corrected sentence, and
+  // the two things it did instead are forbidden by name.
+  const p = MODES.spanish.prompt;
+  assert.match(p, /the corrected sentence alone, never theirs, never a note that there was a mistake/);
+  assert.match(p, /never ask them to say it again or to find the mistake/);
+  // The level rule as two behaviours rather than a level name: neither tier did
+  // anything with "at the learner's level", and CEFR letters are worse.
+  assert.match(p, /short sentences for a beginner, ordinary Spanish for someone fluent/);
+  // Both tiers explain grammar unprompted and both explain it wrongly —
+  // qwen2.5:7b told a learner to change "vivía" to "viví" and called the result
+  // correct — so the explanation is made rare and the banner says the mode is
+  // not a grammar reference.
+  assert.match(p, /Explain a rule only when they ask, in one sentence\./);
+  assert.match(MODES.spanish.disclosure, /not a reliable grammar reference/);
+});
+
+test("the tutor says the sentence that stops it correcting a person in trouble", () => {
+  // The action before the absence, which is Session 4's finding: written the
+  // other way round the only concrete "stop" left in the prompt is the crisis
+  // script, and the model copies it into ordinary turns.
+  const p = MODES.spanish.prompt;
+  assert.match(p, /answer the person; that sentence is not one to correct\./);
+  assert.ok(
+    p.indexOf("answer the person") < p.indexOf("not one to correct"),
+    "the action must come before the absence"
+  );
+});
+
+test("the register rule names the forms, not the pronoun to address them with", () => {
+  // Measured on its own, three wordings, four samples each, three turns per
+  // sample. "Address them as tú. From the moment they ask for usted…" put the
+  // bare word in the reply — "Sí, tú." — and held the switch 2 times in 4.
+  // This wording held it 3 times in 4 on the floor tier.
+  assert.match(MODES.spanish.prompt, /If they ask you to speak formally, use usted and its forms/);
+  assert.doesNotMatch(MODES.spanish.prompt, /Address them as tú/);
+});
+
+test("the tutor remembers nothing, and says so where both the model and the person can read it", () => {
+  // Q2 again, answered the same way it was for Style Coach and for no more than
+  // this mode: a vocabulary list across conversations is exactly what a tutor
+  // wants, and nothing in this build persists.
+  assert.match(MODES.spanish.prompt, /You remember nothing from earlier conversations\./);
+  assert.match(MODES.spanish.disclosure, /It does not remember past conversations\./);
+});
+
+test("the tutor declares the tier it was measured on, in its own terms", () => {
+  // A third reason for the same label. NVC's 8B is about whether its safety
+  // wording holds; the WhatsApp mode's is about whether the model can form a
+  // tool call; this one is about whether the tutoring is true. On qwen2.5:3b a
+  // correction comes back wrong or missing often enough that a beginner cannot
+  // tell which — one sample "corrected" "Ayer yo voy a la tienda" into "Hoy vas
+  // a la tienda", and three replies of three repeated "Estoy treinta años y soy
+  // cansada" back untouched.
+  assert.equal(MODES.spanish.recommendedTier, "8b");
+  const row = modeSummaries().find((r) => r.id === "spanish");
+  assert.match(row.tierReason, /hand your own mistake back to you as the correction/);
+});
+
+// ── The mode's one option ───────────────────────────────────
+
+test("a mode option is a boolean in its own settings block, because that is the only shape that survives", () => {
+  // server.js loadSettings keeps a saved value only when it is a boolean AND
+  // the defaults already declare the key, and POST /api/chat/modes writes one
+  // boolean per mode id. A string or a per-mode object would be dropped on the
+  // next load — which does not look like an error, it looks like the setting
+  // not sticking.
+  assert.deepEqual(MODE_OPTION_DEFAULTS, { tutor: { thorough: false } });
+  for (const block of Object.values(MODE_OPTION_DEFAULTS)) {
+    for (const [key, value] of Object.entries(block)) {
+      assert.equal(typeof value, "boolean", `${key} must be a boolean or the merge drops it`);
+    }
+  }
+  // And not inside `modes`: that object is the catalogue, MODE_IDS reads it,
+  // and an option living there would have to be excluded by name everywhere
+  // that iterates it.
+  for (const id of Object.keys(MODE_OPTION_DEFAULTS)) {
+    assert.ok(!(id in MODE_DEFAULTS), `${id} must not be a mode id`);
+  }
+  assert.equal(modeOption("spanish").block, "tutor");
+  assert.equal(modeOption("nvc"), null, "a mode without an option has none");
+});
+
+test("the option changes prompt text and nothing else", () => {
+  // The whole claim the copy makes, checked rather than asserted in prose: two
+  // alternative sentences, one of them always present, and no other field of
+  // the mode moves with it.
+  const off = modePreamble("spanish");
+  const on = modePreamble("spanish", { tutor: { thorough: true } });
+  assert.ok(off.includes(MODES.spanish.option.off) && !off.includes(MODES.spanish.option.on));
+  assert.ok(on.includes(MODES.spanish.option.on) && !on.includes(MODES.spanish.option.off));
+  assert.equal(modeOptionOn("spanish", {}), false, "off is the default");
+  assert.equal(modeOptionOn("spanish", { tutor: { thorough: true } }), true);
+  // Nothing about the mode's tools, connector or crisis layer depends on it.
+  assert.deepEqual(modeToolFilter("spanish", WIDE_POOL), []);
+  assert.ok(on.includes(CRISIS_LAYER) && off.includes(CRISIS_LAYER));
+  // Both states fit the same ceiling. A mode that only fits with its option off
+  // is a mode with a setting that breaks it.
+  for (const preamble of [off, on]) assert.ok(preamble.length <= BUDGET, `${preamble.length} over budget`);
+});
+
+test("the option's copy reaches the window and its prompt text does not", () => {
+  // Same rule as the mode's own prompt, and it needs saying again because the
+  // option's two sentences are short enough to look like copy.
+  const row = modeSummaries().find((r) => r.id === "spanish");
+  assert.ok(row.option.label && row.option.hint && row.option.note);
+  assert.equal(row.option.on, undefined);
+  assert.equal(row.option.off, undefined);
+  // And the note says what it is, rather than implying an enforcement. The tool
+  // allowlist and the web exclusion are enforced where they act; this is not.
+  assert.match(row.option.note, /not a rule REFUGIO enforces/);
+  assert.equal(modeSummaries().find((r) => r.id === "nvc").option, null);
+});
+
+// ── A language is data (Q5) ─────────────────────────────────
+
+test("a second language is a spec, not a second prompt", () => {
+  // §2.4 asks for the tutor to be language-parameterized so French and German
+  // are later data. This is that claim, exercised: the same builder, a
+  // different spec, and a prompt that is about French with no Spanish left in
+  // it. Nothing here ships — see the next test.
+  const french = tutorMode({
+    id: "french",
+    language: "French",
+    formal: "vous",
+    formalForms: "votre, vous, êtes",
+    recommendedTier: "8b",
+    tierReason: "unmeasured",
+    starters: ["Je voudrais pratiquer mon français", "Parlez-moi de vous"],
+  });
+  assert.equal(french.label, "French Tutor");
+  assert.equal(french.titleLabel, "French practice");
+  assert.equal(french.category, "coaching");
+  assert.match(french.prompt, /You are a French tutor/);
+  assert.match(french.prompt, /use vous and its forms — votre, vous, êtes/);
+  assert.doesNotMatch(french.prompt, /Spanish/, "the template must not leak the language it was written in");
+  assert.doesNotMatch(french.disclosure, /Spanish/);
+  // And it costs what the shipped one costs, so a language cannot arrive over
+  // budget by surprise.
+  assert.ok(2 + french.prompt.length + 4 + french.option.off.length + CRISIS_LAYER.length <= BUDGET);
+});
+
+test("only the language that was measured ships", () => {
+  // Q5, answered: Spanish alone. The template is ready and the evidence is not
+  // transferable — every failure this prompt is written against was watched in
+  // Spanish, and recommendedTier and tierReason are per-language fields exactly
+  // so a second tutor has to answer for itself.
+  assert.deepEqual(definedModes().filter((id) => MODES[id].label.endsWith("Tutor")), ["spanish"]);
+  for (const id of ["french", "german"]) {
+    assert.ok(!(id in MODE_DEFAULTS), `${id} is not in this build`);
+    assert.equal(validateMode(id, { [id]: true }).ok, false);
+  }
+});
+
+test("the tutor is pure prompt: no tools, no connector, no pairing", () => {
+  const def = MODES.spanish;
+  assert.equal(def.tools, undefined);
+  assert.equal(def.requiresConnector, undefined);
+  assert.equal(def.optionalConnector, undefined);
+  assert.equal(pairedId("spanish"), null);
+  assert.equal(modeSummaries().find((r) => r.id === "spanish").tools.length, 0);
+  assert.equal(toolRefusal("spanish", "whatsapp__send_message"), "Error: whatsapp__send_message is not available in this mode. Answer without it.");
 });

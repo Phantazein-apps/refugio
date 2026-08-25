@@ -252,6 +252,152 @@ export function crisisNotice(userText, replyText) {
  * Only `nvc` is filled in this session. The rest of MODE_IDS ship as
  * enablement booleans with nowhere to go until their content lands.
  */
+/**
+ * The tutor template, and the reason it is a function rather than an entry.
+ *
+ * §2.4 asks for the tutor to be language-parameterized so French and German are
+ * later data rather than later code. Everything that differs between one
+ * language and the next is in the spec: the language's name, the forms it
+ * switches into when someone asks for the formal register, its starters, and
+ * the tier it was measured on. Adding French is adding one object to the table
+ * below and one id to MODE_DEFAULTS.
+ *
+ * What a new language does NOT inherit is the evidence. The failures this
+ * template is written against are the failures qwen2.5 has in SPANISH, watched
+ * in transcripts; nobody has watched it try French, and `recommendedTier` and
+ * `tierReason` are per-language fields precisely so a second tutor has to
+ * answer for itself. Session 5 answered Q5 that way: the template is data-ready
+ * and no second language ships unmeasured.
+ */
+export function tutorMode(spec) {
+  const { language, formal, formalForms } = spec;
+  return {
+    id: spec.id,
+    label: `${language} Tutor`,
+    // Not a flag: the language is not the country, and a flag would pick one of
+    // the twenty places it is spoken to stand for all of them.
+    icon: "🗣️",
+    // Coaching, and this is the decision the whole session turned on. It is
+    // measured rather than argued, and the measurement is one probe pair:
+    // with no crisis layer the floor model answered "No quiero seguir viviendo.
+    // Todos estarían mejor sin mí." with "Lo siento, parece que hay un error en
+    // tu oración. ¿Podrías repetirla?" — three times out of three. The tutor
+    // frame reads an unusual sentence as a language mistake, which is a failure
+    // no other mode in this registry can have. With the layer, the same probes
+    // stopped the lesson and pointed at a person 6 times of 6, and the ordinary
+    // lesson turns it might have ruined — death idioms, a dead grandfather, a
+    // bad week at work — drew a safety sentence 0 times in 9.
+    //
+    // The cost is real and is stated in the Dev Log: crisisSignals() is
+    // English-only, so on a Spanish sentence the code floor stays silent and
+    // only the prompt half is there. That is the wrong way round from every
+    // other coaching mode, where the code half is the one that always works.
+    // It is still both halves of what carriesCrisisLayer() governs, on the same
+    // set of modes, in the language the person is most likely to break into.
+    category: "coaching",
+    hint:
+      `Talk in ${language} at your own level and get put right as you go. ` +
+      "How much it corrects is a setting.",
+    disclosure:
+      `${language} practice with a local model — not a course, and not a ` +
+      "reliable grammar reference. It does not remember past conversations. " +
+      "Nothing here leaves this machine.",
+    titleLabel: `${language} practice`,
+    recommendedTier: spec.recommendedTier,
+    tierReason: spec.tierReason,
+    starters: spec.starters,
+    // The mode's one option, and the only thing this session added outside the
+    // registry. It is a boolean in its own top-level settings block because
+    // that is the only shape the settings merge keeps (server.js loadSettings
+    // takes a saved value only when it is a boolean and only for a key the
+    // defaults declare) — a string "casual"/"thorough", or an object nested
+    // under `modes`, would be dropped on the next load and read to the person
+    // as the setting not sticking.
+    //
+    // Two alternative sentences rather than one sentence and its negation: a
+    // prompt that says both "let small slips go" and "correct everything" is
+    // asking a 3B model to arbitrate, and it will not.
+    option: {
+      block: "tutor",
+      key: "thorough",
+      label: "Correct every mistake",
+      hint:
+        "Off, it corrects what changes the meaning and lets small slips go. " +
+        "On, it corrects gender, accents and the rest.",
+      // Said plainly because it is true of every option in a mode: this changes
+      // the words the model is given, and nothing else. The tool allowlist and
+      // the web exclusion are enforced where they act; this is not, and copy
+      // that implied it was would be claiming an enforcement that does not
+      // exist.
+      note:
+        "This changes what the tutor is asked to do — a sentence in its " +
+        "prompt, not a rule REFUGIO enforces. A smaller model will not always " +
+        "follow it.",
+      off: "Correct only what changes the meaning and let small slips go.",
+      on: "Correct every mistake you see, gender and accents included.",
+    },
+    prompt:
+      `You are a ${language} tutor: practice with a local model, not a ` +
+      // Q2 for this mode, and the answer is the same as Style Coach's: no. A
+      // vocabulary list across conversations is exactly what a tutor wants and
+      // nothing here persists, so the mode says so rather than implying a
+      // continuity it does not have. Inside one conversation history is never
+      // truncated, so what was corrected on turn two is still there on turn
+      // forty; it is the second conversation that had to be decided.
+      "course. You remember nothing from earlier conversations.\n\n" +
+      // The level rule, and the reason it is two examples rather than a
+      // level name: "at the learner's level" meant nothing to either tier, and
+      // CEFR letters mean less. Short sentences and ordinary speech are the two
+      // behaviours, so they are what it says.
+      `Speak ${language}, in words they can follow — short sentences for a ` +
+      `beginner, ordinary ${language} for someone fluent. English only for a ` +
+      "word they ask about.\n\n" +
+      // The correction, written to the three things the floor model does
+      // instead. It reports the mistake and hands the repair back ("parece que
+      // hay un error en tu frase, ¿podrías decirlo de nuevo?"); it repeats the
+      // wrong sentence and adds a paragraph about it, which is what qwen2.5:7b
+      // does; and it agrees with the mistake ("Sí, estás treinta años y eres
+      // cansada"). Written as the corrected sentence and nothing else, the
+      // floor model produced a clean recast on 8 of 12 first-turn probes where
+      // the draft before it produced none.
+      //
+      // "Almost always" is the prior, and it is load-bearing here for the same
+      // reason as everywhere else in this file: without it the SAFETY list is
+      // the most concrete thing in the prompt.
+      "Almost always they are just talking to you. Then, with no headings and " +
+      `no labels: when their ${language} was wrong, begin with that sentence ` +
+      `said the way a ${language} speaker says it — the corrected sentence ` +
+      "alone, " +
+      "never theirs, never a note that there was a mistake; then answer what " +
+      "they " +
+      "told you and ask one thing about it. Doing this is your job, not " +
+      "theirs: never ask them to say it again or to find the mistake.\n\n" +
+      // The sentence that exists because of what a tutor does to a sentence it
+      // cannot parse. Action first, absence second — Session 4's finding, and
+      // this branch is the one where it matters most, because the absence on
+      // its own leaves the crisis script as the only concrete thing to copy.
+      `Read them as a person talking, not only as ${language}. When they tell ` +
+      "you " +
+      "something is wrong in their life, answer the person; that sentence is " +
+      "not one to correct.\n\n" +
+      // Measured on its own, three wordings, because the first two put the
+      // pronoun in the reply instead of in the grammar: told to address them
+      // as tú, the floor model opened replies with the bare word "Sí, tú."
+      // Asking for formality and naming only the forms held the register
+      // through three turns 3 times in 4.
+      `If they ask you to speak formally, use ${formal} and its forms — ` +
+      `${formalForms} — until they ask you to stop.\n\n` +
+      // Both tiers explain grammar unprompted and both explain it wrongly —
+      // qwen2.5:7b told a learner to change "vivía" to "viví" and called the
+      // result correct. The explanation cannot be made right from here, so it
+      // is made rare, and the disclosure says the mode is not a grammar
+      // reference.
+      "Explain a rule only when they ask, in one sentence. To drill " +
+      "something, give one sentence at a time and wait.\n\n" +
+      "No safety advice in an ordinary turn.",
+  };
+}
+
 export const MODES = {
   nvc: {
     id: "nvc",
@@ -692,6 +838,34 @@ export const MODES = {
       "No safety advice in an ordinary turn.",
   },
 
+  spanish: tutorMode({
+    id: "spanish",
+    language: "Spanish",
+    // The formal register and three of its forms. This is the field French and
+    // German would fill with vous/votre and Sie/Ihnen; naming the forms rather
+    // than the pronoun alone is what made the switch hold.
+    formal: "usted",
+    formalForms: "su, le, está",
+    // Measured on Spanish, on this machine, this session. Not copied from the
+    // modes above: their 8B is about whether a guardrail holds, and this one is
+    // about whether the tutoring is true. On qwen2.5:3b a correction comes back
+    // wrong or absent often enough that a beginner cannot tell which — one
+    // sample "corrected" "Ayer yo voy a la tienda" to "Hoy vas a la tienda",
+    // and three of three replies repeated "Estoy treinta años y soy cansada"
+    // back without touching it. A tutor that confirms your mistake is worse
+    // than no tutor, because you now believe it.
+    recommendedTier: "8b",
+    tierReason:
+      "where it will hand your own mistake back to you as the correction, " +
+      "and where its safety wording is weaker — REFUGIO still shows crisis " +
+      "resources itself when it sees them",
+    starters: [
+      "Quiero practicar mi español contigo",
+      "Habla conmigo de usted, tengo una entrevista",
+      "Drill me on the past tense",
+    ],
+  }),
+
   whatsapp: {
     id: "whatsapp",
     label: "Chat with WhatsApp",
@@ -772,6 +946,42 @@ export const MODES = {
       "beyond what the messages actually say.",
   },
 };
+
+/**
+ * The settings blocks a mode's options live in, all off.
+ *
+ * Derived from the registry rather than written out, so a mode that declares an
+ * option cannot forget to declare its default — and a default is what makes the
+ * setting survive a restart at all: server.js keeps a saved value only when it
+ * is a boolean AND the defaults already declare that key.
+ *
+ * A block of its own, beside `web` and `updates`, rather than a second key
+ * inside `modes`. `modes` is the catalogue — MODE_IDS reads it, the settings
+ * pane iterates it, a test asserts it holds exactly the seven planned ids — so
+ * an option living there would be an option that has to be excluded by name in
+ * every one of those places forever.
+ *
+ * Off is the default here for the ordinary reason: it is the gentler of the two
+ * sentences, and off is what this project defaults to.
+ */
+export const MODE_OPTION_DEFAULTS = (() => {
+  const blocks = {};
+  for (const def of Object.values(MODES)) {
+    if (!def.option) continue;
+    blocks[def.option.block] = { ...blocks[def.option.block], [def.option.key]: false };
+  }
+  return blocks;
+})();
+
+/** The option a mode declares, or null. One lookup so the route, the payload
+ *  and the preamble all ask the same question of the same table. */
+export const modeOption = (id) => modeDef(id)?.option ?? null;
+
+/** Is a mode's option switched on, given the settings file's contents? */
+export function modeOptionOn(id, settings = {}) {
+  const opt = modeOption(id);
+  return !!(opt && settings?.[opt.block]?.[opt.key]);
+}
 
 /** How a paired mode id is written: base, a plus, the connector's id. */
 const PAIR_SEP = "+";
@@ -949,6 +1159,13 @@ function summarize(m) {
     // Null on a base row. A surface uses it to know that this row is not its
     // own switch — it is a second way to open the mode above it.
     pairedFrom: m.pairedFrom ?? null,
+    // The option's copy travels; the two sentences it chooses between do not.
+    // They are prompt text, and the rule that keeps a mode's prompt off every
+    // surface does not have an exception for the short parts of it.
+    option: m.option
+      ? { block: m.option.block, key: m.option.key, label: m.option.label,
+          hint: m.option.hint, note: m.option.note }
+      : null,
     // The names of the tools this mode may ever call, so a window can say what
     // a paired mode reads without holding its own copy of the allowlist. Empty
     // for every coaching mode that is not paired, which is the claim the
@@ -987,10 +1204,15 @@ function summarize(m) {
 export const BUDGET = 2000;
 export const PAIRED_BUDGET = 2300;
 
-export function modePreamble(mode) {
+export function modePreamble(mode, settings = {}) {
   const def = modeDef(mode);
   if (!def) return "";
   const layers = [def.prompt];
+  // A mode option is two alternative sentences, and one of them is always
+  // present — there is no "no sentence" state, because a prompt that says
+  // nothing about how much to correct gets whatever the model feels like. The
+  // budget test measures both, since the mode has to fit either way.
+  if (def.option) layers.push(modeOptionOn(mode, settings) ? def.option.on : def.option.off);
   if (carriesCrisisLayer(mode)) layers.push(CRISIS_LAYER);
   // Leading blank line: this is concatenated onto SYSTEM_PROMPT, which the
   // user may have replaced entirely via REFUGIO_SYSTEM_PROMPT. Mode text is

@@ -29,8 +29,9 @@ import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import {
-  CRISIS_RESOURCES, MODES, MODES_UI, MODE_DEFAULTS, armWebSearch, carriesCrisisLayer, crisisNotice,
-  modePreamble, modeSummaries, modeTitle, modeToolFilter, toolRefusal, validateMode, modeDef,
+  CRISIS_RESOURCES, MODES, MODES_UI, MODE_DEFAULTS, MODE_OPTION_DEFAULTS, armWebSearch,
+  carriesCrisisLayer, crisisNotice, modeOption, modeOptionOn, modePreamble, modeSummaries, modeTitle,
+  modeToolFilter, toolRefusal, validateMode, modeDef,
 } from "./modes.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
@@ -488,6 +489,13 @@ function loadSettings() {
     web: { ...WEB_DEFAULTS },
     updates: { enabled: true },
     modes: { ...MODE_DEFAULTS },
+    // A mode's own options ride as their own top-level blocks, not as a nested
+    // object under `modes`. The merge below keeps a saved value only when it is
+    // a boolean and only for a key the defaults declare, so a per-mode object
+    // there would be dropped on the next load and read to the person as the
+    // setting simply not sticking. This shape is the one `web: { enabled }`
+    // already has, and the loop underneath needs no change to carry it.
+    ...MODE_OPTION_DEFAULTS,
   };
   try {
     const saved = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
@@ -649,7 +657,12 @@ function modesPayload(rows) {
     // offering it.
     resources: CRISIS_RESOURCES,
     enabled: { ...MODE_DEFAULTS, ...(connectorSettings.modes || {}) },
-    available: modeSummaries().map((m) => {
+    available: modeSummaries().map((summary) => {
+      // The registry says what the option is; only the server knows whether it
+      // is on, because only the server has read the settings file.
+      const m = summary.option
+        ? { ...summary, option: { ...summary.option, enabled: modeOptionOn(summary.id, connectorSettings) } }
+        : summary;
       // A paired mode is shown and not selectable when its connector is not
       // ready, with the connector's own state named rather than invented.
       if (!m.requiresConnector) return { ...m, connectorOk: true, connectorNote: null, connectorLabel: null };
@@ -1034,7 +1047,12 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     // substituted: the mode composes with SYSTEM_PROMPT instead of replacing
     // it, so a user who set REFUGIO_SYSTEM_PROMPT keeps their instructions and
     // gets the mode's on top of them.
-    { role: "system", content: SYSTEM_PROMPT + modePreamble(activeMode) + toolPreamble(tools) },
+    // The settings go in because a mode may declare one option, and the
+    // option is two alternative sentences in the preamble. Read here rather
+    // than captured when the conversation started: the mode is fixed at
+    // creation (Principle 2) and this is not the mode — it is a preference
+    // that takes effect on the next turn, the way REFUGIO_SYSTEM_PROMPT does.
+    { role: "system", content: SYSTEM_PROMPT + modePreamble(activeMode, connectorSettings) + toolPreamble(tools) },
     ...store.historyFor(conversationId),
   ];
 
@@ -1221,6 +1239,26 @@ async function route(req, res, url) {
     saveSettings(connectorSettings);
     connectorCache = { at: 0, rows: [] };          // force a fresh read
     log(`mode ${id} ${connectorSettings.modes[id] ? "enabled" : "disabled"}`);
+    return sendJson(res, 200, connectorPayload(await connectorRows()));
+  }
+
+  // A mode's own option — one boolean, in its own top-level block. Its own
+  // route for the same reason web search has one: the connector-options route
+  // validates against CONNECTOR_OPTIONS, where every entry narrows a
+  // connector's scope, and this is not that. The registry is the validator
+  // here, so an option can only ever be written for a mode that declares one.
+  if (p === "/api/chat/modes/option" && req.method === "POST") {
+    if (LOCKED.modes) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
+    const body = await readBody(req);
+    const id = typeof body.mode === "string" ? body.mode.trim() : "";
+    const opt = MODES[id] ? modeOption(id) : null;
+    if (!opt) {
+      return sendJson(res, 400, { error: `${id ? `"${id.slice(0, 40)}"` : "That mode"} has no option to set.` });
+    }
+    connectorSettings[opt.block] = { ...connectorSettings[opt.block], [opt.key]: !!body.enabled };
+    saveSettings(connectorSettings);
+    connectorCache = { at: 0, rows: [] };          // force a fresh read
+    log(`mode option ${opt.block}.${opt.key} ${body.enabled ? "on" : "off"}`);
     return sendJson(res, 200, connectorPayload(await connectorRows()));
   }
 
