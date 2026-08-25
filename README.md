@@ -188,6 +188,8 @@ A mode is a named frame around **one conversation**: a system prompt, a set of g
 
 On a machine deployed by MDM an administrator can narrow which modes may be switched on at all — see `allowedModes` in [`packaging/README.md`](packaging/README.md). Policy can only ever narrow: there is no setting that switches a mode on for someone.
 
+How the modes are built, what is enforced in code rather than asked for in a prompt, and what the red-team runs actually measured — including what is known *not* to work on a small model — is in [`docs/discussion-modes.md`](docs/discussion-modes.md).
+
 ### Attaching files
 
 Click the paperclip, drag a file onto the window, or paste one. Up to five per message; a file on its own, with nothing typed, is a message.
