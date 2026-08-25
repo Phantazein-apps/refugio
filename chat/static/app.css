@@ -80,8 +80,8 @@ body {
 /* The maturity label, stated where the product names itself. Not a dismissible
    banner: it is true for as long as it is true, and someone who dismissed it on
    day one would spend the whole prototype not knowing they were in one.
-   Named for the ROLE rather than the word, because the word changes — it has
-   already gone from beta to alpha, and it will move again. */
+   Named for the ROLE rather than the word, because the word changes — it went
+   from beta to alpha, back to beta on 2026-08-26, and it will move again. */
 .stage {
   font: 600 .5625rem/1 var(--font-sans); letter-spacing: .08em;
   text-transform: uppercase; color: var(--on-accent); background: var(--accent);

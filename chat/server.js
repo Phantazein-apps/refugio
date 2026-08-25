@@ -312,7 +312,7 @@ const UPDATE_CACHE = join(DATA_DIR, "update-check.json");
  *  This is a judgement, and it cuts against "nothing leaves this computer" —
  *  so it is worth stating plainly rather than burying. An update check sends
  *  no data of yours; it asks a public repository for a public commit hash, and
- *  GitHub learns an IP address asked. Set against that: this is alpha software
+ *  GitHub learns an IP address asked. Set against that: this is beta software
  *  whose bugs get fixed weekly, and a user who is never told is a user running
  *  a known-broken build for months. Defaulting to silence protects the slogan
  *  and not the person. Settings ▸ Updates turns it off, permanently, in one
