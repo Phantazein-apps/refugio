@@ -467,8 +467,19 @@ test("the picker rows carry the copy but never the prompt", () => {
   }
 });
 
-test("the settings copy says what a mode takes away", () => {
-  assert.match(MODES_UI.privacy, /no tools and no web search/);
+test("the settings copy states the promise, not this build's version of it", () => {
+  // The durable guarantees, enforced in code and true whatever ships later.
+  assert.match(MODES_UI.privacy, /never searches the web/);
+  assert.match(MODES_UI.privacy, /never sends anything on your behalf/);
+  assert.match(MODES_UI.privacy, /stays on this computer/);
+  // And the part that is only true today, kept in its own sentence so that
+  // pairing coaching modes with read-only connectors (§2.3, Session 6) reads as
+  // the planned feature it is rather than as a broken promise.
+  assert.match(MODES_UI.connectors, /In this build/);
+  assert.match(MODES_UI.connectors, /only ever be paired with connectors that read/);
+  // The one that must never soften: a coaching mode that could send would be a
+  // different product, and D4 says send-capable tools are never in its list.
+  assert.doesNotMatch(MODES_UI.privacy, /no tools/);
 });
 
 // ── The column under it ─────────────────────────────────────

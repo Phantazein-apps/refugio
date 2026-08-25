@@ -701,7 +701,8 @@ function openModePanel() {
   // Leaving is starting a new chat, so say it here rather than letting someone
   // discover it by looking for a way out.
   els.modePanel.append(el("div.mode-panel-head", {
-    text: "Modes get no connectors and no web search. Leaving one means starting a new chat.",
+    text: `${state.modes?.privacy || ""} ${state.modes?.connectors || ""} `
+      + "Leaving a mode means starting a new chat.",
   }));
 
   els.modePanel.hidden = false;

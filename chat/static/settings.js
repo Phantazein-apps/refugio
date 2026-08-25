@@ -982,6 +982,7 @@ function renderModes() {
   box.append(el("div.card", {},
     el("div.prose", { text: modes.hint || "" }),
     el("div.prose", {}, el("strong", { text: modes.privacy || "" })),
+    el("div.prose", { text: modes.connectors || "" }),
     el("div.aside", { text: modes.note || "" }),
   ));
 

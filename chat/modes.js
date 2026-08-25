@@ -346,11 +346,23 @@ export const MODES_UI = {
     "message. It cannot be changed afterwards — leaving a mode means " +
     "starting a new chat.",
   // Said in the settings pane, not only in the mode itself: the reason a
-  // coaching conversation has no connectors and no web search is a promise,
-  // and a promise the user only discovers by noticing an absence is not one.
+  // coaching conversation is missing controls is a promise, and a promise the
+  // user only discovers by noticing an absence is not one.
+  //
+  // Two sentences because two different things are true for two different
+  // reasons. The first is permanent and enforced in code — no web search on a
+  // mode turn, nothing sent on your behalf, and the conversation never leaves
+  // this computer. The second is where this build happens to be: coaching
+  // modes are offered no connectors at all, which §2.3 and Session 6 change by
+  // pairing them with read-only local ones. Writing the second as though it
+  // were the first would make a planned feature read as a broken promise.
   privacy:
-    "Modes get no tools and no web search, whatever else is switched on. " +
+    "A mode never searches the web and never sends anything on your behalf. " +
     "The conversation stays on this computer.",
+  connectors:
+    "In this build, coaching modes are also offered no connectors at all. " +
+    "When that changes, a mode will only ever be paired with connectors that " +
+    "read, and it will say which.",
   empty: "No discussion modes are available in this build yet.",
 };
 
