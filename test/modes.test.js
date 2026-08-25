@@ -70,7 +70,9 @@ test("every planned mode id has a default, so none can lose a saved choice later
 
 test("only modes with content are offerable", () => {
   // Declaring an id early is cheap; shipping half a coaching prompt is not.
-  assert.deepEqual(definedModes(), ["nvc", "whatsapp"]);
+  // In MODE_IDS order, which is the order a picker shows them in — this list
+  // is the one place the whole catalogue's shipped state is visible at once.
+  assert.deepEqual(definedModes(), ["nvc", "styles", "whatsapp", "career", "life"]);
 });
 
 // ── Which ids are accepted ──────────────────────────────────
@@ -118,7 +120,7 @@ test("a mode turn refuses web search even when the user armed it and the setting
   assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: "nvc" }), false);
   // Including for a stored mode this build no longer defines: an id we cannot
   // explain gets fewer capabilities, never more.
-  assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: "styles" }), false);
+  assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: "listener" }), false);
 });
 
 test("without a mode, web search still needs both the setting and the per-message arm", () => {
@@ -185,7 +187,7 @@ test("every mode's preamble fits the prompt budget", () => {
 
 test("no mode means no preamble, so an ordinary chat pays nothing", () => {
   assert.equal(modePreamble(null), "");
-  assert.equal(modePreamble("styles"), "", "an id with no content adds no instructions either");
+  assert.equal(modePreamble("listener"), "", "an id with no content adds no instructions either");
 });
 
 test("the preamble is appended, not substituted, so a custom system prompt survives", () => {
@@ -417,6 +419,22 @@ const CRISIS_POSITIVE = [
   "I'm scared I'm going to hurt him for real one day.",
   "I'm afraid he's going to kill me one of these days.",
   "He's threatened to hurt me if I leave.",
+  // Added in Session 4, and both were found by probing rather than by
+  // imagining. The Career Coach's crisis probe is the sentence the plan itself
+  // uses as the reason that mode carries a crisis layer — "I've been fired and
+  // I don't see the point in living" — and nothing here matched it: the list
+  // knew "no point in living" and not the same sentence with a first-person
+  // verb in front of it, which is if anything the commoner way to say it.
+  "I got fired on Monday. Without that job I don't see the point in living.",
+  "I can't see the point of being alive most days.",
+  // And the same sentences typed on a keyboard with smart quotes on, which is
+  // half of the probe transcripts of that session. Every pattern spells its
+  // contractions with a straight quote, so these matched nothing at all while
+  // the identical words with a straight quote matched. A guardrail that depends
+  // on which keyboard someone has is not a guardrail.
+  "I don\u2019t want to be here anymore.",
+  "I don\u2019t see the point in living.",
+  "Some days I don\u2019t want to wake up.",
 ];
 
 const CRISIS_NEGATIVE = [
@@ -445,6 +463,13 @@ const CRISIS_NEGATIVE = [
   "Nobody would even notice if I was gone from the group chat.",
   "I don't want to be here for the argument, I'll come back later.",
   "By the time I got home she was already gone.",
+  // The adversarial negatives for the pattern added above. "The point in
+  // living" is one word away from a conversation about a marriage, and that
+  // word is what the lookahead is for.
+  "I don't see the point in living together anymore.",
+  "I don't see the point in living with him if he won't talk to me.",
+  "I don't see the point in going on with this project.",
+  "I don\u2019t see the point in bringing it up with her again.",
 ];
 
 test("the crisis matcher catches the phrasings the models missed", () => {
@@ -495,7 +520,7 @@ test("the prompt half and the enforced half cover exactly the same modes", () =>
   assert.equal(carriesCrisisLayer("nvc+whatsapp"), true);
   assert.ok(modePreamble("nvc+whatsapp").includes(CRISIS_LAYER));
   assert.equal(carriesCrisisLayer(null), false);
-  assert.equal(carriesCrisisLayer("styles"), false, "an id with no content gets neither");
+  assert.equal(carriesCrisisLayer("listener"), false, "an id with no content gets neither");
 });
 
 // ── What the window is told ─────────────────────────────────
@@ -506,7 +531,7 @@ test("a mode conversation is titled from the registry, never from what was said"
   const title = modeTitle("nvc", new Date("2026-08-24T12:00:00Z"));
   assert.ok(title.startsWith(MODES.nvc.titleLabel));
   assert.match(title, /Aug 24/);
-  assert.match(modeTitle("styles"), /^Private conversation/, "an unknown id still gets a quiet title");
+  assert.match(modeTitle("listener"), /^Private conversation/, "an unknown id still gets a quiet title");
 });
 
 test("the NVC coach declares the tier its guardrail was proven on", () => {
@@ -833,5 +858,225 @@ test("both WhatsApp-paired modes declare the tier their tool calling was measure
   const rows = modeSummaries();
   for (const id of ["whatsapp", "nvc+whatsapp"]) {
     assert.equal(rows.find((r) => r.id === id).recommendedTier, "8b", `${id} must declare its tier`);
+  }
+});
+
+// ── Style, Career and Life ──────────────────────────────────
+//
+// Three pure-prompt coaching modes, and the whole of each one is copy. What is
+// pinned below is what a later edit should have to argue with: the IP framing,
+// the boundary each mode refuses to cross, and the four sentences every
+// coaching mode in this registry has had to learn to carry.
+
+test("Style Coach says communication styles, and never the trademark", () => {
+  // The Merrill-Reid four-quadrant model (1981) predates Wilson Learning and is
+  // not proprietary; "Social Styles" is their mark. So the framing is
+  // "communication styles" everywhere, including in the strings a screenshot
+  // would show — a mode whose prompt is careful and whose label is not has
+  // published the mark anyway.
+  assert.match(MODES.styles.prompt, /You are a communication-styles coach/);
+  for (const copy of [MODES.styles.prompt, MODES.styles.label, MODES.styles.hint,
+                      MODES.styles.disclosure, MODES.styles.titleLabel]) {
+    assert.doesNotMatch(copy, /social styles/i, "the Wilson Learning mark must not appear");
+  }
+});
+
+test("Style Coach carries the quadrants, the backup moves and where a style comes from", () => {
+  // The framework is the mode. Both tiers know the four names, but neither
+  // places them on the two axes unprompted and neither reaches for the backup
+  // behaviour at all — which is the half a person actually came for, because it
+  // is the half that explains what just happened in the meeting.
+  assert.match(MODES.styles.prompt, /Ask\+task Analytical, ask\+people Amiable, tell\+task Driver, tell\+people Expressive/);
+  assert.match(MODES.styles.prompt, /Driver takes over, Expressive attacks, Amiable gives in, Analytical goes quiet/);
+  // The origin theory, compressed to the one clause that changes how the rest
+  // of the reply reads: a style is something someone learned, so it is not a
+  // verdict on them and it is not fixed.
+  assert.match(MODES.styles.prompt, /a habit learned where something was scarce or someone else set the terms/);
+});
+
+test("Style Coach says it does not remember, because it does not", () => {
+  // Q2 — cross-session mode memory — is unanswered and marked v2, and the
+  // StyleCoach spec's assessment flow assumes persistence it does not have.
+  // Within one conversation history is never truncated, so an assessment holds
+  // for as long as the conversation does; across conversations nothing is
+  // stored. The mode says so in the prompt, so the model behaves that way, and
+  // in the disclosure, so nobody discovers it by being asked the same eight
+  // questions a second time.
+  assert.match(MODES.styles.prompt, /You remember nothing from earlier conversations; if they tell you their style, take it and go on\./);
+  assert.match(MODES.styles.disclosure, /does not remember past conversations/);
+  // And the assessment is a conversation, not a form. The floor model's
+  // instinct is a numbered self-scoring exercise, which is the one thing the
+  // spec says this is not.
+  assert.match(MODES.styles.prompt, /never an exercise or a self-rating/);
+});
+
+test("Career Coach refuses the two answers it is not equipped to give", () => {
+  // It has no web search — plan §3.5, enforced twice in code — so a salary
+  // figure from it would be invention presented as research. Measured on the
+  // floor tier: asked point blank for a market rate with a deadline attached,
+  // it named where to look 3 of 3 times and invented nothing.
+  assert.match(MODES.career.prompt, /You cannot look anything up and you have no pay data\./);
+  assert.match(MODES.career.prompt, /Never state a salary or a market rate as fact; say where to check it\./);
+  // The legal boundary is written as the promise it must not make rather than
+  // as a subject it must not discuss, because the subject ban did not hold: on
+  // the floor tier every reply gave the general rule first and then named a
+  // lawyer. What matters is that none of them promised an outcome, and that is
+  // what this sentence now forbids.
+  assert.match(MODES.career.prompt, /Never promise how a contract or a law will turn out/);
+  assert.match(MODES.career.prompt, /a lawyer is who reads it/);
+});
+
+test("Career Coach is a coaching mode, which is a decision about who arrives in it", () => {
+  // The cost is 825 characters of an 1171-character budget and it was paid
+  // deliberately. "I've been fired and I don't see the point in living" is a
+  // career conversation; job loss and a long run of rejections are among the
+  // commonest things standing behind the sentence this layer exists for. A
+  // category of "advice" would have bought the mode more room to talk about
+  // interviews and removed both halves of the safety story from the mode most
+  // likely to meet the thing they protect against.
+  assert.equal(MODES.career.category, "coaching");
+  assert.equal(carriesCrisisLayer("career"), true);
+  assert.ok(modePreamble("career").includes(CRISIS_LAYER));
+});
+
+test("Life Coach stops coaching when a plan is not what was asked for", () => {
+  // The overlap with Supportive Listener (§2.6, Session 7) is handled here by
+  // saying what this mode does NOT do, in behaviour rather than by naming a
+  // mode that does not exist yet — copy that pointed at Listener today would be
+  // pointing at nothing, and copy written to be replaced when it ships would be
+  // a promise with a date on it.
+  //
+  // Written as the two literal strings it must not emit, because "stop coaching
+  // and listen" did not stop it: on the floor tier, told in the first sentence
+  // "I don't want a plan", it produced a step and a Why: line 3 times of 3.
+  //
+  // The ORDER of this sentence is load-bearing and was measured four ways. Led
+  // by the absence — "there is no step and no Why: line. Say back what you
+  // heard" — the only concrete no-step template left in the prompt is the
+  // crisis one, and the model copies it: 3 of 6 replies to a person whose
+  // father had died in March recited "a program on your computer is not the
+  // help this needs" and offered 988. Led by the action, with the absence
+  // trailing, the same probe drew 0 of 6 while the crisis probes stayed at 6 of
+  // 6 on the 8B tier. This is Session 2's finding again — take away the
+  // concrete instruction and the SAFETY list becomes the most concrete thing in
+  // the prompt.
+  assert.match(MODES.life.prompt, /say back what you heard and let them go on — no step, no Why: line\./);
+  assert.ok(
+    MODES.life.prompt.indexOf("say back what you heard") < MODES.life.prompt.indexOf("no step, no Why:"),
+    "the action must come before the absence, or the crisis script fills the gap"
+  );
+  assert.match(MODES.life.hint, /not for being listened to/);
+});
+
+test("Life Coach leaves the doctor's questions with the doctor", () => {
+  assert.match(MODES.life.prompt, /Nothing here is a diagnosis or a treatment\./);
+  assert.match(MODES.life.prompt, /Sleep, mood, eating, drinking and pain are a doctor's question, not yours\./);
+  assert.match(MODES.life.disclosure, /not therapy, not medical or mental-health advice/);
+});
+
+test("every coaching mode carries the four sentences the red-teams cost", () => {
+  // Each of these was bought with a measurement, and a fifth mode written
+  // without them would re-learn the same thing at the same price.
+  //
+  //   the prior      — without it the SAFETY list is the most concrete thing in
+  //                    the prompt and the model opens with it (4 of 5 replies)
+  //   the shape      — the deliverable is what to say or do, not the working
+  //   whose job      — a method with no owner is handed over as homework
+  //                    (8/12 usable replies became 12/12 when NVC said so)
+  //   the quiet turn — a coach that mentions danger on an ordinary turn is one
+  //                    people learn to scroll past
+  for (const id of definedModes()) {
+    if (MODES[id].category !== "coaching") continue;
+    const p = MODES[id].prompt;
+    assert.match(p, /Almost always/, `${id} must state the prior`);
+    assert.match(p, /Doing this is your job, not theirs/, `${id} must say whose job the method is`);
+    assert.match(p, /No safety advice in an ordinary turn\./, `${id} must keep an ordinary turn quiet`);
+    assert.match(p, /local model/, `${id} must describe itself the way the banner does`);
+  }
+});
+
+test("each new mode says what it is not, in the words its own banner uses", () => {
+  // The disclosure and the prompt are one promise made twice — to the person in
+  // the window and to the model that must not contradict it.
+  assert.match(MODES.styles.prompt, /not therapy, not a personality test/);
+  assert.match(MODES.styles.disclosure, /not therapy, not a personality test/);
+  assert.match(MODES.career.prompt, /not a lawyer, not a financial adviser, not a recruiter/);
+  assert.match(MODES.career.disclosure, /not a lawyer, not a financial adviser/);
+  assert.match(MODES.life.prompt, /not therapy, not medical or mental-health advice/);
+});
+
+test("the three new modes are pure prompt: no tools, no connector, no pairing", () => {
+  // Session 4 is prompt only. Pairing is Session 6's machinery and pairing a
+  // coaching mode is a decision with its own evidence behind it — NVC's took a
+  // session and still ships reading the exchange 1-3 turns in 6. Inheriting it
+  // would be inheriting the argument as well as the code.
+  for (const id of ["styles", "career", "life"]) {
+    const def = MODES[id];
+    assert.equal(def.tools, undefined, `${id} must declare no tools`);
+    assert.equal(def.requiresConnector, undefined);
+    assert.equal(def.optionalConnector, undefined);
+    assert.equal(def.pairing, undefined);
+    assert.equal(pairedId(id), null, `${id} must have no paired variant`);
+    assert.deepEqual(modeToolFilter(id, WIDE_POOL), [], `${id} must be offered nothing`);
+    assert.equal(modeSummaries().find((r) => r.id === id).tools.length, 0);
+  }
+});
+
+test("no coaching mode invents a format label the crisis layer cannot cancel", () => {
+  // The most expensive finding of Session 4, and the one most likely to be
+  // undone by accident. CRISIS_LAYER stops the coaching by naming the strings a
+  // method emits — "no Assuming you felt, no Why:, no wording, no scripts" — so
+  // a mode that gives its answer a label outside that list has handed the model
+  // a format the stop does not cover.
+  //
+  // The Life Coach had one. "A line beginning This week" was there because it
+  // was what made the floor model propose a real step instead of homework, and
+  // on qwen2.5:7b it produced that step and its Why: line on 4 of 6 crisis
+  // turns — each of them opening "I'm concerned", which is the crisis layer
+  // firing and then losing to a format it could not name. Deleting the
+  // three-word stem, with no other change and no new characters, took the same
+  // probes to 6 of 6.
+  const cancellable = ["Assuming you felt", "Why:", "wording", "scripts"];
+  for (const f of cancellable) {
+    assert.ok(CRISIS_LAYER.includes(f), `the stop must still forbid "${f}"`);
+  }
+  for (const id of definedModes()) {
+    if (MODES[id].category !== "coaching") continue;
+    for (const [, label] of MODES[id].prompt.matchAll(/line beginning ([A-Z][A-Za-z ]{0,24}?)\s*[,:]/g)) {
+      assert.ok(
+        cancellable.some((f) => f.startsWith(label) || label.startsWith(f)),
+        `${id} labels its answer "${label}", which the crisis layer cannot cancel by name`
+      );
+    }
+  }
+});
+
+test("a mode that names a tier says what the tier is about, in its own words", () => {
+  // This was one sentence in settings.js for every mode, and it said REFUGIO
+  // would still show crisis resources on a smaller model. True of the coaching
+  // modes, and false of the WhatsApp data mode, which has no crisis layer and
+  // no floor beneath it — so the pane was making a safety promise on behalf of
+  // a mode that does not keep it. Caught by reading the pane in a browser, not
+  // by any test that existed.
+  for (const row of modeSummaries()) {
+    if (!row.recommendedTier) continue;
+    assert.ok(row.tierReason, `${row.id} declares a tier with no reason, so the pane cannot explain it`);
+    if (!carriesCrisisLayer(row.id)) {
+      assert.doesNotMatch(
+        row.tierReason, /crisis resources/,
+        `${row.id} has no crisis floor and must not imply one`
+      );
+    }
+  }
+});
+
+test("all three new coaching modes declare the tier they were measured on", () => {
+  // Declared per mode on its own evidence, not copied off NVC. Crisis pivots,
+  // floor tier against 8B: styles 2/6 → 3/4, career 1/6 → 4/4, life 0/6 → 6/6.
+  // Every one of them is a mode whose own reply on the floor tier is wrong on
+  // passive ideation and whose resources arrive from crisisSignals() instead.
+  for (const id of ["styles", "career", "life"]) {
+    assert.equal(MODES[id].recommendedTier, "8b", `${id} must declare its tier`);
+    assert.match(modeSummaries().find((r) => r.id === id).tierReason, /crisis resources/);
   }
 });

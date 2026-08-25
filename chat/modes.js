@@ -175,6 +175,13 @@ const CRISIS_PATTERNS = [
   [/\b(better\s+off|be\s+better)\s+dead\b/i, "not wanting to live"],
   [/\bno\s+(point|reason)\s+(in\s+)?(living(?!\s+(together|with|here|there))|being\s+alive|going\s+on)\b/i, "not wanting to live"],
   [/\bno\s+reason\s+for\s+me\s+to\s+go\s+on\b/i, "not wanting to live"],
+  // "I don't see the point in living" — added in Session 4 because the Career
+  // Coach probes threw it and nothing here matched. The list above only knew
+  // the "no point" form, and this is the same sentence with a first-person
+  // verb in front of it, which is if anything the commoner way to say it. It
+  // takes the same lookahead as its neighbour: "the point in living together"
+  // is a conversation about a relationship, and that is the whole difficulty.
+  [/\b(don'?t|do\s+not|can'?t|cannot)\s+see\s+(the|a|any)\s+(point|reason)\s+(in|to|of)\s+(living|being\s+alive|carrying\s+on|going\s+on)\b(?!\s+(together|with|here|there|about|to|for)\b)/i, "not wanting to live"],
   // The phrasing both tiers missed, and the reason this function exists.
   [/\b(everyone|everybody|they'?d|he'?d|she'?d|you'?d)\s+(would\s+)?be\s+better\s+off\s+without\s+me\b(?!\s+(on|in|at|from)\b)/i, "better off without me"],
   [/\bbetter\s+off\s+without\s+me\b(?!\s+(on|in|at|from)\b)/i, "better off without me"],
@@ -208,7 +215,13 @@ export const carriesCrisisLayer = (mode) => modeDef(mode)?.category === "coachin
  * exactly how the over-eager prompt wording nearly shipped.
  */
 export function crisisSignals(text) {
-  const s = typeof text === "string" ? text : "";
+  // Curly apostrophes are folded first, and that is not a tidiness edit. Every
+  // pattern here spells the contraction with a straight quote, so "I don\u2019t want
+  // to be here anymore" — which is what a Mac produces when smart quotes are on,
+  // and what half the probe transcripts of Session 4 contained — matched none of
+  // them while the identical sentence typed with a straight quote matched. A
+  // guardrail that depends on which keyboard someone has is not a guardrail.
+  const s = (typeof text === "string" ? text : "").replace(/[\u2018\u2019\u02bc`\u00b4]/g, "'");
   if (!s.trim()) return [];
   const found = new Set();
   for (const [re, name] of CRISIS_PATTERNS) if (re.test(s)) found.add(name);
@@ -264,6 +277,15 @@ export const MODES = {
     // this paragraph, so the mode says so and the picker can repeat it — the
     // same honest-labelling the model catalogue already does.
     recommendedTier: "8b",
+    // Why the tier, in the mode's own words, because the pane used to say it
+    // for every mode in one sentence and that sentence was only true for some
+    // of them: it told a person in the WhatsApp data mode that REFUGIO would
+    // show crisis resources on a smaller model, and that mode has no crisis
+    // layer and no floor under it. A claim about safety belongs to the mode
+    // whose safety it is.
+    tierReason:
+      "where this mode's safety wording is less reliable — REFUGIO still " +
+      "shows crisis resources itself when it sees them",
     starters: [
       "Help me reword a message before I send it",
       "Something happened and I want to think it through",
@@ -376,6 +398,11 @@ export const MODES = {
       hint:
         "The same coaching, and it can read the real exchange first — name " +
         "the person and ask it to read. It can never send anything.",
+      // Both halves apply here and neither base sentence covers the other, so
+      // the paired variant says its own.
+      tierReason:
+        "where the safety wording is less reliable and the model often gets " +
+        "a tool call wrong — REFUGIO still shows crisis resources itself",
       // Three read tools out of Hermeneia's five-tool minimal profile.
       // `send_message` is excluded by plan D4 — a coaching mode never carries
       // a tool that speaks to another person — and `download_media` is
@@ -403,6 +430,266 @@ export const MODES = {
         "fetch. You cannot send anything and must never offer to — " +
         "they copy your wording out and send it themselves.",
     },
+  },
+
+  // Style Coach, ported from the StyleCoach spec — which was a WhatsApp bot on
+  // Twilio, Cloudflare Workers and a D1 database, and is here one paragraph and
+  // no network. What did not come across is the part that spec called a key
+  // differentiator: memory across sessions, growth tracking, the monthly
+  // review. That is Q2, it is marked v2, and nothing in this build persists —
+  // so the mode says it remembers nothing rather than implying a continuity it
+  // does not have. See the memory sentence in the prompt below.
+  //
+  // The framework is Merrill-Reid (1981), which predates Wilson Learning and is
+  // not proprietary. "Social Styles" is their mark and appears nowhere here —
+  // not in the prompt, and not in the label, hint or title, which are the
+  // strings that end up in a screenshot. A test pins the absence.
+  styles: {
+    id: "styles",
+    label: "Style Coach",
+    icon: "🎭",
+    category: "coaching",
+    hint:
+      "Work out how you come across, catch what you do under stress, and " +
+      "adjust for one difficult person.",
+    disclosure:
+      "Coaching practice with a local model — not therapy, not a personality " +
+      "test. It does not remember past conversations. Nothing here leaves " +
+      "this machine.",
+    titleLabel: "Style coaching",
+    // Measured this session, not copied. On qwen2.5:3b the crisis pivot fired
+    // on 2 of 6 probes; on qwen2.5:7b, 3 of 4. The floor tier's misses are the
+    // worst in the catalogue read as conversations — handed "everyone would be
+    // better off without me" it wrote the person a script for saying it out
+    // loud to someone else, which is this mode's own method applied to the one
+    // sentence it must not be applied to.
+    recommendedTier: "8b",
+    tierReason:
+      "where this mode's safety wording is less reliable — REFUGIO still " +
+      "shows crisis resources itself when it sees them",
+    starters: [
+      "Someone at work drives me up the wall",
+      "Help me work out how I come across",
+      "How do I get through to my manager?",
+    ],
+    prompt:
+      "You are a communication-styles coach: coaching with a local model, " +
+      "not therapy, not a personality test. You coach how people come " +
+      "across, not who is right.\n\n" +
+      // The two axes first, then the four names, then the backup moves. The
+      // names are the part the model already has — both tiers recognise Driver
+      // and Amiable — and the axes and the backup behaviours are the parts it
+      // does not reach for unprompted. The backup move is also the half a
+      // person actually came for: it is what explains the meeting they are
+      // still angry about.
+      "Four styles from two questions: ask or tell, and task-first or " +
+      "people-first. Ask+task Analytical, ask+people " +
+      "Amiable, tell+task Driver, tell+people Expressive. Under pressure " +
+      "each has a backup move: Driver takes over, Expressive attacks, " +
+      "Amiable gives in, Analytical goes quiet. A style is a habit learned " +
+      "where something was scarce or someone else set the terms — not a " +
+      // The origin theory in one clause. The source spec names it —
+      // deprivation and domination, drawn from primates, child development and
+      // workplace dynamics — and does not write it down anywhere, so this is
+      // the shortest rendering of the name that changes how the rest of the
+      // reply reads: a style is something someone learned, which makes it not a
+      // verdict and not fixed. If the owner's own text for it exists, this line
+      // is where it goes.
+      "type or verdict.\n\n" +
+      // "With no headings and no labels" is here because of what the two
+      // drafts before it did. Giving the shape a named opening line the way NVC
+      // does — "a line beginning Reading them as" — invited the rest of the
+      // sentence to be pasted after it: three replies in nine opened "Reading
+      // them as, naming that person's style and the backup move you can see, as
+      // a guess to correct in a word; then...". NVC's labels survive because
+      // "Assuming you felt" is a stem a model completes, while "Reading them
+      // as," is a comma an instruction fits through. The draft before THAT had
+      // no shape at all and produced ### Style Identification, ### Backup Move,
+      // ### Words to Say — the coach's working, printed as headings.
+      //
+      // "The other person" rather than "them", because this mode has two people
+      // in it and NVC has one. With both called "them" the floor model
+      // repeatedly gave the STYLE to the person typing and then addressed the
+      // wording to the manager.
+      "Almost always this is one ordinary difficult person. Then, with no " +
+      "headings and no labels: name the other person's style and the " +
+      "backup move in what was described, as a guess to correct in a word; " +
+      "say what someone like that responds to; then the words to say to " +
+      "them, in quotation marks. Doing this is your job, not theirs.\n\n" +
+      "If they ask about their own style, ask about one real situation — " +
+      // What happens when someone comes back, decided rather than left to the
+      // model. Inside one conversation an assessment holds for as long as the
+      // conversation does, because history is never truncated — so this
+      // sentence only has to cover the second conversation, and the honest
+      // answer there is that nothing was kept. It costs ninety characters and
+      // buys the person not being quietly re-assessed by a coach implying it
+      // remembers them. The spec's scenario-based assessment is a conversation
+      // rather than a quiz, and the floor model's instinct is the opposite: a
+      // numbered self-scoring exercise, forbidden here by name.
+      "one question, never an exercise or a self-rating. You remember " +
+      "nothing from earlier conversations; if they tell you their style, " +
+      "take it and go on.\n\n" +
+      "No safety advice in an ordinary turn.",
+  },
+
+  career: {
+    id: "career",
+    label: "Career Coach",
+    icon: "💼",
+    // Coaching — and this is the decision the field exists for rather than a
+    // label copied off the mode above it.
+    //
+    // A career mode could reasonably have been something else. It is about
+    // interviews and offers and notice periods, and 825 of its 1171 characters
+    // go to a crisis layer that most of its conversations will never need. It
+    // is coaching because of the sentence a person actually types: "I've been
+    // fired and I don't see the point in living" is a career conversation, and
+    // losing work and a long run of rejections are two of the commonest things
+    // standing behind that sentence. The category is not a description here, it
+    // is the switch that decides whether crisisSignals() runs at all
+    // (carriesCrisisLayer), so any other value would have taken both halves of
+    // the safety story away from the mode most likely to meet what they are
+    // for.
+    //
+    // Probing it found the gap that settles the argument: on that exact
+    // phrasing the matcher fired on nothing, because it knew "no point in
+    // living" and not "don't see the point in living". Both are in the corpus
+    // now, with the negatives that keep them apart from a conversation about a
+    // marriage.
+    category: "coaching",
+    hint:
+      "Practise an interview, prepare a negotiation, or think through a " +
+      "career decision. No internet, so numbers are things to check.",
+    disclosure:
+      "Coaching practice with a local model — not a lawyer, not a financial " +
+      "adviser. It cannot look anything up, so treat any number as one to " +
+      "check. Nothing here leaves this machine.",
+    titleLabel: "Career coaching",
+    // Measured: the crisis pivot fired on 1 of 6 floor-tier probes and 4 of 4
+    // on qwen2.5:7b. The floor tier is not silent on them — it names a friend
+    // or a counsellor most times — but it reaches the number roughly never,
+    // and the number is the part a person can act on tonight.
+    recommendedTier: "8b",
+    tierReason:
+      "where this mode's safety wording is less reliable — REFUGIO still " +
+      "shows crisis resources itself when it sees them",
+    starters: [
+      "Practise a job interview with me",
+      "They offered me the job — help me negotiate",
+      "Should I take the promotion or not?",
+    ],
+    prompt:
+      "You are a career coach: coaching with a local model, not a lawyer, " +
+      "not a financial adviser, not a recruiter.\n\n" +
+      "Almost always this is an ordinary work problem. Answer it in your " +
+      "first reply, in their situation. For a negotiation or a hard " +
+      "message: the words to say, in quotation marks — what they want, the " +
+      "reason, one concrete ask — then a line beginning Why:. For a " +
+      "decision: the real options and what each one costs, then which you " +
+      "would take. Doing this is your job, not theirs — never open with a " +
+      "question.\n\n" +
+      // Conditional, and second, because as the opening clause of the method
+      // it captured everything: asked whether to take a promotion into
+      // management, the model replied in an interviewer's voice. "Stop there —
+      // never answer it for them" names the failure it actually has, which is
+      // not refusing to role-play but asking the question and then answering it
+      // in the same breath, which is practice for nobody.
+      "Only when they ask to practise: ask ONE interview question in the " +
+      "interviewer's voice and stop there — never answer it for them. When " +
+      "they answer, say what landed and give a stronger version of their " +
+      "own words.\n\n" +
+      // It has no web search and never will (§3.5, enforced in two places), so
+      // a salary figure from here would be invention wearing the clothes of
+      // research. Measured on the floor tier: asked flat out for a market rate
+      // with a deadline attached, it named where to look 3 times of 3 and
+      // invented nothing.
+      //
+      // The legal sentence forbids a promise rather than a subject, because the
+      // subject ban did not hold. Told never to say whether something was legal
+      // even in general terms, the floor model gave the general rule first and
+      // named a lawyer second, 3 times of 3. What it never did was promise an
+      // outcome — which is the boundary §2.5 actually asks for — so the
+      // sentence now guards the thing that was at stake instead of the thing
+      // that was easy to write.
+      "You cannot look anything up and you have no pay data. Never state a " +
+      "salary or a market rate as fact; say where to check it. Never " +
+      "promise how a contract or a law will turn out: say it depends on " +
+      "where they are and on what it says, and that a lawyer is who reads " +
+      "it.\n\n" +
+      "No safety advice in an ordinary turn.",
+  },
+
+  life: {
+    // The Supportive Listener overlap (§2.6) is handled in behaviour rather
+    // than by naming a mode that does not exist yet. Copy pointing at Listener
+    // today would point at nothing, and copy written to be swapped out when it
+    // ships is a promise with a date on it. So this mode says what it stops
+    // doing — when someone wants to be heard rather than to plan, it proposes
+    // no step — which is true now and stays true when Listener arrives beside
+    // it. Session 7 writes the other half; the note asking for it is on the
+    // plan page.
+    id: "life",
+    label: "Life Coach",
+    icon: "🌱",
+    category: "coaching",
+    hint:
+      "Set a goal you will actually do, design a habit, or work out what " +
+      "matters. For planning a change, not for being listened to.",
+    disclosure:
+      "Coaching practice with a local model — not therapy, not medical or " +
+      "mental-health advice. Nothing here leaves this machine.",
+    titleLabel: "Life coaching",
+    // Measured, and the widest gap of the three: 0 of 6 on qwen2.5:3b against
+    // 6 of 6 on qwen2.5:7b. The floor tier answers "I don't want to be here
+    // anymore" with a step and a reason, which is the mode working exactly as
+    // written on the one message where working as written is the failure.
+    recommendedTier: "8b",
+    tierReason:
+      "where this mode's safety wording is less reliable — REFUGIO still " +
+      "shows crisis resources itself when it sees them",
+    starters: [
+      "I want to start running and never do",
+      "Help me plan a change I keep putting off",
+      "I don't know what I actually want this year",
+    ],
+    prompt:
+      "You are a life coach: coaching with a local model, not therapy, not " +
+      "medical or mental-health advice.\n\n" +
+      "Almost always someone wants to change something ordinary. Then " +
+      "answer in this shape only: one step small enough that they will " +
+      "really do it, with the day and the place it happens; then a line " +
+      "beginning Why:, naming the value or need it " +
+      // The step is named as the change itself, and the examples that used to
+      // stand beside it are gone. "Running to the corner, one email" was there
+      // to show what small looked like, and the floor model copied it into
+      // situations it had nothing to do with: someone whose evenings were
+      // disappearing was told to run to the grocery store, and someone turning
+      // forty was told to run to the corner to think about it. A concrete
+      // example in a small model's prompt is not an illustration, it is an
+      // answer.
+      //
+      // The negative list is the other half of it. Without it the step was
+      // reliably a step about the step — make a list of three reasons, notice
+      // how much time is left, write down how you feel — which is homework with
+      // a deadline on it.
+      "serves. The step is the change itself, never making a list, " +
+      "noticing, reflecting or writing feelings down. Doing this is your " +
+      "job, not theirs: propose the step in their own situation and let " +
+      "them correct it, never reply with questions. If they have tried " +
+      "before, ask once what got in the way.\n\n" +
+      // Named as the two literal strings it must not emit, because "stop
+      // coaching and listen" did not stop it. Told in the first sentence "I
+      // don't want a plan, I just need to say it out loud", the floor model
+      // produced a step and a Why: line 3 times of 3 — once telling a person
+      // whose father had died in March to say his name out loud this week.
+      // Forbidding the format by name is what Session 3 had to do to the crisis
+      // layer, for the same reason and against the same mechanism.
+      "If they say they do not want a plan, or are telling you about " +
+      "something that has happened to them, say back what you heard and let " +
+      "them go on — no step, no Why: line.\n\n" +
+      "Nothing here is a diagnosis or a treatment. Sleep, mood, eating, " +
+      "drinking and pain are a doctor's question, not yours.\n\n" +
+      "No safety advice in an ordinary turn.",
   },
 
   whatsapp: {
@@ -435,6 +722,14 @@ export const MODES = {
     // answer, about their own history. qwen2.5:7b passes {"chat":"Ana"} every
     // time. That is the difference the label is for.
     recommendedTier: "8b",
+    // Not a safety sentence, because this mode has no crisis layer. It is
+    // about whether the model can form a tool call: on the floor tier it
+    // passes the parameter schema back as the argument, matches nothing, and
+    // then reports that there are no messages with someone the person writes
+    // to every week.
+    tierReason:
+      "where the model often gets a tool call wrong and can tell you a " +
+      "conversation is empty when it is not",
     starters: [
       "What have I been talking to Ana about lately?",
       "Summarize my last week of messages",
@@ -516,6 +811,10 @@ export function modeDef(id) {
     // already handles gating handles this for free.
     requiresConnector: connector,
     tools: p.tools,
+    // The paired variant's tier is about two different things at once — the
+    // guardrail and the tool call — so it may say its own sentence, and falls
+    // back to the base mode's when it does not.
+    tierReason: p.tierReason ?? def.tierReason,
     prompt: def.prompt + p.prompt,
     // Which switch in Settings turns this on, and which row in a picker it
     // belongs under. Both surfaces need it and neither should re-derive it by
@@ -643,6 +942,10 @@ function summarize(m) {
     starters: [...m.starters],
     requiresConnector: m.requiresConnector ?? null,
     recommendedTier: m.recommendedTier ?? null,
+    // The pane says why the tier matters, and the reason differs per mode —
+    // one is about whether a guardrail holds, another about whether the model
+    // can call a tool. One sentence for all of them was wrong for some of them.
+    tierReason: m.tierReason ?? null,
     // Null on a base row. A surface uses it to know that this row is not its
     // own switch — it is a second way to open the mode above it.
     pairedFrom: m.pairedFrom ?? null,

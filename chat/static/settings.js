@@ -1036,14 +1036,20 @@ function renderModes() {
       }
     }
     // Honest labelling, the same as the model picker does. The tier is not a
-    // preference for bigger models: on a smaller one the mode's safety wording
+    // preference for bigger models: on a smaller one something about the mode
     // was measured to hold less well, and saying so is cheaper than implying
     // every model behaves the same.
-    if (m.recommendedTier && !tierMet(active, m.recommendedTier)) {
+    //
+    // WHY the reason comes from the payload rather than from here: this used to
+    // be one sentence for every mode, and it said REFUGIO would show crisis
+    // resources on a smaller model. That is true of the coaching modes and
+    // false of the WhatsApp data mode, which has no crisis layer and no floor
+    // beneath it — so the pane was making a safety promise on behalf of a mode
+    // that does not keep it. Each mode now says what its own tier is about.
+    if (m.recommendedTier && m.tierReason && !tierMet(active, m.recommendedTier)) {
       card.append(el("div.aside.warn", {
         text: `Works best on an ${m.recommendedTier.toUpperCase()} model or larger. `
-          + `You are running ${active || "a smaller model"}, where this mode's safety wording is `
-          + `less reliable — REFUGIO still shows crisis resources itself when it sees them.`,
+          + `You are running ${active || "a smaller model"}, ${m.tierReason}.`,
       }));
     }
     const note = managedNote("modes");
