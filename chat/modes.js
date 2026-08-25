@@ -283,10 +283,13 @@ export function tutorMode(spec) {
     // Todos estarían mejor sin mí." with "Lo siento, parece que hay un error en
     // tu oración. ¿Podrías repetirla?" — three times out of three. The tutor
     // frame reads an unusual sentence as a language mistake, which is a failure
-    // no other mode in this registry can have. With the layer, the same probes
-    // stopped the lesson and pointed at a person 6 times of 6, and the ordinary
-    // lesson turns it might have ruined — death idioms, a dead grandfather, a
-    // bad week at work — drew a safety sentence 0 times in 9.
+    // no other mode in this registry can have. With the layer and nothing else
+    // changed, the same probes stopped the lesson and pointed at a person 6
+    // times of 6, and the ordinary lesson turns it might have ruined — death
+    // idioms, a dead grandfather, a bad week at work — drew a safety sentence
+    // 0 times in 9. That pair is what the category was decided on; the prompt
+    // was rewritten several times afterwards and the shipped wording measures
+    // lower, so the Dev Log carries the rates rather than this comment.
     //
     // The cost is real and is stated in the Dev Log: crisisSignals() is
     // English-only, so on a Spanish sentence the code floor stays silent and
@@ -306,8 +309,9 @@ export function tutorMode(spec) {
     recommendedTier: spec.recommendedTier,
     tierReason: spec.tierReason,
     starters: spec.starters,
-    // The mode's one option, and the only thing this session added outside the
-    // registry. It is a boolean in its own top-level settings block because
+    // The mode's one option, and the one thing in this file that needs code
+    // elsewhere: a settings block, a route, and a row in the pane. It is a
+    // boolean in its own top-level settings block because
     // that is the only shape the settings merge keeps (server.js loadSettings
     // takes a saved value only when it is a boolean and only for a key the
     // defaults declare) — a string "casual"/"thorough", or an object nested
