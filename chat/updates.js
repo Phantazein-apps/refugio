@@ -118,10 +118,37 @@ export async function remoteHead(dir, branch) {
   }
 }
 
+/** Does this checkout already contain that commit?
+ *
+ *  Asked because "different hash" is not the same question as "older". A
+ *  maintainer's clone is routinely AHEAD of the branch it tracks, and the
+ *  panel was telling them an update was available to a commit sixteen behind
+ *  them — which `git pull --ff-only` then correctly refused to do anything
+ *  about, so the notice never cleared however many times they ran it.
+ *
+ *  Local only: `merge-base --is-ancestor` reads the object store and touches
+ *  no network. A commit we have never fetched is not a valid object, git exits
+ *  non-zero, and "not contained" is exactly the right answer for it.
+ */
+export async function contains(dir, sha) {
+  if (!sha) return false;
+  try {
+    await git(["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: dir });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Combine local and remote into the shape the UI renders. Pure, so the
  *  interesting cases are testable without a network or a repository. */
 export function describe({ local, remote, checkedAt = null, enabled = true }) {
-  const behind = !!(local?.supported && remote?.sha && local.sha && remote.sha !== local.sha);
+  // Three conditions, and the third is the one this got wrong for a week: a
+  // hash that differs from HEAD is only an update if this checkout does not
+  // already have it. `remote.contained` is answered by contains() above; when
+  // the caller cannot answer it the field is absent and this reads as before.
+  const behind = !!(local?.supported && remote?.sha && local.sha
+    && remote.sha !== local.sha && !remote.contained);
   return {
     enabled,
     supported: !!local?.supported,
@@ -159,9 +186,28 @@ export function writeCache(path, data) {
   try { writeFileSync(path, JSON.stringify(data, null, 2)); } catch { /* read-only home; not fatal */ }
 }
 
-/** Is a background check due? Only ever true when the user has left checks on. */
-export function isDue(cache, now = Date.now()) {
+/** Is a background check due? Only ever true when the user has left checks on.
+ *
+ *  A cached answer is about the branch it was taken on. Switching channels —
+ *  v1.0.3 to v2.0.0-beta.2, or a working clone moving between branches — makes
+ *  yesterday's hash an answer to a question nobody asked, so it is due again
+ *  immediately rather than tomorrow. The `branch` field has always been
+ *  written into the cache; nothing read it until it caused this. */
+export function isDue(cache, now = Date.now(), branch = null) {
   if (!cache?.checkedAt) return true;
+  if (branch && cache.branch && cache.branch !== branch) return true;
   const last = Date.parse(cache.checkedAt);
   return !Number.isFinite(last) || now - last >= CHECK_INTERVAL_MS;
+}
+
+/** The cached answer, or nothing when it is about a different branch.
+ *
+ *  Separate from isDue so the two uses cannot drift: one decides whether to
+ *  ask again, this decides whether to SHOW what was cached. Showing a hash
+ *  from another branch is how "the main branch has moved to <a commit on a
+ *  feature branch>" reached a screen. */
+export function cachedFor(cache, branch) {
+  if (!cache?.latestSha) return {};
+  if (branch && cache.branch && cache.branch !== branch) return {};
+  return cache;
 }

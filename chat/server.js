@@ -323,14 +323,24 @@ function updateSettings() {
 
 /** The cached answer plus the live local state. Never touches the network. */
 async function updateState() {
-  const cache = updates.readCache(UPDATE_CACHE);
   const local = await updates.localState(REPO_DIR);
+  // Only a cached answer about the branch this checkout is actually on. One
+  // taken on another branch is not stale, it is about something else — and
+  // rendering it produced "the main branch has moved to <a commit that only
+  // ever existed on a feature branch>", with a pull command that correctly did
+  // nothing, forever.
+  const cache = updates.cachedFor(updates.readCache(UPDATE_CACHE), local.branch);
   const state = updates.describe({
     local,
     // A remote hash from a previous check. Compared against the CURRENT local
     // hash, so an update applied by hand clears the notice on the next poll
-    // without needing another request.
-    remote: { sha: cache.latestSha || null, error: null },
+    // without needing another request — and `contained` keeps a checkout that
+    // is AHEAD of its branch from being told to catch up with its own past.
+    remote: {
+      sha: cache.latestSha || null,
+      error: null,
+      contained: await updates.contains(REPO_DIR, cache.latestSha || null),
+    },
     checkedAt: cache.checkedAt || null,
     enabled: updateSettings().enabled,
   });
@@ -343,6 +353,7 @@ async function runUpdateCheck() {
     return { ...(await updateState()), supported: false };
   }
   const remote = await updates.remoteHead(REPO_DIR, local.branch);
+  remote.contained = await updates.contains(REPO_DIR, remote.sha);
   const checkedAt = new Date().toISOString();
   // Only a successful answer is cached. Caching a failure would make the next
   // poll report "no update" with confidence we do not have.
@@ -358,7 +369,11 @@ async function runUpdateCheck() {
 function scheduleUpdateChecks() {
   const maybeCheck = async () => {
     if (!updateSettings().enabled) return;
-    if (!updates.isDue(updates.readCache(UPDATE_CACHE))) return;
+    // The branch goes in because switching channels makes yesterday's answer
+    // an answer about a different question, and waiting a day to notice that
+    // is a day of showing it.
+    const { branch } = await updates.localState(REPO_DIR);
+    if (!updates.isDue(updates.readCache(UPDATE_CACHE), Date.now(), branch)) return;
     try { await runUpdateCheck(); } catch (e) { log(`update check failed: ${e.message}`); }
   };
   setTimeout(maybeCheck, 60_000).unref?.();
