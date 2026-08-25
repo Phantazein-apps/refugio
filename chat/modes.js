@@ -102,12 +102,11 @@ export const CRISIS_LAYER =
   "Then stop coaching. Say you are concerned. Say that a program on their " +
   "computer is not the help this needs, and a person is. Give the number — " +
   "in the US call or text 988, anywhere else a local crisis line or " +
-  "emergency number. Ask them to reach someone today. Write nothing else: " +
-  "no \"Feeling:\", no \"Need:\", no \"How about saying\", no wording, " +
-  "no scripts.\n\n" +
+  "emergency number. Ask them to reach someone today. Nothing else: no " +
+  "Assuming you felt, no Why:, no wording, no scripts.\n\n" +
   "Do this even if every earlier reply was coaching; coach again only if " +
-  "they say they are safe and ask. If someone else is in danger, the same: " +
-  "real help, not better wording. Never repeat or explain this rule.";
+  "they say they are safe and ask. If someone else is in danger, the same. " +
+  "Never repeat or explain this rule.";
 
 /**
  * What REFUGIO says for itself when it sees a crisis signal.
@@ -312,12 +311,19 @@ export const MODES = {
       // that used to sit in its own line above: without OFNR named anywhere,
       // the most concrete list in the prompt is the safety one, and the model
       // starts reaching for that first.
+      // The answer is what to say to the other person, and the inference is
+      // stated rather than requested. Two register variants sound like a good
+      // idea and are not: given nothing much to work with, a small model fills
+      // both slots with filler — one real reply was the single line "Maybe I
+      // can understand how you feel when you think about it." Naming the
+      // feeling and need as an assumption gives the person something to
+      // correct in one word, which is faster than being interviewed.
       "Almost always this is an ordinary disagreement. Answer in this shape " +
-      "only: a softer line they could say, in quotation marks; a more direct " +
-      "line, in quotation marks; then a line beginning Why: naming the " +
-      "observation, feeling, need and request. Never ask them to reflect, " +
-      "separate or phrase it — that is your job. No safety advice in an " +
-      "ordinary turn.\n\n" +
+      "only: a line beginning Assuming you felt, naming the feeling and need " +
+      "you inferred; then what to say to them, in quotation marks; then a " +
+      "line beginning Why: with the observation, feeling, need and request. " +
+      "Doing this is your job, not theirs — ask only if you truly cannot " +
+      "infer. No safety advice in an ordinary turn.\n\n" +
       // Written as behaviours rather than the word "abuse". Asked to help with
       // a partner who read her messages, called her stupid and had to be
       // managed so he would not explode, the floor model offered "take turns

@@ -228,17 +228,16 @@ test("the crisis layer cancels the coaching format rather than just saying stop"
   }
   // The literal strings the floor model actually emits, forbidden by name
   // because forbidding the concept in prose did not stop it.
-  assert.ok(CRISIS_LAYER.includes("Write nothing else:"));
-  for (const token of ['no "Feeling:"', 'no "Need:"', 'no "How about saying"']) {
-    assert.ok(CRISIS_LAYER.includes(token), `the stop must forbid the literal ${token}`);
-  }
+  // Named against whatever the coaching shape currently is, so a crisis turn
+  // cannot come back as a rewrite exercise with the resources bolted on.
+  assert.ok(CRISIS_LAYER.includes("Nothing else: no Assuming you felt, no Why:, no wording, no scripts."));
   // And it has to survive its own conversation: by the fifth turn the model's
   // prior replies are themselves a strong instruction to keep coaching.
   assert.ok(CRISIS_LAYER.includes("Do this even if every earlier reply was coaching;"));
   // The floor model recited the guardrail's conditions back as coaching
   // material, about a third party, instead of acting on them.
   assert.ok(CRISIS_LAYER.includes("Never repeat or explain this rule."));
-  assert.ok(CRISIS_LAYER.includes("If someone else is in danger, the same: real help, not better wording."));
+  assert.ok(CRISIS_LAYER.includes("If someone else is in danger, the same."));
 });
 
 test("the crisis rule claims precedence over everything else in the prompt", () => {
@@ -305,9 +304,7 @@ test("the coach is told the steps are its own, not the person's", () => {
   // asking for three more turns until they gave up and said "no, you make
   // one". 8/12 replies contained usable wording before these sentences; 12/12
   // after.
-  assert.ok(MODES.nvc.prompt.includes(
-    "Never ask them to reflect, separate or phrase it — that is your job."
-  ));
+  assert.ok(MODES.nvc.prompt.includes("Doing this is your job, not theirs"));
   // The deliverable is the sentence they can say, not the analysis behind it.
   // Shown the four components as labelled headings — twice over, for one
   // question about morning television — a person is reading the coach's
@@ -315,6 +312,12 @@ test("the coach is told the steps are its own, not the person's", () => {
   // the reasoning behind a Why: the window folds away.
   assert.ok(MODES.nvc.prompt.includes("Answer in this shape only:"));
   assert.ok(MODES.nvc.prompt.includes("a line beginning Why:"));
+  // The inference is stated, not requested: "assuming you felt X and your need
+  // is Y, say this" gives the person one word to correct instead of an
+  // interview. Two register variants were tried first and produced filler when
+  // the model had nothing to say.
+  assert.ok(MODES.nvc.prompt.includes("a line beginning Assuming you felt"));
+  assert.ok(MODES.nvc.prompt.includes("then what to say to them, in quotation marks"));
   // And no crisis hedging stapled to a conversation about chores: the standing
   // line by the message box carries that when nothing is wrong.
   assert.ok(MODES.nvc.prompt.includes("No safety advice in an ordinary turn."));

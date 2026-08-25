@@ -120,7 +120,10 @@ function splitCrisisNote(text) {
  *  failure — a missing expander, never a missing answer. */
 function splitWhy(text) {
   if (typeof text !== "string") return [text, null];
-  const m = text.match(/(^|\n)\s*["'*_]*\s*Why\b\s*:?["'*_]*\s*/i);
+  // The colon is required. Optional, it matched "Why do you feel upset when
+  // your son..." mid-reply and folded the entire useful answer away, leaving
+  // one stray quoted line as the visible response.
+  const m = text.match(/(^|\n)\s*["'*_]*\s*Why\s*:["'*_]*\s*/i);
   if (!m || m.index === 0) return [text, null];
   const body = text.slice(0, m.index).trimEnd();
   const why = text.slice(m.index + m[0].length).trim();
