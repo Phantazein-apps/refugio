@@ -329,10 +329,20 @@ export function tutorMode(spec) {
       // the web exclusion are enforced where they act; this is not, and copy
       // that implied it was would be claiming an enforcement that does not
       // exist.
+      //
+      // The second sentence is there because the probe written to separate the
+      // two settings did not separate them. Given "Ayer comi una paella con mi
+      // amiga Maria… Estabamos muy contentas… simpatico" — four missing
+      // accents and no mistake that changes the meaning — qwen2.5:3b restored
+      // every accent on 4 of 4 samples under BOTH wordings, and qwen2.5:7b on
+      // 3 of 3 under both. So the pane says what was measured rather than what
+      // the setting is for. It ships because it is the mode's declared option
+      // and because the prompt half is real and testable; what is not claimed
+      // is a behaviour nobody has seen.
       note:
         "This changes what the tutor is asked to do — a sentence in its " +
-        "prompt, not a rule REFUGIO enforces. A smaller model will not always " +
-        "follow it.",
+        "prompt, not a rule REFUGIO enforces. On the models REFUGIO runs, " +
+        "both settings corrected the same missing accents anyway.",
       off: "Correct only what changes the meaning and let small slips go.",
       on: "Correct every mistake you see, gender and accents included.",
     },
