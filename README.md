@@ -5,7 +5,7 @@
 <p>
   <img src="https://img.shields.io/badge/v2-BETA-ff0018?style=flat-square&labelColor=000000" alt="v2 beta">
   <img src="https://img.shields.io/badge/macOS%20·%20Linux%20·%20Windows-f4f2ee?style=flat-square&labelColor=000000" alt="Cross-platform">
-  <img src="https://img.shields.io/badge/local%20LLM-Ollama%20%2F%20LM%20Studio-ff0018?style=flat-square&labelColor=000000" alt="Local LLM">
+  <img src="https://img.shields.io/badge/local%20LLM-Ollama-ff0018?style=flat-square&labelColor=000000" alt="Local LLM">
   <img src="https://img.shields.io/badge/connectors-MCP-ff0018?style=flat-square&labelColor=000000" alt="MCP connectors">
   <img src="https://img.shields.io/badge/license-MIT-a8a5a0?style=flat-square&labelColor=000000" alt="MIT license">
 </p>
@@ -28,7 +28,7 @@
 </tr>
 </table>
 
-One command installs a **local LLM** (Ollama or LM Studio) and REFUGIO's own chat window, giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your **personal** tools — WhatsApp ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)), email ([Epistole](https://github.com/Phantazein-apps/epistole)), Apple Reminders, Things 3, Notion, and persistent memory — and, if you want, **business** tools like Slack, Jira, ServiceNow, and Salesforce.
+One command installs a **local LLM** (Ollama) and REFUGIO's own chat window, giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your **personal** tools — WhatsApp ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)), email ([Epistole](https://github.com/Phantazein-apps/epistole)), Apple Reminders, Things 3, Notion, and persistent memory — and, if you want, **business** tools like Slack, Jira, ServiceNow, and Salesforce.
 
 Works on **macOS, Linux, and Windows**. No prerequisites — the installer handles everything (Node.js, Git, the LLM engine, and the model).
 
@@ -87,6 +87,7 @@ Honest list, because "beta" is a claim and these are its exceptions:
 - The **native macOS window** is new and lightly exercised.
 - If the **menu-bar icon doesn't appear**: check System Settings ▸ Control Center, where macOS 26 keeps a per-app list of which menu bar icons may show. `~/.refugio-logs/menubar.log` records the item's frame at launch. Note that on macOS 26 a healthy status item's window reports **no screen**, because Control Center hosts it in its own process — so that is not a sign of anything being wrong. `menubar/probe/build.sh` builds a 40-line menu-bar app that does nothing but show the word PROBE; if that appears and REFUGIO doesn't, the difference is in REFUGIO.
 - **Small models are weak at choosing tools.** REFUGIO refuses to install one that can't call tools at all, but a 3B model still picks wrong sometimes.
+- **Ollama is the only engine v2 can use.** `REFUGIO_ENGINE=lmstudio` is still accepted and still configures the legacy Open WebUI path, but the v2 chat window speaks Ollama's native API and nothing in it reads the OpenAI-compatible URL the installer writes for LM Studio. On that engine the model list is empty. This worked before v2 replaced the UI, so it is a regression rather than a feature that never landed — [`docs/gaps.md`](docs/gaps.md) §9 has the detail and the cost to close it.
 - Sources are kept **for the session only** — reopening a conversation shows the answers, not the raw tool output behind them.
 
 A fuller register — including what the `.pkg` and `.msi` do *not* set up, and what the chat UI spec planned and never built — is in [`docs/gaps.md`](docs/gaps.md).
@@ -225,8 +226,8 @@ If you pick a model that can't call tools, the chat holds the message rather tha
 
 REFUGIO runs the model **on your machine** — nothing is sent to any external service.
 
-- **Ollama** (default) is installed automatically and a model is pulled for you. The installer doesn't ask — this is what almost everyone wants, and it's the one REFUGIO can install and manage for you.
-- **LM Studio** — for people already running it. Set `REFUGIO_ENGINE=lmstudio` and REFUGIO connects to its local server (OpenAI-compatible on `http://localhost:1234`) instead of installing Ollama. Start the server first: LM Studio → Developer → Start Server.
+- **Ollama** (default, and the only engine the v2 chat window can use) is installed automatically and a model is pulled for you. The installer doesn't ask — this is what almost everyone wants, and it's the one REFUGIO can install and manage for you.
+- **LM Studio** — `REFUGIO_ENGINE=lmstudio` points the **legacy Open WebUI path** at its local server (OpenAI-compatible on `http://localhost:1234`) instead of installing Ollama. Start the server first: LM Studio → Developer → Start Server. **It does not work with the v2 chat window**, which talks to Ollama's native API and never reads the OpenAI-compatible URL written for it — you get an empty model list. Tracked in [`docs/gaps.md`](docs/gaps.md) §9, along with the `chat/openai.js` that would close it and bring vLLM, llama.cpp and MLX along with it.
 - **Neither** — `REFUGIO_ENGINE=none` skips the engine entirely, for setting one up by hand later.
 
 Your choice is remembered in `~/.refugio.env`, so reinstalling never moves you off the engine you picked.
@@ -420,7 +421,8 @@ Create `~/.refugio.env` (or run the installer, which writes it for you):
 REFUGIO_ENGINE=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 REFUGIO_MODEL=llama3.1:8b
-# For LM Studio instead:
+# For LM Studio instead — legacy Open WebUI path only. The v2 chat
+# window cannot use this engine yet; see docs/gaps.md §9.
 # REFUGIO_ENGINE=lmstudio
 # OPENAI_API_BASE_URL=http://localhost:1234/v1
 # OPENAI_API_KEY=lm-studio
