@@ -1,13 +1,16 @@
 // The maturity label — the one claim that is made in five places at once.
 //
 // "alpha" and "beta" are asserted in package.json, in two HTML files, in the
-// macOS window title and in the README badge, and nothing renders any of the
-// others from the first one. The label went beta → alpha → beta over the
-// project's life, and each move has to happen in all five or the product tells
-// a different story depending on where someone is looking when they ask.
+// macOS window title, in the README badge and on the banner at the top of the
+// README — and nothing renders any of the others from the first one. The label
+// went beta → alpha → beta over the project's life, and each move has to happen
+// in all six or the product tells a different story depending on where someone
+// is looking when they ask. The banner is the sixth because it is the first
+// thing anyone sees, and an image is the surface least likely to be checked by
+// hand.
 //
 // This does not say WHICH label is right. That is a judgement about the
-// software, made by a person. It says the five agree.
+// software, made by a person. It says the six agree.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -34,6 +37,7 @@ test("every surface that names the stage names the same one", () => {
     "chat/static/wizard.html": read("../chat/static/wizard.html"),
     "menubar/Sources/RefugioBar/ChatWindow.swift": read("../menubar/Sources/RefugioBar/ChatWindow.swift"),
     "README.md": read("../README.md"),
+    "assets/banner.svg": read("../assets/banner.svg"),
   };
   for (const [file, text] of Object.entries(surfaces)) {
     assert.ok(new RegExp(want, "i").test(text), `${file} never says "${want}"`);
@@ -41,7 +45,7 @@ test("every surface that names the stage names the same one", () => {
     for (const other of ["alpha", "beta", "rc"].filter((s) => s !== want)) {
       // The README quotes the older Open WebUI line and the CSS comment records
       // the history on purpose, so only the label-shaped uses are checked.
-      const stale = new RegExp(`(class="stage"[^>]*>\\s*${other}|REFUGIO \\(${other}\\)|v2-${other.toUpperCase()}-|v2 is ${other}\\b|the \\*\\*v2 ${other}\\*\\*)`, "i");
+      const stale = new RegExp(`(class="stage"[^>]*>\\s*${other}|REFUGIO \\(${other}\\)|v2-${other.toUpperCase()}-|v2 is ${other}\\b|the \\*\\*v2 ${other}\\*\\*|V2 ${other}\\b)`, "i");
       assert.doesNotMatch(text, stale, `${file} still labels REFUGIO "${other}"`);
     }
   }
