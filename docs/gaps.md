@@ -106,16 +106,60 @@ to install a model that cannot call tools at all, caps the surface
 model-capability limit, not a bug to fix — it is recorded so it is not
 rediscovered as one.
 
-## 8. Neither installer has ever been built
+## 8. The installers build, and nothing they produce is signed
 
-The `.pkg` and `.msi` are written and reviewed; the first real build is the
-next run of `.github/workflows/package.yml`. Signing needs certificates that do
-not exist yet, so what CI produces until then is unsigned and un-notarized —
-which on macOS means *"cannot be opened because Apple cannot check it for
-malicious software"* on every Mac since Catalina. See `packaging/README.md`
-for the certificate types and costs.
+**Corrected 2026-08-27.** This entry used to read *"neither installer has ever
+been built"*. That is no longer true. `.github/workflows/package.yml` builds
+both on every push, installs them silently on real macOS and Windows runners
+and asserts what landed — including, on Windows, that a deploy-time policy
+property set with `msiexec /qn ALLOWEDMODES="..."` reaches the Policies hive.
 
-## 9. Not a gap: TCC consent
+What remains is signing. The certificates do not exist yet, so the job publishes
+its artifacts as `refugio-pkg-UNSIGNED` and `refugio-msi-UNSIGNED` — which on
+macOS means *"cannot be opened because Apple cannot check it for malicious
+software"* on every Mac since Catalina. See `packaging/README.md` for the
+certificate types and costs.
+
+## 9. LM Studio is offered as an engine and the v2 chat window cannot use it
+
+`REFUGIO_ENGINE=lmstudio` is accepted by the installer, written to
+`~/.refugio.env` and documented in the README's engine section. In v2 it does
+not reach the chat window.
+
+`chat/server.js:36` imports every model call from `chat/ollama.js`, which
+speaks Ollama's **native** API — NDJSON `/api/chat`, `/api/tags`, `/api/show`,
+`/api/pull` — at `OLLAMA_BASE_URL`. LM Studio serves an OpenAI-compatible
+`/v1`, and nothing under `chat/` reads the `OPENAI_API_BASE_URL` the installer
+writes for it. The supervisor compounds it rather than catching it: `wantsOllama`
+is false under this engine (`start-refugio.cjs:510`), so no Ollama is started,
+while the chat server starts regardless (`start-refugio.cjs:824`). What the
+person gets is an empty model list and *"No model available. Is Ollama
+running?"* — naming the engine they deliberately did not pick.
+
+This worked on the Open WebUI path, which consumed `OPENAI_API_BASE_URL`
+directly. It was never carried across when v2 replaced that UI, so it is a
+regression that reads as a feature — which is why it is here and not in the
+README's rough edges alone.
+
+Cost to close: a `chat/openai.js` with the same six exports, and an engine
+switch at the single import. Three are near-mechanical (`complete`, `isUp`,
+`listModels` over `/v1/models`, which loses size and `modified_at` and degrades
+to "unrated" — a path `chat/server.js:204` already tolerates). `chatStream` has
+to accumulate tool-call fragments across indexed deltas where Ollama hands over
+a whole object. `showModel` has no equivalent and must return `null`, which
+callers already read as UNKNOWN rather than "no". `pullModel` has no equivalent
+at all, so the Settings download has to be hidden for this engine rather than
+left to fail.
+
+The same file would make vLLM, llama.cpp's `server`, `mlx_lm.server` and TGI
+reachable by base URL, with no second model lifecycle to maintain. What it
+cannot carry over is the tool-calling gate: `/api/show` capabilities is how
+REFUGIO knows a model can drive connectors at all, and no OpenAI-compatible
+server reports it. That is a decision to take deliberately rather than a detail
+to discover — `models.json` calls that gate "the gate the whole product hangs
+on".
+
+## 10. Not a gap: TCC consent
 
 `packaging/README.md` §"The thing that is not possible" — an installer cannot
 grant itself access to Notes, Reminders or Messages, and no amount of packaging
