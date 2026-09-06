@@ -968,6 +968,43 @@ async function setWebEnabled(enabled, box) {
 
 // ── Discussion modes ────────────────────────────────────────
 
+/** Name this pane after the product serving it.
+ *
+ *  The markup says "Discussion modes" because that is what the file on disk
+ *  has always said and one of the two products still calls it that. The other
+ *  offers connector modes and no coaching at all, so the heading, the sidebar
+ *  entry and the line under the heading come from the server's copy — the same
+ *  object every other sentence in this pane comes from, for the same reason.
+ *
+ *  The heading keeps its two-tone treatment by putting the last word in the
+ *  accent span, which is what the markup does by hand for "Discussion modes"
+ *  and works for any label of two or more words. */
+function applyModesLabels(modes) {
+  const label = modes.label || "";
+  if (label) {
+    const nav = document.querySelector('.snav-item[data-pane="modes"]');
+    if (nav) nav.textContent = label;
+    const h = $("h-modes");
+    if (h) {
+      const words = label.split(" ");
+      const last = words.pop();
+      h.replaceChildren(
+        ...(words.length ? [document.createTextNode(words.join(" ") + " ")] : []),
+        el("span.red", { text: last }),
+      );
+    }
+  }
+  const sub = $("modes-sub");
+  if (sub && modes.paneSub) sub.textContent = modes.paneSub;
+  // The wordmark qualifier, same as the chat window's. Set from here because
+  // this is the one pane whose payload always carries the product name.
+  const chip = $("brand-edition");
+  const product = modes.product || "";
+  const suffix = product.startsWith("REFUGIO ") ? product.slice("REFUGIO ".length) : "";
+  if (chip) { chip.textContent = suffix; chip.hidden = !suffix; }
+  if (product) document.title = `${product} — Settings`;
+}
+
 /** The modes pane.
  *
  *  Every word here comes from the backend's MODES_UI and the registry rows, not
@@ -983,9 +1020,12 @@ function renderModes() {
   const modes = state.connectors?.modes || state.status?.modes;
   if (!modes) { box.append(el("div.waiting", { text: "Checking…" })); return; }
 
+  applyModesLabels(modes);
+
   const rows = modes.available || [];
   if (!rows.length) {
     box.append(el("div.card", {}, el("div.prose", { text: modes.empty || "No discussion modes are available in this build yet." })));
+    if (modes.otherProduct) box.append(el("div.card", {}, el("div.aside", { text: modes.otherProduct })));
     return;
   }
 
@@ -994,6 +1034,11 @@ function renderModes() {
     el("div.prose", {}, el("strong", { text: modes.privacy || "" })),
     el("div.prose", { text: modes.connectors || "" }),
     el("div.aside", { text: modes.note || "" }),
+    // Where the other product's modes went. Rendered inside the same framing
+    // card rather than at the bottom of the pane, because it answers the
+    // question someone arrived with — "where is the NVC coach" — and the
+    // bottom of a list of switches is not where they stop looking.
+    ...(modes.otherProduct ? [el("div.aside", { text: modes.otherProduct })] : []),
   ));
 
   const active = modelName();

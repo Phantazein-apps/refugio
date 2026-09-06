@@ -23,3 +23,6 @@ mcpo-config.json
 branding/env.py
 app/
 data/
+
+# Which product this install is (written by the installer)
+.refugio-edition

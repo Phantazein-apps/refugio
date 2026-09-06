@@ -29,6 +29,7 @@
 //     and that it still cannot send.
 
 import { WEB_TOOL } from "./websearch.js";
+import { EDITION, EDITIONS, editionOffersCategory, editionFor } from "./edition.js";
 
 /**
  * Every planned mode id, all off.
@@ -1152,10 +1153,95 @@ export const MODES_UI = {
     "If you are in crisis or thinking of harming yourself, call or text 988 " +
     "in the US, or your local emergency number.",
   empty: "No discussion modes are available in this build yet.",
+  // The line under the pane's heading. Here rather than in the markup for the
+  // same reason as everything else in this object: the settings page is served
+  // by both products and must not carry a sentence that is true in only one.
+  paneSub: "Coaching conversations that stay on this computer.",
 };
 
-/** Ids that actually have content, and are therefore offerable. */
+/**
+ * What each edition calls this pane, and the two sentences that are not true
+ * in both products.
+ *
+ * Everything in MODES_UI above is shared, and that is the point: the privacy
+ * promise, the connector promise and the one-mode-per-conversation rule are
+ * the same sentences in both products because they are the same guarantees,
+ * enforced by the same code. What differs is only what the pane is called,
+ * what kind of thing it holds, and whether a crisis line belongs under the
+ * message box — REFUGIO offers no coaching mode, so a standing hotline notice
+ * there would be a warning attached to nothing, which is how people learn to
+ * stop reading warnings.
+ *
+ * `otherProduct` exists so the split is discoverable rather than a feature
+ * that silently vanished. Someone looking for the NVC coach in REFUGIO must
+ * find out where it went, in the place they went looking.
+ */
+export const MODES_UI_BY_EDITION = {
+  standard: {
+    label: "Connector modes",
+    hint:
+      "Modes that point one conversation at a connector. Off by default; " +
+      "nothing appears in the composer until you switch one on.",
+    // No coaching modes in this edition, so nothing standing under the box.
+    standing: "",
+    empty: "No connector modes are available in this build yet.",
+    paneSub: "Conversations pointed at one connector, and nothing else.",
+    otherProduct:
+      "The coaching modes — NVC, style, career, life, language — are REFUGIO " +
+      "Listener, a separate install with its own conversations.",
+  },
+  listener: {
+    otherProduct:
+      "Chatting with a connector — reading your WhatsApp inside a " +
+      "conversation — is REFUGIO, a separate install with its own " +
+      "conversations.",
+  },
+};
+
+/**
+ * The pane's copy for one edition: the shared sentences with that edition's
+ * overrides on top.
+ *
+ * A function rather than two hand-written objects, because the shared half is
+ * the half that must never drift and two literals is exactly how it would.
+ */
+export function modesUi(edition = EDITION) {
+  return { ...MODES_UI, otherProduct: null, ...(MODES_UI_BY_EDITION[editionFor(edition).id] || {}) };
+}
+
+/** Ids that actually have content — the whole catalogue this build ships. */
 export const definedModes = () => MODE_IDS.filter((id) => !!MODES[id]);
+
+/**
+ * Ids this EDITION offers — the catalogue narrowed to one product.
+ *
+ * The split is by category, not by a second list of ids: REFUGIO offers the
+ * `data` modes, which are ways of pointing a conversation at a connector, and
+ * REFUGIO Listener offers the `coaching` ones. A mode added tomorrow lands in
+ * the right product by declaring what kind of thing it is, which the registry
+ * already makes it do — nothing here needs editing.
+ *
+ * The modes outside this edition are still compiled in, still tested, still
+ * carrying their guardrails. `definedModes()` is deliberately kept as the
+ * registry view so the doctrine tests keep checking every mode in the build
+ * rather than only the half this checkout happens to be running as; this is
+ * the view every surface and every route uses.
+ */
+export const offeredModes = (edition = EDITION) =>
+  definedModes().filter((id) => editionOffersCategory(MODES[id].category, edition));
+
+/**
+ * Is this id — base or paired — part of this edition's product?
+ *
+ * Asked wherever a mode could be offered, switched on, or entered. A paired
+ * variant answers with its base mode's category, because pairing adds a
+ * connector to a coaching conversation and does not make it a different kind
+ * of conversation.
+ */
+export function modeOffered(id, edition = EDITION) {
+  const def = modeDef(id);
+  return !!def && editionOffersCategory(def.category, edition);
+}
 
 /**
  * The rows a picker or settings pane needs — never the prompt text.
@@ -1165,8 +1251,24 @@ export const definedModes = () => MODE_IDS.filter((id) => !!MODES[id]);
  * reader to treat it as a description of what the mode guarantees.
  */
 export function modeSummaries() {
+  return summariesFor(definedModes());
+}
+
+/**
+ * The same rows, narrowed to what this edition offers.
+ *
+ * This is what the server sends. `modeSummaries()` above is the registry view
+ * and exists for the tests that assert doctrine across every mode in the
+ * build; a surface asking for that one would offer a person the other
+ * product's modes and then refuse them at the door.
+ */
+export function offeredSummaries(edition = EDITION) {
+  return summariesFor(offeredModes(edition));
+}
+
+function summariesFor(ids) {
   const rows = [];
-  for (const id of definedModes()) {
+  for (const id of ids) {
     rows.push(summarize(MODES[id]));
     // The paired variant rides directly behind its base, because that is the
     // order a picker should show them in and the server is where that order is
@@ -1333,6 +1435,16 @@ export function modeTitle(mode, date = new Date()) {
 }
 
 /**
+ * Which edition offers modes of this category, or null if none does.
+ *
+ * Derived from the same table the offering is derived from, so a refusal can
+ * never name a product that would not in fact have the mode.
+ */
+export function ownerEdition(category) {
+  return Object.values(EDITIONS).find((e) => e.modeCategories.includes(category)) || null;
+}
+
+/**
  * Validate a mode id off the request body.
  *
  * Two different refusals, because they send the user to two different places:
@@ -1340,12 +1452,31 @@ export function modeTitle(mode, date = new Date()) {
  * id that is switched off is a settings trip. Saying "unknown mode" for both
  * would send someone looking for the wrong problem.
  */
-export function validateMode(requested, enabled = {}, connectorReady = null) {
+export function validateMode(requested, enabled = {}, connectorReady = null, edition = EDITION) {
   const id = typeof requested === "string" ? requested.trim() : "";
   if (!id) return { ok: true, mode: null };
   const def = modeDef(id);
   if (!def) {
     return { ok: false, mode: null, error: `There is no discussion mode called "${id.slice(0, 40)}".` };
+  }
+  // A third refusal, and it is not the same as either of the two above. The id
+  // is real and this build defines it — it simply belongs to the other
+  // product. It is checked BEFORE "switched off" because the settings file is
+  // shared in shape and not in scope: a person whose file still says nvc:true,
+  // from before the split or from a machine that ran the other edition, would
+  // otherwise be sent to a Settings pane that does not contain the switch. It
+  // names where the mode actually lives, because "not available" with no
+  // destination is how a feature reads as broken rather than as moved.
+  if (!modeOffered(id, edition)) {
+    const owner = ownerEdition(def.category);
+    return {
+      ok: false,
+      mode: null,
+      wrongEdition: owner?.id ?? null,
+      error: owner
+        ? `${def.label} is part of ${owner.product}, which installs separately.`
+        : `${def.label} is not part of ${editionFor(edition).product}.`,
+    };
   }
   // The base mode's switch, for a paired variant. One switch governs both ways
   // of holding the conversation; whether the paired one can be reached is a
@@ -1356,7 +1487,10 @@ export function validateMode(requested, enabled = {}, connectorReady = null) {
     return {
       ok: false,
       mode: null,
-      error: `${MODES[key].label} is switched off. Turn it on in Settings, under ${MODES_UI.label}.`,
+      // This edition's name for the pane, not the shared one: the message is
+      // directions, and directions to a pane called something else are worse
+      // than none.
+      error: `${MODES[key].label} is switched off. Turn it on in Settings, under ${modesUi(edition).label}.`,
     };
   }
   // A mode that needs a connector is refused when the connector is not ready,

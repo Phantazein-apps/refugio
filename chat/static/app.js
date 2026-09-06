@@ -643,7 +643,23 @@ async function setWebEnabled(enabled) {
  *  is worse than no switch. */
 function applyModes(modes) {
   state.modes = modes || null;
+  applyEdition(modes);
   renderModeControl();
+}
+
+/** Name the window after the product it is.
+ *
+ *  REFUGIO and REFUGIO Listener are separate installs with separate windows,
+ *  and on a machine that has moved from one to the other the tab title is the
+ *  cheapest way to be sure which one is open. The server is the only thing
+ *  that knows, so it is told here rather than baked into the markup — and the
+ *  standard edition sends no qualifier, so nothing about it changes. */
+function applyEdition(modes) {
+  const chip = document.getElementById("brand-edition");
+  const product = modes?.product || "";
+  const suffix = product.startsWith("REFUGIO ") ? product.slice("REFUGIO ".length) : "";
+  if (chip) { chip.textContent = suffix; chip.hidden = !suffix; }
+  if (product) document.title = product;
 }
 
 /** The modes this build defines that are switched on — connector ready or not.

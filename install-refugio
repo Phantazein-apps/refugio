@@ -3,6 +3,12 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
 #
 # Installs Node.js if missing, then runs the Node-based installer.
+#
+# This repository builds two products, and this script installs one of them.
+# The other has its own bootstrap, install-listener, which is this same file
+# with REFUGIO_EDITION preset — see docs/editions.md. REFUGIO_EDITION is
+# honoured here too, so a caller who already knows which one they want can say
+# so without picking a different URL.
 
 set -e
 
@@ -16,9 +22,18 @@ ok()   { printf "  ${GREEN}✓${NC} %s\n" "$1"; }
 warn() { printf "  ${YELLOW}!${NC} %s\n" "$1"; }
 fail() { printf "  ${RED}✗${NC} %s\n" "$1"; exit 1; }
 
+# Which product. Set by install-listener before it sources the same logic;
+# settable by hand for anyone driving this script directly.
+export REFUGIO_EDITION="${REFUGIO_EDITION:-standard}"
+case "$REFUGIO_EDITION" in
+  standard) PRODUCT="REFUGIO" ;;
+  listener) PRODUCT="REFUGIO Listener" ;;
+  *) printf "  \033[0;31m✗\033[0m Unknown REFUGIO_EDITION '%s' — expected standard or listener\n" "$REFUGIO_EDITION"; exit 1 ;;
+esac
+
 echo ""
 echo -e "${BOLD}============================================================"
-echo " 🏔️  REFUGIO Installer"
+echo " 🏔️  ${PRODUCT} Installer"
 echo -e "============================================================${NC}"
 echo ""
 

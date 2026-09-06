@@ -159,7 +159,36 @@ server reports it. That is a decision to take deliberately rather than a detail
 to discover — `models.json` calls that gate "the gate the whole product hangs
 on".
 
-## 10. Not a gap: TCC consent
+## 10. REFUGIO Listener has no menu-bar app, tray icon, or packaged install
+
+The split into two products ([`docs/editions.md`](editions.md)) made everything
+a person's data touches per-edition — directory, database, credentials, port,
+login item, CLI, launcher scripts. Three surfaces were deliberately left as
+REFUGIO's alone, and a Listener install gets none of them:
+
+- **The macOS menu-bar app** (`menubar/`). A Swift bundle whose sources
+  hard-code `~/refugio`, `~/.refugio-logs`, ports 8090/8080 and the
+  `com.phantazein.refugio` identifier, built by `menubar/install.sh` into
+  `/Applications/REFUGIO.app`. Parameterising it is perhaps forty lines of
+  Swift plus an `Info.plist` key — and it cannot be compiled or exercised
+  anywhere but a Mac, so shipping it untested would give the Listener an icon
+  that starts and stops the *other* product. That risk is why the installer
+  prints one line saying the launchers are REFUGIO-only rather than installing
+  a copy under the wrong identity.
+- **The Windows and Linux trays** (`tray/`). The same shape of problem without
+  the build step: two scripts written for one install's paths.
+- **The `.pkg` and `.msi`** (`packaging/`). Bundle identifiers, an MDM
+  configuration profile and an ADMX template, all written for one product. A
+  second set is a distribution decision — signing, identifiers, profiles —
+  rather than a code change.
+
+What the Listener does get: the per-edition `refugio-listener` command
+(`start`, `bg`, `stop`, `restart`, `status`), `Start REFUGIO Listener.command`
+on macOS, the `.bat` launchers on Windows, a `.desktop` entry on Linux, and its
+own login item. Everything the launchers do is reachable; the icon is not
+there.
+
+## 11. Not a gap: TCC consent
 
 `packaging/README.md` §"The thing that is not possible" — an installer cannot
 grant itself access to Notes, Reminders or Messages, and no amount of packaging

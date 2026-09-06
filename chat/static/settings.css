@@ -45,6 +45,12 @@ body {
 }
 .back { display: inline-flex; align-items: center; gap: var(--s2); color: var(--ink); text-decoration: none; }
 .back .wordmark { font-family: var(--display); font-size: 13px; letter-spacing: 0.01em; }
+/* See .brand-edition in app.css — same qualifier, same rule about only
+   appearing when there is something to say. */
+.wordmark-edition {
+  font-family: var(--display); font-size: 13px; letter-spacing: 0.01em;
+  color: var(--ink-soft); margin-left: 4px;
+}
 .strip-title { letter-spacing: var(--tracking-nav); }
 .back-link {
   margin-left: auto;

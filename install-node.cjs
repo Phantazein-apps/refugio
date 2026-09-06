@@ -14,6 +14,29 @@ const readline = require("readline")
 const isWin = os.platform() === "win32"
 const home = os.homedir()
 
+// ── Which product is being installed ─────────────────────────
+//
+// This repository builds two: REFUGIO and REFUGIO Listener. They are separate
+// installs — separate directory, port, credentials file, login item and data —
+// and a machine holds one of them at a time.
+//
+// The table that says what differs is editions.cjs, in the repository. This
+// file cannot read it: it is downloaded on its own and run BEFORE anything is
+// cloned. So it carries the three facts it needs before the clone — where to
+// install, what to print, and which port to check is free — and nothing else.
+// Every other edition fact is read from editions.cjs the moment it exists, and
+// loadEdition() below refuses to continue if these three disagree with it.
+// test/edition.test.js fails on the same disagreement, so the drift is caught
+// before anyone runs the installer rather than during.
+const EDITION_BOOT = {
+  standard: { dir: "refugio", product: "REFUGIO", chatPort: 8090 },
+  listener: { dir: "refugio-listener", product: "REFUGIO Listener", chatPort: 8091 },
+}
+
+/** The edition being installed, and its full row once the clone has happened.
+ *  `boot` until then. */
+let ED = { id: "standard", ...EDITION_BOOT.standard }
+
 // Resolved uv command. On Apple Silicon this may become an absolute path to a
 // native arm64 uv so we never build an x86_64 Python env (which lacks macOS
 // wheels for onnxruntime / cryptography). Set by installUV().
@@ -223,6 +246,19 @@ async function promptGithubFields(env, existing) {
 // rather than failing the install or dragging the user through an Xcode
 // download mid-setup.
 function installMenuBarApp(targetDir) {
+  // The menu-bar app and the tray icons are REFUGIO's, and only REFUGIO's, for
+  // now. They are a Swift bundle and two scripts that hard-code the standard
+  // install's directory, port, log path and bundle identifier; building a
+  // second, differently-identified copy of them is real work with no way to
+  // test it from anywhere but a Mac, and shipping an untested one would give
+  // the Listener a menu-bar icon that starts and stops the other product.
+  // Everything the launchers actually do is available from the CLI this
+  // installer writes, which IS per-edition. See docs/editions.md.
+  if (ED.id !== "standard") {
+    console.log(`  ${C.dim}Menu-bar and tray launchers are REFUGIO-only for now — use the`)
+    console.log(`    ${ED.cli} command (or "${startCommandName()}") to start and stop.${C.reset}`)
+    return
+  }
   const menubarDir = path.join(targetDir, "menubar")
   const script = path.join(menubarDir, "install.sh")
   if (!fs.existsSync(script)) return
@@ -283,6 +319,19 @@ function installMenuBarApp(targetDir) {
 // no build step. Writes a launcher .vbs (runs PowerShell with no console
 // window) plus a Startup shortcut, mirroring the macOS menu-bar app.
 function installWindowsTray(targetDir) {
+  // The menu-bar app and the tray icons are REFUGIO's, and only REFUGIO's, for
+  // now. They are a Swift bundle and two scripts that hard-code the standard
+  // install's directory, port, log path and bundle identifier; building a
+  // second, differently-identified copy of them is real work with no way to
+  // test it from anywhere but a Mac, and shipping an untested one would give
+  // the Listener a menu-bar icon that starts and stops the other product.
+  // Everything the launchers actually do is available from the CLI this
+  // installer writes, which IS per-edition. See docs/editions.md.
+  if (ED.id !== "standard") {
+    console.log(`  ${C.dim}Menu-bar and tray launchers are REFUGIO-only for now — use the`)
+    console.log(`    ${ED.cli} command (or "${startCommandName()}") to start and stop.${C.reset}`)
+    return
+  }
   const ps1 = path.join(targetDir, "tray", "refugio-tray.ps1")
   if (!fs.existsSync(ps1)) return
 
@@ -314,6 +363,19 @@ function installWindowsTray(targetDir) {
 // everywhere. Without yad the script prints install guidance and exits; the
 // `refugio` CLI is unaffected either way.
 function installLinuxTray(targetDir, appsDir) {
+  // The menu-bar app and the tray icons are REFUGIO's, and only REFUGIO's, for
+  // now. They are a Swift bundle and two scripts that hard-code the standard
+  // install's directory, port, log path and bundle identifier; building a
+  // second, differently-identified copy of them is real work with no way to
+  // test it from anywhere but a Mac, and shipping an untested one would give
+  // the Listener a menu-bar icon that starts and stops the other product.
+  // Everything the launchers actually do is available from the CLI this
+  // installer writes, which IS per-edition. See docs/editions.md.
+  if (ED.id !== "standard") {
+    console.log(`  ${C.dim}Menu-bar and tray launchers are REFUGIO-only for now — use the`)
+    console.log(`    ${ED.cli} command (or "${startCommandName()}") to start and stop.${C.reset}`)
+    return
+  }
   const sh = path.join(targetDir, "tray", "refugio-tray.sh")
   if (!fs.existsSync(sh)) return
   try { fs.chmodSync(sh, 0o755) } catch {}
@@ -781,20 +843,209 @@ function probeHttp(url, timeout = 1500) {
 
 // ── Phase 1: Banner ──────────────────────────────────────────
 
-function showBanner() {
-  console.log(`
-${C.bold}============================================================
- 🏔️  REFUGIO Installer
- A self-hosted refuge for your AI — runs on your own machine
-============================================================${C.reset}
+/**
+ * Which edition the caller asked for.
+ *
+ * `--listener` is the shorthand the install-listener bootstrap uses;
+ * `--edition <id>` and REFUGIO_EDITION are the long forms, so a script can
+ * name it without knowing which flags exist. An unrecognised name is a hard
+ * stop rather than a silent fall back to standard: someone who typed
+ * `--edition lisener` wants the Listener, and quietly installing the other
+ * product into the other directory is the worst possible way to answer that.
+ */
+function pickEdition(args) {
+  const i = args.indexOf("--edition")
+  const asked = (args.includes("--listener") ? "listener"
+    : i >= 0 ? (args[i + 1] || "")
+    : process.env.REFUGIO_EDITION || "standard").trim()
+  if (!EDITION_BOOT[asked]) {
+    fail(`Unknown edition "${asked}" — expected one of: ${Object.keys(EDITION_BOOT).join(", ")}`)
+    process.exit(1)
+  }
+  return asked
+}
 
+/** The double-clickable launcher's file name, per product.
+ *
+ *  Named after the product rather than kept as "Start REFUGIO.command" for
+ *  both, because on a Mac this is a file someone finds in a folder months
+ *  later, and it is the only thing in that folder that says what it starts. */
+function startCommandName() {
+  return `Start ${ED.product}.command`
+}
+
+/**
+ * Refuse to install alongside the other product, and say how to proceed.
+ *
+ * The two editions do not share a directory, a port, a login item or a
+ * database, so nothing here is a technical necessity — they could both sit on
+ * the disk. The reason is that they are two products with one purpose each,
+ * and a machine running both has two chat windows that look alike, two login
+ * items, two supervisors and two model processes, with the conversation a
+ * person wanted in whichever one they happened to open. That is not a
+ * configuration anyone chose; it is one they end up in.
+ *
+ * So: refuse, name what is already there, and offer the two ways out. The
+ * default is the safe one. `--replace` stops the other product and takes away
+ * its launchers, and deliberately does NOT delete its directory or its data —
+ * switching products must not be the way a person loses conversations they
+ * never agreed to lose, and going back is then just running its installer.
+ */
+function checkEditionConflict(editionId, flags) {
+  const others = Object.entries(EDITION_BOOT)
+    .filter(([id]) => id !== editionId)
+    .map(([id, b]) => ({ id, ...b, dir: path.join(home, b.dir) }))
+    .filter((o) => fs.existsSync(path.join(o.dir, "package.json")))
+  if (!others.length) return
+
+  const other = others[0]
+  if (!flags.has("--replace")) {
+    console.log("")
+    fail(`${other.product} is already installed at ${other.dir}`)
+    console.log("")
+    console.log(`  ${ED.product} and ${other.product} are separate products, and this`)
+    console.log(`  machine holds one of them at a time.`)
+    console.log("")
+    console.log(`  To switch to ${ED.product}:`)
+    console.log(`    re-run this installer with ${C.bold}--replace${C.reset}`)
+    console.log(`    ${C.dim}Stops ${other.product} and removes its login item and launchers.`)
+    console.log(`    Its folder and its conversations are left exactly where they are,`)
+    console.log(`    so running its installer again brings it back.${C.reset}`)
+    console.log("")
+    console.log(`  To remove ${other.product} entirely first:`)
+    console.log(`    ${C.bold}${path.join(other.dir, "uninstall-refugio")}${C.reset}`)
+    console.log("")
+    process.exit(1)
+  }
+
+  console.log(`  ${C.bold}Replacing ${other.product}${C.reset} ${C.dim}— its folder and conversations are kept${C.reset}`)
+  standDown(other)
+}
+
+/**
+ * Stop the other edition and take away everything that would start it again.
+ *
+ * Every step is best-effort and silent about absence: this runs on a machine
+ * that may have had the other product installed by any of three routes across
+ * two years, and a missing login item is the expected case, not a failure.
+ * What must not happen is a half-stood-down install whose launchd job restarts
+ * the supervisor an hour later on a port this one is not using — which is why
+ * the login item is removed BEFORE the process is killed, in both places it
+ * could be.
+ */
+function standDown(other) {
+  const marker = path.join(other.dir, ".refugio-edition")
+  // Read the other install's own table rather than assuming: it knows its
+  // label and its log directory, and a version of it older than this split
+  // simply answers with the standard names, which are the right ones for it.
+  let row = null
+  try { row = require(path.join(other.dir, "editions.cjs")).editionFor(other.id) } catch {}
+  const agentLabel = row?.agentLabel || "com.phantazein.refugio"
+  const logDir = path.join(home, row?.logDir || ".refugio-logs")
+  const macApp = row?.macApp || "REFUGIO.app"
+  const cli = row?.cli || "refugio"
+
+  if (os.platform() === "darwin") {
+    const plist = path.join(home, "Library", "LaunchAgents", `${agentLabel}.plist`)
+    try { execSync(`launchctl bootout gui/$(id -u) "${plist}"`, { stdio: "ignore" }) } catch {}
+    try { if (fs.existsSync(plist)) fs.unlinkSync(plist) } catch {}
+    try { execSync(`pkill -f "${macApp}/Contents/MacOS/RefugioBar"`, { stdio: "ignore" }) } catch {}
+  } else if (os.platform() === "linux") {
+    const unit = `${cli}.service`
+    try { execSync(`systemctl --user disable --now ${unit}`, { stdio: "ignore" }) } catch {}
+    try { fs.unlinkSync(path.join(home, ".config", "systemd", "user", unit)) } catch {}
+    try { execSync("systemctl --user daemon-reload", { stdio: "ignore" }) } catch {}
+    for (const d of [path.join(home, ".config", "autostart"), path.join(home, ".local", "share", "applications")]) {
+      for (const f of [`${cli}.desktop`, `${cli}-tray.desktop`]) {
+        try { fs.unlinkSync(path.join(d, f)) } catch {}
+      }
+    }
+  } else if (isWin) {
+    const startup = path.join(home, "AppData", "Roaming", "Microsoft", "Windows",
+      "Start Menu", "Programs", "Startup")
+    for (const f of [`${other.product}.vbs`, "REFUGIO.vbs", `${other.product} Tray.vbs`, "REFUGIO Tray.vbs"]) {
+      try { fs.unlinkSync(path.join(startup, f)) } catch {}
+    }
+  }
+
+  // Then the running supervisor, by the pid it wrote down.
+  try {
+    const pid = parseInt(fs.readFileSync(path.join(logDir, "supervisor.pid"), "utf-8").trim(), 10)
+    if (pid > 0) process.kill(pid, "SIGTERM")
+  } catch {}
+
+  ok(`${other.product} stopped — its folder is still at ${other.dir}`)
+  if (fs.existsSync(marker) || row) {
+    // With its edition named. That installer defaults to standard when nothing
+    // says otherwise, so the bare command would reinstall the OTHER product
+    // into the other directory and leave this folder sitting where it is.
+    console.log(`    ${C.dim}Bring it back later with: node ${path.join(other.dir, "install-node.cjs")} --edition ${other.id} --replace${C.reset}`)
+  }
+}
+
+/**
+ * Swap the bootstrap row for the real one, now that the repository is on disk.
+ *
+ * The assertion is the point. Two copies of the same fact is the arrangement
+ * this file is forced into, and the only thing that makes it safe is that the
+ * moment they can be compared, they are.
+ */
+function loadEdition(targetDir, editionId) {
+  const table = path.join(targetDir, "editions.cjs")
+  // A checkout that predates the split has no table at all. That is not drift,
+  // it is a version mismatch — this installer was fetched from one ref and
+  // REFUGIO_VERSION pinned the clone to another — and it needs its own
+  // sentence, because "Cannot find module editions.cjs" sends someone looking
+  // for a missing file rather than at the version they pinned. The supported
+  // flow cannot reach it: install-refugio fetches this file from
+  // $REFUGIO_VERSION and clones the same ref, so both halves always match.
+  if (!fs.existsSync(table)) {
+    fail(`The version this installed (${process.env.REFUGIO_VERSION || "the default"}) predates the ` +
+      `REFUGIO / REFUGIO Listener split, so it cannot be installed as "${editionId}".`)
+    console.log("")
+    console.log(`  ${C.dim}It was cloned to ${targetDir} and left there.`)
+    console.log(`  Install a version that has both products:`)
+    console.log(`    REFUGIO_VERSION=main curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/${editionId === "listener" ? "install-listener" : "install-refugio"} | bash${C.reset}`)
+    console.log("")
+    process.exit(1)
+  }
+  const row = require(table).editionFor(editionId)
+  const boot = EDITION_BOOT[editionId]
+  if (row.id !== editionId || row.installDir !== boot.dir || row.product !== boot.product
+      || row.chatPort !== boot.chatPort) {
+    fail(`This installer and ${path.join(targetDir, "editions.cjs")} disagree about the ` +
+      `"${editionId}" edition (installer: ${boot.dir}/${boot.product}/:${boot.chatPort}, ` +
+      `repository: ${row.installDir}/${row.product}/:${row.chatPort}). Re-download the installer.`)
+    process.exit(1)
+  }
+  return row
+}
+
+function showBanner() {
+  // Two products, two things worth saying under the name. The connector list
+  // is REFUGIO's whole point and is beside the point in the Listener, where
+  // the coaching modes carry no connectors at all — printing it there would
+  // advertise the other product's feature on the first screen of this one.
+  const body = ED.id === "listener" ? `
+ Installs a local LLM (Ollama by default) and REFUGIO Listener's chat window:
+ private coaching conversations — NVC, style, career, life, language — that
+ never search the web and never leave this machine.
+
+ No prerequisites — everything installs automatically.
+` : `
  Installs a local LLM (Ollama by default) and REFUGIO's chat window, plus
  optional personal connectors (WhatsApp, email, Notion, memory)
  and business connectors (Slack, Jira, and more).
 
  No prerequisites — everything installs automatically.
  You can skip any connector and add credentials later.
-`)
+`
+  console.log(`
+${C.bold}============================================================
+ 🏔️  ${ED.product} Installer
+ A self-hosted refuge for your AI — runs on your own machine
+============================================================${C.reset}
+${body}`)
 }
 
 // ── Phase 2: Check Dependencies ──────────────────────────────
@@ -955,7 +1206,7 @@ async function preflight(targetDir) {
   // about the wrong port is worse than no question: it teaches people to say
   // yes to killing processes the installer has no business touching.
   const wantsOwuiPort = process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1"
-  const uiPort = wantsOwuiPort ? 8080 : parseInt(process.env.REFUGIO_CHAT_PORT || "8090", 10)
+  const uiPort = wantsOwuiPort ? 8080 : parseInt(process.env.REFUGIO_CHAT_PORT || String(ED.chatPort), 10)
   try {
     const portCheck = isWin
       ? runQuiet(`netstat -ano | findstr :${uiPort} | findstr LISTENING`)
@@ -1009,7 +1260,7 @@ async function preflight(targetDir) {
 // ── Phase 3: Clone & Install ─────────────────────────────────
 
 async function cloneAndInstall(targetDir) {
-  console.log(`${C.bold}Installing REFUGIO...${C.reset}\n`)
+  console.log(`${C.bold}Installing ${ED.product}...${C.reset}\n`)
 
   // Track which version to install — override with REFUGIO_VERSION env var
   const refugioVersion = process.env.REFUGIO_VERSION || "main"
@@ -1018,9 +1269,9 @@ async function cloneAndInstall(targetDir) {
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(targetDir, "package.json"), "utf-8"))
       if (pkg.name === "refugio") {
-        ok(`Found existing REFUGIO at ${targetDir}`)
+        ok(`Found existing ${ED.product} at ${targetDir}`)
         console.log(`    ${C.dim}This will update to ${refugioVersion}.`)
-        console.log(`    Your credentials and settings in ~/.refugio.env are not affected.${C.reset}`)
+        console.log(`    Your credentials and settings in ~/${ED.envFile} are not affected.${C.reset}`)
         const update = await confirm("Update?", true)
         if (update) {
           run("git fetch --tags origin", { cwd: targetDir })
@@ -1033,7 +1284,7 @@ async function cloneAndInstall(targetDir) {
       }
     } catch {}
   } else {
-    ok("Cloning REFUGIO repository...")
+    ok(`Cloning the ${ED.product} repository...`)
     run(`git clone --branch ${refugioVersion} https://github.com/Phantazein-apps/refugio.git "${targetDir}"`)
   }
 
@@ -1077,7 +1328,12 @@ function writeEnvFile(envPath, env) {
     { header: "Salesforce", keys: ["SALESFORCE_INSTANCE_URL", "SALESFORCE_USERNAME", "SALESFORCE_PASSWORD", "SALESFORCE_SECURITY_TOKEN"] }
   ]
 
-  let content = "# REFUGIO Credentials (chmod 600)\n# Edit values below, then start REFUGIO\n\n"
+  let content = `# ${ED.product} Credentials (chmod 600)\n# Edit values below, then start ${ED.product}\n\n`
+  // Which product this file belongs to, in the file itself. The marker beside
+  // the code is the authority, but a credentials file that says nothing about
+  // its edition is one nobody can identify when two of them are sitting in the
+  // same home directory after a switch.
+  content += `# -- Edition ${"─".repeat(43)}\nREFUGIO_EDITION=${ED.id}\n\n`
 
   for (const section of sections) {
     content += `# -- ${section.header} ${"─".repeat(Math.max(0, 50 - section.header.length))}\n`
@@ -1187,7 +1443,7 @@ async function promptCredentials(envPath, targetDir) {
     ok("Using LM Studio (http://localhost:1234)")
   } else if (llmChoice === "3") {
     env.REFUGIO_ENGINE = ""
-    ok("Skipping LLM engine — configure later in ~/.refugio.env")
+    ok(`Skipping LLM engine — configure later in ~/${ED.envFile}`)
   } else {
     env.OLLAMA_BASE_URL = OLLAMA_URL
     env.REFUGIO_ENGINE = "ollama"
@@ -1683,7 +1939,7 @@ async function setupMemPalace(env) {
 }
 
 async function startREFUGIO(targetDir, env, autoStarted) {
-  console.log(`${C.bold}Starting REFUGIO...${C.reset}\n`)
+  console.log(`${C.bold}Starting ${ED.product}...${C.reset}\n`)
 
   // Which surface owns the UI decides everything below. This block used to be
   // hard-wired to Open WebUI on 8080 — so on a v2 install it waited FIVE
@@ -1691,24 +1947,24 @@ async function startREFUGIO(targetDir, env, autoStarted) {
   // the whole time, and then never reached the domain setup at all. That is why
   // https://refugio stopped appearing.
   const usingOwui = process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1"
-  const CHAT_PORT = parseInt(env.REFUGIO_CHAT_PORT || "8090", 10)
+  const CHAT_PORT = parseInt(env.REFUGIO_CHAT_PORT || String(ED.chatPort), 10)
   const PORT = usingOwui ? 8080 : CHAT_PORT
 
   if (autoStarted) {
     // The supervisor (start-refugio.cjs) is already running via launchd/systemd
     // (setupAutoStart runs before this function)
-    ok("REFUGIO supervisor started via auto-start service")
+    ok(`${ED.product} supervisor started via auto-start service`)
   } else {
     // On-demand mode (low-RAM): no login service, so launch the supervisor now
     // (detached) for this session. It won't relaunch on future logins.
     try {
-      const out = fs.openSync(path.join(home, ".refugio-logs", "refugio.log"), "a")
+      const out = fs.openSync(path.join(home, ED.logDir, "refugio.log"), "a")
       const child = spawn(process.execPath, [path.join(targetDir, "start-refugio.cjs"), "--no-browser"], {
         detached: true, stdio: ["ignore", out, out], cwd: targetDir
       })
       child.unref()
       try { fs.closeSync(out) } catch {}  // child inherited the fd; parent doesn't need it
-      ok("REFUGIO supervisor started (on-demand)")
+      ok(`${ED.product} supervisor started (on-demand)`)
     } catch (e) {
       warn(`Could not start supervisor: ${e.message} — run: refugio`)
     }
@@ -1718,7 +1974,7 @@ async function startREFUGIO(targetDir, env, autoStarted) {
   // longer than the terminal width with \r leaves wrapped residue behind.
   // \x1b[K clears from the cursor to end of line after each rewrite.
   const waitStart = Date.now()
-  const surface = usingOwui ? "Open WebUI" : "REFUGIO"
+  const surface = usingOwui ? "Open WebUI" : ED.product
   // The chat server binds immediately; only Open WebUI needs minutes. Waiting
   // five minutes either way meant a failure looked identical to a slow start.
   const readyPath = usingOwui ? "/api/config" : "/api/chat/status"
@@ -1746,7 +2002,7 @@ async function startREFUGIO(targetDir, env, autoStarted) {
     // it speaks MCP itself, and it has no login — so on the default path the
     // browser opens and that is the whole of it.
     if (!usingOwui) {
-      ok("Opening REFUGIO...")
+      ok(`Opening ${ED.product}...`)
       openBrowser(refugioUrl)
       return refugioUrl
     }
@@ -1877,11 +2133,11 @@ function setupAutoStart(targetDir) {
   if (os.platform() === "darwin") {
     // macOS: launchd plist
     const plistDir = path.join(home, "Library", "LaunchAgents")
-    const plistPath = path.join(plistDir, "com.phantazein.refugio.plist")
+    const plistPath = path.join(plistDir, `${ED.agentLabel}.plist`)
 
     if (!fs.existsSync(plistDir)) fs.mkdirSync(plistDir, { recursive: true })
 
-    const logDir = path.join(home, ".refugio-logs")
+    const logDir = path.join(home, ED.logDir)
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true })
 
     const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1889,7 +2145,7 @@ function setupAutoStart(targetDir) {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.phantazein.refugio</string>
+    <string>${ED.agentLabel}</string>
     <key>ProgramArguments</key>
     <array>
         <string>${nodePath}</string>
@@ -1915,24 +2171,24 @@ function setupAutoStart(targetDir) {
     try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
     try {
       execSync(`launchctl bootstrap gui/$(id -u) "${plistPath}"`, { stdio: "ignore" })
-      ok("REFUGIO will auto-start on login (launchd)")
+      ok(`${ED.product} will auto-start on login (launchd)`)
     } catch {
       try {
         execSync(`launchctl load "${plistPath}"`, { stdio: "ignore" })
-        ok("REFUGIO will auto-start on login (launchd)")
+        ok(`${ED.product} will auto-start on login (launchd)`)
       } catch {
-        warn("Could not register auto-start — run manually: node ~/refugio/start-refugio.cjs")
+        warn(`Could not register auto-start — run manually: node ${startScript}`)
       }
     }
   } else if (os.platform() === "linux") {
     // Linux: systemd user service
     const serviceDir = path.join(home, ".config", "systemd", "user")
-    const servicePath = path.join(serviceDir, "refugio.service")
+    const servicePath = path.join(serviceDir, `${ED.cli}.service`)
 
     if (!fs.existsSync(serviceDir)) fs.mkdirSync(serviceDir, { recursive: true })
 
     const service = `[Unit]
-Description=REFUGIO
+Description=${ED.product}
 After=network.target
 
 [Service]
@@ -1948,21 +2204,21 @@ WantedBy=default.target
     fs.writeFileSync(servicePath, service)
     try {
       execSync("systemctl --user daemon-reload", { stdio: "ignore" })
-      execSync("systemctl --user enable refugio.service", { stdio: "ignore" })
-      ok("REFUGIO will auto-start on login (systemd)")
+      execSync(`systemctl --user enable ${ED.cli}.service`, { stdio: "ignore" })
+      ok(`${ED.product} will auto-start on login (systemd)`)
     } catch {
-      warn("Could not register auto-start — run manually: node ~/refugio/start-refugio.cjs")
+      warn(`Could not register auto-start — run manually: node ${startScript}`)
     }
   } else if (isWin) {
     // Windows: VBScript in Startup folder (runs without console window)
     try {
       const startupDir = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-      const vbsPath = path.join(startupDir, "REFUGIO.vbs")
+      const vbsPath = path.join(startupDir, `${ED.product}.vbs`)
       const vbs = `Set WshShell = CreateObject("WScript.Shell")\nWshShell.Run """${nodePath}"" ""${startScript}"" --no-browser", 0, False`
       fs.writeFileSync(vbsPath, vbs)
-      ok("REFUGIO will auto-start on login (Startup folder)")
+      ok(`${ED.product} will auto-start on login (Startup folder)`)
     } catch {
-      warn("Could not register auto-start — run manually: node ~/refugio/start-refugio.cjs")
+      warn(`Could not register auto-start — run manually: node ${startScript}`)
     }
   }
 
@@ -1974,20 +2230,20 @@ WantedBy=default.target
 // WebUI isn't resident all day. The user starts REFUGIO when they want it and
 // frees the RAM by quitting (Ctrl+C / `refugio stop`).
 function setupOnDemand(targetDir, nodePath, startScript) {
-  try { fs.mkdirSync(path.join(home, ".refugio-logs"), { recursive: true }) } catch {}
+  try { fs.mkdirSync(path.join(home, ED.logDir), { recursive: true }) } catch {}
 
   // Remove any existing login auto-start so it truly won't launch at boot.
   if (os.platform() === "darwin") {
-    const plistPath = path.join(home, "Library", "LaunchAgents", "com.phantazein.refugio.plist")
+    const plistPath = path.join(home, "Library", "LaunchAgents", `${ED.agentLabel}.plist`)
     try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
     try { if (fs.existsSync(plistPath)) fs.unlinkSync(plistPath) } catch {}
   } else if (os.platform() === "linux") {
-    try { execSync("systemctl --user disable refugio.service", { stdio: "ignore" }) } catch {}
-    try { fs.unlinkSync(path.join(home, ".config", "systemd", "user", "refugio.service")) } catch {}
+    try { execSync(`systemctl --user disable ${ED.cli}.service`, { stdio: "ignore" }) } catch {}
+    try { fs.unlinkSync(path.join(home, ".config", "systemd", "user", `${ED.cli}.service`)) } catch {}
     try { execSync("systemctl --user daemon-reload", { stdio: "ignore" }) } catch {}
   } else if (isWin) {
     try {
-      const vbsPath = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "REFUGIO.vbs")
+      const vbsPath = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", `${ED.product}.vbs`)
       if (fs.existsSync(vbsPath)) fs.unlinkSync(vbsPath)
     } catch {}
   }
@@ -2002,16 +2258,34 @@ function setupOnDemand(targetDir, nodePath, startScript) {
     // holding a terminal open, which is not where a fallback belongs.
     const binDir = path.join(home, ".local", "bin")
     try { fs.mkdirSync(binDir, { recursive: true }) } catch {}
+    // Every name in here is the edition's: the command, the log directory, the
+    // port it probes and the product it reports. A REFUGIO Listener install
+    // writing a `refugio` on PATH would take over the other product's command
+    // and then start the wrong supervisor from it.
+    const menubarCase = ED.id === "standard" ? `
+  menubar)
+    # Relaunch the menu-bar app and show what it decided. It writes one line per
+    # launch saying whether it got a slot in the menu bar.
+    if [ -d /Applications/${ED.macApp} ]; then
+      pkill -f "${ED.macApp}/Contents/MacOS/RefugioBar" 2>/dev/null
+      sleep 1
+      open /Applications/${ED.macApp}
+      sleep 3
+      echo "--- $LOGS/menubar.log ---"
+      tail -n 5 "$LOGS/menubar.log" 2>/dev/null || echo "(no log yet — this build predates it)"
+    else
+      echo "Menu-bar app is not installed. Build it with: cd $DIR/menubar && ./install.sh"
+    fi ;;` : ""
     const cli = `#!/bin/sh
-# REFUGIO on-demand launcher
+# ${ED.product} on-demand launcher
 NODE="${nodePath}"
 DIR="${targetDir}"
-LOGS="$HOME/.refugio-logs"
+LOGS="$HOME/${ED.logDir}"
 PIDF="$LOGS/supervisor.pid"
 
 refugio_stop() {
-  if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "REFUGIO stopped (RAM freed)"
-  else echo "REFUGIO is not running"; fi
+  if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then echo "${ED.product} stopped (RAM freed)"
+  else echo "${ED.product} is not running"; fi
 }
 refugio_bg() {
   mkdir -p "$LOGS"
@@ -2022,48 +2296,35 @@ case "$1" in
   stop) refugio_stop ;;
   bg)
     refugio_bg
-    echo "REFUGIO starting in the background — 'refugio status' to check, 'refugio stop' to stop." ;;
+    echo "${ED.product} starting in the background — '${ED.cli} status' to check, '${ED.cli} stop' to stop." ;;
   restart)
     refugio_stop
     sleep 2
     refugio_bg
-    echo "REFUGIO restarting in the background — 'refugio status' to check." ;;
+    echo "${ED.product} restarting in the background — '${ED.cli} status' to check." ;;
   status)
-    if curl -s --max-time 2 http://127.0.0.1:8090/api/chat/status >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8090"
+    if curl -s --max-time 2 http://127.0.0.1:${ED.chatPort}/api/chat/status >/dev/null 2>&1; then echo "running -> http://127.0.0.1:${ED.chatPort}"
     elif curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080 (Open WebUI)"
-    else echo "stopped"; fi ;;
-  menubar)
-    # Relaunch the menu-bar app and show what it decided. It writes one line per
-    # launch saying whether it got a slot in the menu bar.
-    if [ -d /Applications/REFUGIO.app ]; then
-      pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar" 2>/dev/null
-      sleep 1
-      open /Applications/REFUGIO.app
-      sleep 3
-      echo "--- $LOGS/menubar.log ---"
-      tail -n 5 "$LOGS/menubar.log" 2>/dev/null || echo "(no log yet — this build predates it)"
-    else
-      echo "Menu-bar app is not installed. Build it with: cd $DIR/menubar && ./install.sh"
-    fi ;;
+    else echo "stopped"; fi ;;${menubarCase}
   *)
-    echo "Starting REFUGIO... (Ctrl+C or 'refugio stop' to stop and free RAM)"
-    echo "Tip: 'refugio bg' starts it without holding this terminal."
+    echo "Starting ${ED.product}... (Ctrl+C or '${ED.cli} stop' to stop and free RAM)"
+    echo "Tip: '${ED.cli} bg' starts it without holding this terminal."
     exec "$NODE" "$DIR/start-refugio.cjs" ;;
 esac
 `
-    const cliPath = path.join(binDir, "refugio")
+    const cliPath = path.join(binDir, ED.cli)
     try { fs.writeFileSync(cliPath, cli); fs.chmodSync(cliPath, 0o755) } catch {}
 
     if (os.platform() === "darwin") {
       const cmd = `#!/bin/sh\nexec "${nodePath}" "${targetDir}/start-refugio.cjs"\n`
-      const cmdPath = path.join(targetDir, "Start REFUGIO.command")
+      const cmdPath = path.join(targetDir, startCommandName())
       try { fs.writeFileSync(cmdPath, cmd); fs.chmodSync(cmdPath, 0o755) } catch {}
       installMenuBarApp(targetDir)
     } else {
       const appsDir = path.join(home, ".local", "share", "applications")
       try { fs.mkdirSync(appsDir, { recursive: true }) } catch {}
-      const desktop = `[Desktop Entry]\nType=Application\nName=REFUGIO\nComment=Start your local AI\nExec="${nodePath}" "${targetDir}/start-refugio.cjs"\nTerminal=true\nCategories=Utility;\n`
-      try { fs.writeFileSync(path.join(appsDir, "refugio.desktop"), desktop) } catch {}
+      const desktop = `[Desktop Entry]\nType=Application\nName=${ED.product}\nComment=Start your local AI\nExec="${nodePath}" "${targetDir}/start-refugio.cjs"\nTerminal=true\nCategories=Utility;\n`
+      try { fs.writeFileSync(path.join(appsDir, `${ED.cli}.desktop`), desktop) } catch {}
       installLinuxTray(targetDir, appsDir)
     }
   } else {
@@ -2073,21 +2334,21 @@ esac
     const stop = [
       "@echo off",
       "setlocal enabledelayedexpansion",
-      'set "PIDF=%USERPROFILE%\\.refugio-logs\\supervisor.pid"',
-      'if not exist "%PIDF%" ( echo REFUGIO is not running & exit /b )',
+      `set "PIDF=%USERPROFILE%\\${ED.logDir}\\supervisor.pid"`,
+      `if not exist "%PIDF%" ( echo ${ED.product} is not running & exit /b )`,
       'set /p PID=<"%PIDF%"',
-      "taskkill /PID !PID! /T /F >nul 2>&1 && echo REFUGIO stopped (RAM freed) || echo REFUGIO is not running",
+      `taskkill /PID !PID! /T /F >nul 2>&1 && echo ${ED.product} stopped (RAM freed) || echo ${ED.product} is not running`,
     ].join("\r\n") + "\r\n"
     try { fs.writeFileSync(path.join(targetDir, "Stop-REFUGIO.bat"), stop) } catch {}
     installWindowsTray(targetDir)
   }
 
-  ok("Low-RAM mode: REFUGIO will NOT auto-start on login (keeps your RAM free)")
+  ok(`Low-RAM mode: ${ED.product} will NOT auto-start on login (keeps your RAM free)`)
   if (!isWin) {
-    ok("Start anytime:  refugio   ·   stop + free RAM:  refugio stop")
+    ok(`Start anytime:  ${ED.cli}   ·   stop + free RAM:  ${ED.cli} stop`)
     const onPath = (process.env.PATH || "").split(":").includes(path.join(home, ".local", "bin"))
-    if (!onPath) ok(`(if 'refugio' isn't found: run ${path.join(home, ".local", "bin", "refugio")}, or add ~/.local/bin to PATH)`)
-    if (os.platform() === "darwin") ok(`Or double-click:  ${path.join(targetDir, "Start REFUGIO.command")}`)
+    if (!onPath) ok(`(if '${ED.cli}' isn't found: run ${path.join(home, ".local", "bin", ED.cli)}, or add ~/.local/bin to PATH)`)
+    if (os.platform() === "darwin") ok(`Or double-click:  ${path.join(targetDir, startCommandName())}`)
   } else {
     ok(`Start: double-click ${path.join(targetDir, "Start-REFUGIO.bat")}`)
     ok(`Stop + free RAM: double-click ${path.join(targetDir, "Stop-REFUGIO.bat")}`)
@@ -2099,7 +2360,15 @@ esac
 async function main() {
   const args = process.argv.slice(2)
   const flags = new Set(args.filter(a => a.startsWith("--")))
-  const positional = args.filter(a => !a.startsWith("--"))
+  // A flag's VALUE is not a positional argument. `--edition listener` used to
+  // leave "listener" in this list, and the directory rule below would then
+  // install into ./listener — the one bug a two-product installer must not
+  // have, because it lands the wrong product in an unexpected place and says
+  // nothing. `--dir` was already immune by accident (its own branch wins);
+  // this makes both immune on purpose.
+  const VALUED_FLAGS = new Set(["--edition", "--dir"])
+  const positional = args.filter((a, i) =>
+    !a.startsWith("--") && !VALUED_FLAGS.has(args[i - 1]))
 
   if (flags.has("--help") || flags.has("-h")) {
     console.log(`
@@ -2107,26 +2376,44 @@ async function main() {
      or: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-node.cjs | node
 
   Options:
-    --no-start         Don't launch REFUGIO after install
+    --edition <id>     Which product: standard (default) or listener
+    --listener         Shorthand for --edition listener
+    --replace          Stand down the other edition if it is installed
+    --no-start         Don't launch after install
     --non-interactive  Skip credential prompts (create template only)
     --owui             Also install Open WebUI (legacy interface, being retired)
     --skip-owui        No-op, kept for compatibility — Open WebUI is now opt-in
     --help             Show this help
 
   Environment:
+    REFUGIO_EDITION=listener  Same as --listener
     REFUGIO_ENGINE=lmstudio   Use LM Studio's local server (:1234) instead of Ollama
     REFUGIO_ENGINE=none       Skip the LLM engine; configure it later by hand
     REFUGIO_MODEL=<tag>       Override the auto-selected Ollama model
     REFUGIO_OWUI=1            Same as --owui
 
+  Editions:
+    REFUGIO and REFUGIO Listener are separate products built from this one
+    repository, and a machine holds one at a time. They install to different
+    directories (~/refugio and ~/refugio-listener), keep separate conversations
+    and credentials, and serve on different ports. REFUGIO carries the
+    connectors; the Listener carries the private coaching modes.
+
   Examples:
     node install-node.cjs                    Interactive install to ~/refugio
+    node install-node.cjs --listener         Install REFUGIO Listener instead
+    node install-node.cjs --listener --replace   ...replacing an existing REFUGIO
     node install-node.cjs ./my-refugio       Install to custom directory
     node install-node.cjs --no-start         Install without launching
     node install-node.cjs --non-interactive  Headless install (CI-friendly)
 `)
     return
   }
+
+  // Which product, before anything else: it decides the directory, the
+  // credentials file, the port and the name on every line printed below.
+  const editionId = pickEdition(args)
+  ED = { id: editionId, ...EDITION_BOOT[editionId] }
 
   // Determine target directory
   const dirIdx = args.indexOf("--dir")
@@ -2136,18 +2423,28 @@ async function main() {
   } else if (positional.length > 0) {
     targetDir = path.resolve(positional[0])
   } else {
-    targetDir = path.join(home, "refugio")
+    targetDir = path.join(home, ED.dir)
   }
 
-  const envPath = path.join(home, ".refugio.env")
-
   showBanner()
+
+  // Before the clone, because a refusal that has already downloaded a
+  // repository into the user's home directory is not a refusal.
+  checkEditionConflict(editionId, flags)
 
   const { hasUV } = checkDeps()
 
   await preflight(targetDir)
 
   await cloneAndInstall(targetDir)
+
+  // The repository exists now, so the real edition table does too.
+  ED = { ...loadEdition(targetDir, editionId), dir: ED.dir }
+  // The fact, written beside the code: the supervisor and the chat server read
+  // this rather than depending on an environment that launchd will not carry.
+  try { fs.writeFileSync(path.join(targetDir, ".refugio-edition"), `${editionId}\n`) } catch {}
+
+  const envPath = path.join(home, ED.envFile)
 
   if (!checkMachineSupported(targetDir, flags)) return
 
@@ -2200,7 +2497,7 @@ async function main() {
   }
 
   console.log(`${C.bold}============================================================`)
-  console.log(` 🏔️  REFUGIO is ready!`)
+  console.log(` 🏔️  ${ED.product} is ready!`)
   console.log(`============================================================${C.reset}`)
   console.log("")
   console.log(`  Installation:  ${targetDir}`)
@@ -2211,31 +2508,31 @@ async function main() {
     // may open behind the terminal, and someone who does not know a setup
     // screen is waiting will conclude their connectors were never configured.
     console.log(`  ${C.bold}Finish in the window:${C.reset} choose a model and switch on your connectors.`)
-    console.log(`  ${C.dim}REFUGIO opens setup the first time it starts. It is also at /setup, and`)
+    console.log(`  ${C.dim}${ED.product} opens setup the first time it starts. It is also at /setup, and`)
     console.log(`  everything in it is in Settings afterwards.${C.reset}`)
     console.log("")
   }
   if (flags.has("--non-interactive")) {
     // Headless: nothing was auto-started or launcher-installed.
-    console.log(`  To start REFUGIO:`)
+    console.log(`  To start ${ED.product}:`)
     console.log(`    node ${path.join(targetDir, "start-refugio.cjs")}`)
   } else if (isLowRam()) {
     if (isWin) {
-      console.log(`  Start REFUGIO:     double-click ${path.join(targetDir, "Start-REFUGIO.bat")}`)
+      console.log(`  Start ${ED.product}:     double-click ${path.join(targetDir, "Start-REFUGIO.bat")}`)
       console.log(`  Stop + free RAM:   double-click ${path.join(targetDir, "Stop-REFUGIO.bat")}`)
     } else {
-      const extra = os.platform() === "darwin" ? `   (or double-click "Start REFUGIO.command")` : ""
-      console.log(`  Start REFUGIO:     refugio${extra}`)
-      console.log(`  Stop + free RAM:   refugio stop`)
+      const extra = os.platform() === "darwin" ? `   (or double-click "${startCommandName()}")` : ""
+      console.log(`  Start ${ED.product}:     ${ED.cli}${extra}`)
+      console.log(`  Stop + free RAM:   ${ED.cli} stop`)
     }
     console.log("")
-    console.log(`  Low-RAM mode: REFUGIO does NOT auto-start on login, so it only`)
+    console.log(`  Low-RAM mode: ${ED.product} does NOT auto-start on login, so it only`)
     console.log(`  uses memory while you're actually using it.`)
   } else {
-    console.log(`  To start REFUGIO manually:`)
+    console.log(`  To start ${ED.product} manually:`)
     console.log(`    node ${path.join(targetDir, "start-refugio.cjs")}`)
     console.log("")
-    console.log(`  REFUGIO will auto-start on login.`)
+    console.log(`  ${ED.product} will auto-start on login.`)
   }
   console.log("")
 }
