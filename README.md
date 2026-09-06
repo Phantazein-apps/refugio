@@ -61,7 +61,7 @@ This repository builds two, and a machine holds one of them at a time.
 | What it is for | Your own data, reachable by a local model — WhatsApp, email, reminders, notes, Notion, Slack, Jira | Private coaching conversations that never leave the machine |
 | Install with | `install-refugio` | `install-listener` |
 | Lives in | `~/refugio` | `~/refugio-listener` |
-| Conversations in | `~/.refugio-data` | `~/.refugio-listener-data` |
+| Conversations in | `~/refugio/data` | `~/refugio-listener/data` |
 | Credentials in | `~/.refugio.env` | `~/.refugio-listener.env` |
 | Serves on | `127.0.0.1:8090` | `127.0.0.1:8091` |
 | Connectors | all of them | none — coaching modes are handed no tools |

@@ -976,7 +976,10 @@ function standDown(other) {
 
   ok(`${other.product} stopped — its folder is still at ${other.dir}`)
   if (fs.existsSync(marker) || row) {
-    console.log(`    ${C.dim}Bring it back later with: node ${path.join(other.dir, "install-node.cjs")} --replace${C.reset}`)
+    // With its edition named. That installer defaults to standard when nothing
+    // says otherwise, so the bare command would reinstall the OTHER product
+    // into the other directory and leave this folder sitting where it is.
+    console.log(`    ${C.dim}Bring it back later with: node ${path.join(other.dir, "install-node.cjs")} --edition ${other.id} --replace${C.reset}`)
   }
 }
 

@@ -24,7 +24,8 @@ install *offers*, and everything a person's data touches.
 |---|---|---|
 | Modes offered | category `data` — `whatsapp` | category `coaching` — `nvc`, `styles`, `spanish`, `career`, `life`, and the paired `nvc+whatsapp` |
 | Install directory | `~/refugio` | `~/refugio-listener` |
-| Conversations, settings | `~/.refugio-data` | `~/.refugio-listener-data` |
+| Conversations, settings | `~/refugio/data` | `~/refugio-listener/data` |
+| …on a packaged install | `~/.refugio-data` | `~/.refugio-listener-data` |
 | Credentials | `~/.refugio.env` | `~/.refugio-listener.env` |
 | Logs | `~/.refugio-logs` | `~/.refugio-listener-logs` |
 | Chat port | 8090 | 8091 |
