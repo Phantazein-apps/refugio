@@ -16,6 +16,29 @@ const isWin = os.platform() === "win32"
 const home = os.homedir()
 const REFUGIO_DIR = path.resolve(__dirname)
 
+// ── Which product this install is ───────────────────────────
+//
+// REFUGIO and REFUGIO Listener are one codebase and two installs, and every
+// path below that mentions the home directory is one of the things that
+// differs between them. Resolved the same way the chat server resolves it —
+// the environment first, then the .refugio-edition marker the installer wrote
+// beside this file, then standard — so a supervisor started by launchd with no
+// environment and a supervisor started by hand agree about which product they
+// are supervising.
+const { editionFor, isEdition, MARKER_FILE, DEFAULT_EDITION } = require(path.join(REFUGIO_DIR, "editions.cjs"))
+const EDITION = (() => {
+  const asked = (process.env.REFUGIO_EDITION || "").trim()
+  if (asked) return isEdition(asked) ? asked : DEFAULT_EDITION
+  try {
+    const marked = fs.readFileSync(path.join(REFUGIO_DIR, MARKER_FILE), "utf-8").trim()
+    if (isEdition(marked)) return marked
+  } catch {}
+  return DEFAULT_EDITION
+})()
+const PRODUCT = editionFor(EDITION)
+const LOG_DIR = path.join(home, PRODUCT.logDir)
+const ENV_FILE = path.join(home, PRODUCT.envFile)
+
 /**
  * Is this a packaged install — laid down by the .pkg or .msi rather than cloned
  * by install-node.cjs?
@@ -46,7 +69,7 @@ const PACKAGED = (() => {
 
 /** Where mutable state goes: per-user under a packaged install, alongside the
  *  code for a git checkout, which is where it has always been. */
-const STATE_DIR = PACKAGED ? path.join(home, ".refugio-data") : REFUGIO_DIR
+const STATE_DIR = PACKAGED ? path.join(home, PRODUCT.dataDir) : REFUGIO_DIR
 const CHAT_DATA_DIR = PACKAGED ? STATE_DIR : path.join(REFUGIO_DIR, "data")
 if (PACKAGED) { try { fs.mkdirSync(STATE_DIR, { recursive: true }) } catch {} }
 
@@ -71,7 +94,7 @@ function has(cmd) {
 
 function loadEnv() {
   const env = {}
-  const envFile = path.join(home, ".refugio.env")
+  const envFile = ENV_FILE
   if (fs.existsSync(envFile)) {
     fs.readFileSync(envFile, "utf-8").split("\n").forEach(line => {
       line = line.trim()
@@ -416,9 +439,9 @@ async function main() {
     : null
 
   // ── Prevent duplicate supervisors ──────────────────────────
-  const pidFile = path.join(home, ".refugio-logs", "supervisor.pid")
+  const pidFile = path.join(LOG_DIR, "supervisor.pid")
   try {
-    fs.mkdirSync(path.join(home, ".refugio-logs"), { recursive: true })
+    fs.mkdirSync(LOG_DIR, { recursive: true })
   } catch {}
 
   if (fs.existsSync(pidFile)) {
@@ -472,7 +495,7 @@ ${C.bold}============================================================
   // explicit flag wins, else REFUGIO_OWUI=1 opts in, else it stays off.
   const noOwui = owuiFlag === null ? env.REFUGIO_OWUI !== "1" : !owuiFlag
   if (Object.keys(env).length === 0) {
-    fail("No credentials found at ~/.refugio.env")
+    fail(`No credentials found at ~/${PRODUCT.envFile}`)
     fail("Run the installer first: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash")
     process.exit(1)
   }
@@ -774,7 +797,7 @@ ${C.bold}============================================================
 
     if (nextCount === 0 && prevCount > 0) {
       warn(`No connectors detected this launch, but ${mcpoConfigPath} lists ${prevCount} — keeping it.`)
-      warn(`Check ~/.refugio.env and that each connector's files are still present.`)
+      warn(`Check ~/${PRODUCT.envFile} and that each connector's files are still present.`)
     } else {
       if (nextCount < prevCount) {
         warn(`Connector count dropped ${prevCount} → ${nextCount}; rewriting ${path.basename(mcpoConfigPath)}.`)
@@ -818,7 +841,7 @@ ${C.bold}============================================================
   // Runs alongside Open WebUI for now; the banner points here first, and OWUI
   // stays available for anyone who wants its heavier feature set.
   // Disable with REFUGIO_CHAT=0.
-  const CHAT_PORT = parseInt(env.REFUGIO_CHAT_PORT || "8090", 10)
+  const CHAT_PORT = parseInt(env.REFUGIO_CHAT_PORT || String(PRODUCT.chatPort), 10)
   const chatEntry = path.join(REFUGIO_DIR, "chat", "server.js")
   let chatUrl = null
   if (env.REFUGIO_CHAT !== "0" && fs.existsSync(chatEntry)) {
@@ -837,13 +860,22 @@ ${C.bold}============================================================
       // a crash-looping chat server undebuggable — the exit code is all you get.
       let chatStdio = "ignore"
       try {
-        const chatLog = fs.openSync(path.join(home, ".refugio-logs", "chat.log"), "a")
+        const chatLog = fs.openSync(path.join(LOG_DIR, "chat.log"), "a")
         chatStdio = ["ignore", chatLog, chatLog]
       } catch {}
       supervisor.start("chat", nodeBin, ["--no-warnings", chatEntry, "--port", String(CHAT_PORT)], {
         env: {
           ...mergedEnv,
           REFUGIO_DATA_DIR: CHAT_DATA_DIR,
+          // The child must not re-derive this. It would get the same answer
+          // from the same marker, but a supervisor and its server disagreeing
+          // about which product they are is the one failure this split cannot
+          // tolerate, so it is stated rather than inferred twice.
+          REFUGIO_EDITION: EDITION,
+          // Same reasoning, one level further out: the setup screen writes
+          // credentials through the chat server, and it must write into the
+          // file this supervisor actually read.
+          REFUGIO_ENV_FILE: ENV_FILE,
           // Told explicitly rather than left to the chat server's own default.
           // Its default resolves relative to its own location, which is the
           // install directory — the one place a packaged install must not
@@ -853,7 +885,7 @@ ${C.bold}============================================================
         stdio: chatStdio
       })
       chatUrl = `http://127.0.0.1:${CHAT_PORT}`
-      ok(`REFUGIO chat → ${chatUrl}`)
+      ok(`${PRODUCT.product} chat → ${chatUrl}`)
     }
   }
 
@@ -908,7 +940,7 @@ ${C.bold}============================================================
     // (the supervisor otherwise discards child output).
     let owuiStdio = "ignore"
     try {
-      const owuiLog = fs.openSync(path.join(home, ".refugio-logs", "open-webui.log"), "a")
+      const owuiLog = fs.openSync(path.join(LOG_DIR, "open-webui.log"), "a")
       owuiStdio = ["ignore", owuiLog, owuiLog]
     } catch {}
     supervisor.start("open-webui", owuiBin, ["serve", "--port", String(PORT), "--host", "127.0.0.1"], {
@@ -1050,14 +1082,14 @@ window.location.href = '/';
 
   console.log(`
 ${C.bold}============================================================
- 🏔️  REFUGIO is running — supervisor active
+ 🏔️  ${PRODUCT.product} is running — supervisor active
 ============================================================${C.reset}
 
 ${access}
 
   Processes are monitored and auto-restarted if they crash.
-  To stop:  Ctrl+C, or ${C.bold}refugio stop${C.reset}
-  Logs:     ~/.refugio-logs/
+  To stop:  Ctrl+C, or ${C.bold}${PRODUCT.cli} stop${C.reset}
+  Logs:     ~/${PRODUCT.logDir}/
 `)
 
   // Keep the process alive — the supervisor event handlers will do the rest

@@ -1,5 +1,13 @@
 #!/bin/bash
-# Remove REFUGIO from this machine.
+# Remove REFUGIO — or REFUGIO Listener — from this machine.
+#
+# Which of the two it removes is decided by where this script is: it reads the
+# .refugio-edition marker beside itself and the editions.cjs table next to
+# that, so the copy in ~/refugio removes REFUGIO and the copy in
+# ~/refugio-listener removes the Listener, and neither touches the other's
+# conversations, credentials, login item or logs. Running it from a checkout
+# with no marker removes REFUGIO, which is what every install before the split
+# was.
 #
 # Written because "just delete the folder" is wrong in a way that costs people
 # things they didn't agree to lose. Three of REFUGIO's files are expensive:
@@ -32,6 +40,42 @@ for a in "$@"; do
 done
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; RESET=$'\033[0m'
+
+# ── Which product this copy removes ────────────────────────────────────
+#
+# The standard edition's values are the defaults, and are also the right answer
+# for every install that predates the split and for a bare checkout. Node reads
+# the real table when it can; when it cannot — no node, no editions.cjs, a
+# tarball of just this file — the defaults stand and the script still removes
+# what a pre-split install put on the disk. That is why these are written out
+# here rather than left empty: a degraded run must remove REFUGIO correctly,
+# not remove nothing.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+EDITION="standard"
+[ -r "$HERE/.refugio-edition" ] && EDITION="$(tr -d '[:space:]' < "$HERE/.refugio-edition")"
+
+PRODUCT="REFUGIO"
+INSTALL_DIR="refugio"
+DATA_DIR=".refugio-data"
+ENV_FILE=".refugio.env"
+LOG_DIR=".refugio-logs"
+AGENT_LABEL="com.phantazein.refugio"
+MAC_APP="REFUGIO.app"
+CLI="refugio"
+BOOTSTRAP="install-refugio"
+
+if [ -r "$HERE/editions.cjs" ] && command -v node >/dev/null 2>&1; then
+  eval "$(node -e '
+    const e = require(process.argv[1]).editionFor(process.argv[2])
+    const q = (v) => `"${String(v).replace(/(["\\$`])/g, "\\$1")}"`
+    console.log([
+      `PRODUCT=${q(e.product)}`, `INSTALL_DIR=${q(e.installDir)}`,
+      `DATA_DIR=${q(e.dataDir)}`, `ENV_FILE=${q(e.envFile)}`,
+      `LOG_DIR=${q(e.logDir)}`, `AGENT_LABEL=${q(e.agentLabel)}`,
+      `MAC_APP=${q(e.macApp)}`, `CLI=${q(e.cli)}`, `BOOTSTRAP=${q(e.bootstrap)}`,
+    ].join("\n"))
+  ' "$HERE/editions.cjs" "$EDITION" 2>/dev/null)"
+fi
 say()  { printf '%s\n' "$*"; }
 step() { printf '▸ %s\n' "$*"; }
 gone=0; kept=0
@@ -74,7 +118,7 @@ confirm_destroy() {
 # different, reads as being asked the same thing repeatedly unless the shape of
 # it is stated first.
 if [ "$ALL" = 0 ] && [ "$YES" = 0 ]; then
-  say "${DIM}REFUGIO itself is removed without asking — a reinstall recreates it."
+  say "${DIM}$PRODUCT itself is removed without asking — a reinstall recreates it."
   say "You will be asked about four things that a reinstall cannot bring back:"
   say "your conversations, your setup credentials, your WhatsApp link, and Ollama."
   say "Every one of them defaults to KEEP.${RESET}"
@@ -84,34 +128,37 @@ fi
 # ── 1. Stop everything first ───────────────────────────────────────────
 # Removing files under a running supervisor leaves it thrashing on paths that
 # no longer exist, and a live Hermeneia keeps a lock on the WhatsApp database.
-step "Stopping REFUGIO"
+step "Stopping $PRODUCT"
 if [ "$DRY" = 0 ]; then
-  [ -f "$HOME/.refugio-logs/supervisor.pid" ] &&
-    kill "$(cat "$HOME/.refugio-logs/supervisor.pid")" 2>/dev/null
-  pkill -f "start-refugio" 2>/dev/null
-  pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar" 2>/dev/null
-  pkill -f "refugio-tray" 2>/dev/null
-  launchctl unload "$HOME/Library/LaunchAgents/com.phantazein.refugio.plist" 2>/dev/null
-  systemctl --user stop refugio.service 2>/dev/null
+  [ -f "$HOME/$LOG_DIR/supervisor.pid" ] &&
+    kill "$(cat "$HOME/$LOG_DIR/supervisor.pid")" 2>/dev/null
+  # Matched on this install's own path, not on the script name: both editions
+  # run a file called start-refugio.cjs, and a bare pkill would take down the
+  # other product's supervisor from inside this one's uninstall.
+  pkill -f "$HOME/$INSTALL_DIR/start-refugio" 2>/dev/null
+  pkill -f "$MAC_APP/Contents/MacOS/RefugioBar" 2>/dev/null
+  pkill -f "$CLI-tray" 2>/dev/null
+  launchctl unload "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist" 2>/dev/null
+  systemctl --user stop "$CLI.service" 2>/dev/null
   sleep 2
 fi
 say "  done"
 
 # ── 2. Things a reinstall recreates — removed without asking ───────────
-step "Removing REFUGIO itself"
-rm_path "/Applications/REFUGIO.app"
-rm_path "$HOME/Library/LaunchAgents/com.phantazein.refugio.plist"
-rm_path "$HOME/.config/systemd/user/refugio.service"
-rm_path "$HOME/.config/autostart/refugio-tray.desktop"
-rm_path "$HOME/.local/share/applications/refugio.desktop"
-rm_path "$HOME/.local/bin/refugio"
-rm_path "$HOME/.refugio-logs"
+step "Removing $PRODUCT itself"
+rm_path "/Applications/$MAC_APP"
+rm_path "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+rm_path "$HOME/.config/systemd/user/$CLI.service"
+rm_path "$HOME/.config/autostart/$CLI-tray.desktop"
+rm_path "$HOME/.local/share/applications/$CLI.desktop"
+rm_path "$HOME/.local/bin/$CLI"
+rm_path "$HOME/$LOG_DIR"
 
 # The menu-bar app's own preferences, including the position macOS remembers
 # for its status item. Left behind, a hidden-item state survives a reinstall
 # and the icon stays invisible for reasons nothing on disk explains.
 if [ "$DRY" = 0 ]; then
-  for d in com.phantazein.refugio.app com.phantazein.refugio.menubar; do
+  for d in "$AGENT_LABEL.app" "$AGENT_LABEL.menubar"; do
     defaults delete "$d" >/dev/null 2>&1 && say "  removed  menu-bar preferences ($d)"
   done
 
@@ -123,7 +170,7 @@ if [ "$DRY" = 0 ]; then
   # something nobody needs to act on.
   CC_PLIST="$HOME/Library/Group Containers/group.com.apple.controlcenter/Library/Preferences/group.com.apple.controlcenter.plist"
   if [ -r "$CC_PLIST" ]; then
-    for d in com.phantazein.refugio.app com.phantazein.refugio.menubar; do
+    for d in "$AGENT_LABEL.app" "$AGENT_LABEL.menubar"; do
       /usr/libexec/PlistBuddy -c "Delete :trackedApplications:$d" "$CC_PLIST" >/dev/null 2>&1 \
         && say "  removed  Control Center menu-bar entry ($d)"
     done
@@ -137,18 +184,18 @@ fi
 # ── 3. Chat history and settings ───────────────────────────────────────
 # Inside ~/refugio, which is why this is asked BEFORE that directory goes.
 step "Chat history and settings"
-if [ -d "$HOME/refugio/data" ] || [ -d "$HOME/.refugio-data" ]; then
+if [ -d "$HOME/$INSTALL_DIR/data" ] || [ -d "$HOME/$DATA_DIR" ]; then
   if confirm_destroy "Your conversations" \
-       "Every chat you have had with REFUGIO, and the per-connector scope toggles. Nothing you typed during setup is here — that is the next question."; then
-    rm_path "$HOME/refugio/data"
-    rm_path "$HOME/.refugio-data"
+       "Every chat you have had with $PRODUCT, and the per-connector scope toggles. Nothing you typed during setup is here — that is the next question."; then
+    rm_path "$HOME/$INSTALL_DIR/data"
+    rm_path "$HOME/$DATA_DIR"
   else
-    # Move it aside so removing ~/refugio doesn't take it anyway.
-    if [ -d "$HOME/refugio/data" ]; then
+    # Move it aside so removing the install directory doesn't take it anyway.
+    if [ -d "$HOME/$INSTALL_DIR/data" ]; then
       if [ "$DRY" = 0 ]; then
-        mkdir -p "$HOME/.refugio-data-saved" && cp -R "$HOME/refugio/data/." "$HOME/.refugio-data-saved/" 2>/dev/null
+        mkdir -p "$HOME/$DATA_DIR-saved" && cp -R "$HOME/$INSTALL_DIR/data/." "$HOME/$DATA_DIR-saved/" 2>/dev/null
       fi
-      say "  ${DIM}saved to ~/.refugio-data-saved — copy it back into ~/refugio/data after reinstalling${RESET}"
+      say "  ${DIM}saved to ~/$DATA_DIR-saved — copy it back into ~/$INSTALL_DIR/data after reinstalling${RESET}"
     fi
     keep_note "chat history"
   fi
@@ -157,20 +204,20 @@ else
 fi
 
 step "Credentials and configuration"
-if [ -f "$HOME/.refugio.env" ]; then
+if [ -f "$HOME/$ENV_FILE" ]; then
   if confirm_destroy "The credentials you typed during setup" \
-       "~/.refugio.env — your Epistole endpoint, Notion key, Slack token and the rest. Keep it and the installer reuses them; delete it and you enter them all again."; then
-    rm_path "$HOME/.refugio.env"
+       "~/$ENV_FILE — your Epistole endpoint, Notion key, Slack token and the rest. Keep it and the installer reuses them; delete it and you enter them all again."; then
+    rm_path "$HOME/$ENV_FILE"
   else
-    keep_note "~/.refugio.env (the installer will reuse it)"
+    keep_note "~/$ENV_FILE (the installer will reuse it)"
   fi
 else
   say "  ${DIM}none found${RESET}"
 fi
 
 # ── 4. The install directory ───────────────────────────────────────────
-step "Removing ~/refugio"
-rm_path "$HOME/refugio"
+step "Removing ~/$INSTALL_DIR"
+rm_path "$HOME/$INSTALL_DIR"
 
 # ── 5. WhatsApp ────────────────────────────────────────────────────────
 step "WhatsApp (Hermeneia)"
@@ -191,8 +238,9 @@ fi
 # models with it, so offering "delete the models?" first and "delete Ollama?"
 # second would ask people to answer the same thing twice.
 #
-# Neither is REFUGIO's by default: Ollama may predate this install and other
-# things may be using it. But REFUGIO is usually what put it there, and leaving
+# Neither is this product's by default: Ollama may predate this install and
+# other things may be using it — the OTHER edition included, if it was ever
+# here. But this installer is usually what put it there, and leaving
 # a multi-gigabyte service behind after an uninstall is its own kind of rude.
 step "Ollama"
 ollama_present=0
@@ -267,11 +315,11 @@ if [ "$DRY" = 1 ]; then
   say "${BOLD}Dry run complete${RESET} — $gone item(s) would be removed. Nothing was changed."
 else
   if [ "$kept" -gt 0 ]; then
-    say "${BOLD}REFUGIO removed${RESET} — $gone item(s) deleted, $kept kept."
+    say "${BOLD}$PRODUCT removed${RESET} — $gone item(s) deleted, $kept kept."
   else
-    say "${BOLD}REFUGIO removed${RESET} — $gone item(s) deleted."
+    say "${BOLD}$PRODUCT removed${RESET} — $gone item(s) deleted."
   fi
 fi
 say ""
 say "Reinstall with:"
-say "  ${DIM}curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash${RESET}"
+say "  ${DIM}curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/$BOOTSTRAP | bash${RESET}"

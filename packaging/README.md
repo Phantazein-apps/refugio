@@ -4,6 +4,15 @@
 configurable by policy. This document is mostly about the parts that are not
 obvious, and one part that is genuinely not possible.
 
+**These packages are REFUGIO's.** This repository also builds REFUGIO Listener
+— the coaching product, installed from `install-listener` into its own
+directory with its own data, port and login item ([`docs/editions.md`](../docs/editions.md)).
+It has no packaged install: the bundle identifiers, the configuration profiles
+and the ADMX template below are all written for one product, and a second set
+is a distribution decision — signing, identifiers, profiles — rather than a
+code change. `allowedModes` still behaves as described; on a REFUGIO machine it
+narrows the modes REFUGIO offers, which is the connector ones.
+
 ```
 packaging/
 ├── macos/

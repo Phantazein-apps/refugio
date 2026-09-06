@@ -20,6 +20,19 @@ and — for two of them — a read-only connector allowlist. Six ship: `nvc`,
 `nvc+whatsapp`. A seventh id, `listener`, is declared in the defaults and has
 no content, so it is not offerable.
 
+**Six ship in the build; no install offers all six.** The coaching modes are
+REFUGIO Listener's product and `whatsapp` is REFUGIO's, decided by category in
+`editions.cjs` and applied by `offeredModes()` / `modeOffered()`. Both products
+compile all of them — which is the point, because it means everything below is
+tested once and cannot rot in the edition nobody is currently working on. The
+split itself, and what it deliberately did not do, is
+[`docs/editions.md`](editions.md); the rest of this file is about the modes and
+is true in whichever product ships them.
+
+(The `listener` mode id and the `listener` EDITION are different things with
+the same name: the id is the Supportive Listener coaching mode that has not
+been written, and the edition is the product it would ship in.)
+
 The whole catalogue is one dependency-free module, `chat/modes.js`: the table,
 the copy the window renders, and the pure helpers every enforcement point
 calls. Nothing about a mode is written at runtime except its enablement boolean
@@ -31,7 +44,8 @@ own code.
 | What | Where |
 |---|---|
 | Registry, copy, pure helpers | `chat/modes.js` |
-| Enablement (one boolean per id) | `modes` block in `~/.refugio-data/connector-settings.json` |
+| Which product offers which modes | `offeredModes` / `modeOffered`, `chat/modes.js`; the table in `editions.cjs` |
+| Enablement (one boolean per id) | `modes` block in the edition's data directory — `~/.refugio-data/connector-settings.json`, or `~/.refugio-listener-data/…` |
 | A mode's own option (one boolean) | its own top-level block, e.g. `tutor: { thorough }` |
 | Per-conversation persistence | `conversations.mode TEXT` — `chat/store.js:65`, written at creation by `ensureConversation` (`store.js:92`) |
 | Which mode this turn runs in | `chat/server.js:1011` — read from the row, never from the client, after turn one |
@@ -41,6 +55,7 @@ own code.
 | Crisis floor | `crisisNotice()` (`modes.js:241`) appended at `server.js:1136`, to the stream and to the stored message |
 | Quiet titles | `maybeTitle` (`server.js:942`) is skipped; the registry's `titleLabel` plus the date is used |
 | Managed policy | `allowedModes` in `chat/managed.js`, clamped at load and refused per id in the routes |
+| Edition refusal | `validateMode`'s third refusal (`modes.js`), `wrongEditionMsg` for the two write routes (`server.js`) |
 
 Three rules hold across all of it:
 
@@ -116,7 +131,9 @@ what happened, and they generalise past the mode that found them.
 
 ## Adding a mode
 
-One registry entry is usually the whole change. `carriesCrisisLayer(mode)` is
+One registry entry is usually the whole change, and its `category` decides
+which product ships it — there is no second list to add it to, and a category
+no edition offers is caught by a test rather than by a mode nobody can reach. `carriesCrisisLayer(mode)` is
 the single predicate deciding which modes get the crisis layer **and** the code
 floor, and it reads `category === "coaching"` — a mode that is not in that
 category silently gets neither, which a test forbids by asserting both halves

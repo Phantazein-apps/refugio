@@ -29,10 +29,12 @@ import * as wizard from "./wizard.js";
 import * as updates from "./updates.js";
 import { WEB_TOOL, WEB_DEFAULTS, WEB_SEARCH_UI, webSearch, formatResults } from "./websearch.js";
 import {
-  CRISIS_RESOURCES, MODES, MODES_UI, MODE_DEFAULTS, MODE_OPTION_DEFAULTS, armWebSearch,
-  carriesCrisisLayer, crisisNotice, modeOption, modeOptionOn, modePreamble, modeSummaries, modeTitle,
-  modeToolFilter, toolRefusal, validateMode, modeDef,
+  CRISIS_RESOURCES, MODES, MODE_DEFAULTS, MODE_OPTION_DEFAULTS, armWebSearch,
+  carriesCrisisLayer, crisisNotice, modeOption, modeOptionOn, modePreamble, modeTitle,
+  modeToolFilter, toolRefusal, validateMode, modeDef, modeOffered, modesUi, offeredSummaries,
+  ownerEdition,
 } from "./modes.js";
+import { EDITION, PRODUCT } from "./edition.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
 
@@ -52,9 +54,13 @@ const argPort = (() => {
   const i = process.argv.indexOf("--port");
   return i > -1 ? parseInt(process.argv[i + 1], 10) : null;
 })();
-const PORT = argPort || parseInt(process.env.REFUGIO_CHAT_PORT || "8090", 10);
+// The edition's port and data directory are the defaults, not 8090 and
+// ~/.refugio-data. Two products that share either one are not two products:
+// the port would make a leftover Listener process answer as REFUGIO, and the
+// directory would put two sets of private conversations in one database.
+const PORT = argPort || parseInt(process.env.REFUGIO_CHAT_PORT || String(PRODUCT.chatPort), 10);
 
-const DATA_DIR = process.env.REFUGIO_DATA_DIR || join(homedir(), ".refugio-data");
+const DATA_DIR = process.env.REFUGIO_DATA_DIR || join(homedir(), PRODUCT.dataDir);
 const DB_PATH = join(DATA_DIR, "chat.db");
 
 const SYSTEM_PROMPT =
@@ -560,7 +566,12 @@ const MANAGED_MSG = "This is set by your organisation and cannot be changed here
 
 // ── First-run setup ─────────────────────────────────────────
 
-const ENV_PATH = process.env.REFUGIO_ENV_FILE || join(homedir(), ".refugio.env");
+// The edition's credentials file, not ~/.refugio.env. The setup screen writes
+// through here, and a Listener install writing into REFUGIO's file would hand
+// one product's setup answers to the other — and, on a machine where REFUGIO
+// was replaced rather than removed, quietly rewrite a file its own installer
+// left behind on purpose.
+const ENV_PATH = process.env.REFUGIO_ENV_FILE || join(homedir(), PRODUCT.envFile);
 
 /** Is this request coming from REFUGIO's own pages?
  *
@@ -658,21 +669,33 @@ function countConnectors(rows) {
  *
  *  Built in one place because it appears in three, and three hand-written
  *  copies of the same shape is how a surface ends up offering a mode the
- *  server will refuse. `available` is only the modes this build actually
- *  defines — an id in the defaults with no content stays invisible — and it
- *  never includes prompt text: that is instructions to a model, and pasting it
- *  into a window invites the reader to treat it as a promise. */
+ *  server will refuse. `available` is only the modes this EDITION offers — an
+ *  id in the defaults with no content stays invisible, and so does a mode that
+ *  belongs to the other product — and it never includes prompt text: that is
+ *  instructions to a model, and pasting it into a window invites the reader to
+ *  treat it as a promise.
+ *
+ *  `enabled` deliberately still carries every id in MODE_DEFAULTS, including
+ *  the other product's. The settings file is not rewritten by an edition: a
+ *  machine that ran REFUGIO Listener and now runs REFUGIO keeps its saved
+ *  choices intact, unoffered rather than erased, and gets them back if it goes
+ *  the other way. */
 function modesPayload(rows) {
   const byId = new Map((rows || []).map((r) => [r.id, r]));
   return {
-    ...MODES_UI,
+    ...modesUi(EDITION),
+    // Which product this is, so the window can name itself and a person
+    // looking for a mode that lives in the other one is told where it went
+    // rather than left to conclude it was removed.
+    edition: EDITION,
+    product: PRODUCT.product,
     // Sent so the window can tell REFUGIO's own words apart from the model's.
     // The server appends this to a reply whatever the model said, and someone
     // deciding whether to trust a phone number should be able to see who is
     // offering it.
     resources: CRISIS_RESOURCES,
     enabled: { ...MODE_DEFAULTS, ...(connectorSettings.modes || {}) },
-    available: modeSummaries().map((summary) => {
+    available: offeredSummaries(EDITION).map((summary) => {
       // The registry says what the option is; only the server knows whether it
       // is on, because only the server has read the settings file.
       const withOption = summary.option
@@ -734,6 +757,19 @@ function connectorNote(id, row) {
   if (row.state === "degraded") return `${label} is running but not connected right now.`;
   const summary = row.explanation?.summary;
   return summary ? `${label} ${summary}.` : `${label} is not ready.`;
+}
+
+/** Why a mode this build defines is nonetheless refused here.
+ *
+ *  One sentence, written once, for the two routes and matching the one
+ *  validateMode returns — three hand-written variants of "wrong product" is
+ *  three chances to name the wrong one. */
+function wrongEditionMsg(id) {
+  const def = modeDef(id);
+  const owner = def ? ownerEdition(def.category) : null;
+  return owner
+    ? `${def.label} is part of ${owner.product}, which installs separately.`
+    : `${def?.label || id} is not part of ${PRODUCT.product}.`;
 }
 
 function connectorPayload(rows) {
@@ -1260,6 +1296,12 @@ async function route(req, res, url) {
     // a stale page offering an id this build never shipped should be told so,
     // rather than have a boolean written for a mode nobody can reach.
     if (!MODES[id]) return sendJson(res, 400, { error: `There is no discussion mode called "${id.slice(0, 40)}".` });
+    // Then whether it is this product's mode at all. Before the policy check,
+    // because "your organisation blocked this" is the wrong answer for a mode
+    // no administrator could have permitted here in the first place, and
+    // before the write, because the switch must not be settable for a mode
+    // this install will refuse to enter.
+    if (!modeOffered(id, EDITION)) return sendJson(res, 400, { error: wrongEditionMsg(id) });
     if (!modeAllowed(id, POLICY)) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
     connectorSettings.modes = { ...connectorSettings.modes, [id]: !!body.enabled };
     saveSettings(connectorSettings);
@@ -1280,6 +1322,9 @@ async function route(req, res, url) {
     if (!opt) {
       return sendJson(res, 400, { error: `${id ? `"${id.slice(0, 40)}"` : "That mode"} has no option to set.` });
     }
+    // An option belongs to its mode, so it travels with it between products: a
+    // mode this edition does not offer has no setting anyone here can change.
+    if (!modeOffered(id, EDITION)) return sendJson(res, 400, { error: wrongEditionMsg(id) });
     // An option is locked with the mode it belongs to, not with the feature:
     // it is that mode's setting, and a mode nobody may switch on has no
     // setting anyone needs to change.
@@ -1806,7 +1851,7 @@ const server = http.createServer((req, res) => {
 // text nobody sees. Say what is wrong and stop.
 server.on("error", (e) => {
   if (e.code === "EADDRINUSE") {
-    log(`port ${PORT} is already in use — REFUGIO chat is probably already running.`);
+    log(`port ${PORT} is already in use — ${PRODUCT.product} chat is probably already running.`);
     log(`Open http://127.0.0.1:${PORT}, or stop the other copy and start again.`);
   } else {
     log(`could not start: ${e.message}`);
@@ -1817,7 +1862,7 @@ server.on("error", (e) => {
 // Bind to loopback only. This serves the user's private conversations with no
 // authentication — it must never be reachable from the network.
 server.listen(PORT, "127.0.0.1", async () => {
-  log(`REFUGIO chat → http://127.0.0.1:${PORT}`);
+  log(`${PRODUCT.product} chat → http://127.0.0.1:${PORT} (edition: ${EDITION})`);
   log(`store: ${DB_PATH}`);
   const model = await resolveModel();
   log(model ? `model: ${model}` : `no model yet (Ollama at ${OLLAMA_BASE})`);

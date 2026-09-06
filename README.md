@@ -52,10 +52,40 @@ Works on **macOS, Linux, and Windows**. No prerequisites — the installer handl
 
 ## Install
 
+### Two products
+
+This repository builds two, and a machine holds one of them at a time.
+
+|  | **REFUGIO** | **REFUGIO Listener** |
+|---|---|---|
+| What it is for | Your own data, reachable by a local model — WhatsApp, email, reminders, notes, Notion, Slack, Jira | Private coaching conversations that never leave the machine |
+| Install with | `install-refugio` | `install-listener` |
+| Lives in | `~/refugio` | `~/refugio-listener` |
+| Conversations in | `~/.refugio-data` | `~/.refugio-listener-data` |
+| Credentials in | `~/.refugio.env` | `~/.refugio-listener.env` |
+| Serves on | `127.0.0.1:8090` | `127.0.0.1:8091` |
+| Connectors | all of them | none — coaching modes are handed no tools |
+| Modes | Chat with WhatsApp | NVC, Style, Career, Life, Spanish Tutor |
+
+They are one codebase: the same chat window, the same model handling, the same
+guardrails, the same tests. What differs is which modes each one *offers* and
+everything a person's data touches — directory, database, credentials, port,
+login item, application name and the `refugio` / `refugio-listener` command.
+Nothing is shared, so neither can read the other's conversations, and the
+installer refuses to put the second one on a machine that has the first
+(`--replace` stands the old one down, keeping its folder and its history).
+
+The rest of this README is REFUGIO's. [`docs/editions.md`](docs/editions.md) is
+the split itself: why it exists, what it costs, and what is still REFUGIO-only.
+
 ### macOS / Linux
 
 ```bash
+# REFUGIO
 curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
+
+# REFUGIO Listener
+curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-listener | bash
 ```
 
 > **Deploying to a fleet?** There are `.pkg` and `.msi` builds designed for MDM
@@ -67,7 +97,11 @@ curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/instal
 ### Windows (PowerShell)
 
 ```powershell
+# REFUGIO
 irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio.ps1 | iex
+
+# REFUGIO Listener
+irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-listener.ps1 | iex
 ```
 
 This installs the **v2 beta** — REFUGIO's own chat window. It replaces Open WebUI and talks to your connectors over MCP directly, instead of proxying them through MCPO:
@@ -77,7 +111,7 @@ This installs the **v2 beta** — REFUGIO's own chat window. It replaces Open We
 - **Fewer moving parts.** MCPO exists only because Open WebUI can't speak MCP. The chat UI can, so it isn't started.
 - **Sources.** Every answer built from your data can show exactly which tool calls produced it — which chats were read, which reminders listed.
 - **Web search, off by default.** The one thing that leaves your machine. It has to be switched on, and then armed for each individual message, with a warning saying what is sent.
-- **Discussion modes, also off by default.** Six built-in frames for one conversation — NVC, communication styles, career, life, a Spanish tutor, and reading your own WhatsApp history. They *remove* capability rather than adding it: no web search, no tools, no generated titles. See below.
+- **Discussion modes, also off by default.** One built-in frame for one conversation — reading your own WhatsApp history. It *removes* capability rather than adding it: no web search, three read-only tools, no generated titles. The five coaching frames — NVC, communication styles, career, life, a Spanish tutor — are **REFUGIO Listener**, installed separately. See below.
 
 ### Known rough edges
 
@@ -111,7 +145,7 @@ Only that path installs `uv`, the Python virtual environment and PyTorch, and on
 ### What happens
 
 1. Installs **Node.js** and **Git** if missing (plus **[uv](https://docs.astral.sh/uv/)** only if you asked for Open WebUI)
-2. Clones REFUGIO to `~/refugio`
+2. Clones REFUGIO to `~/refugio` (or REFUGIO Listener to `~/refugio-listener`)
 3. Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM (or connects to **[LM Studio](https://lmstudio.ai/)** if you set `REFUGIO_ENGINE=lmstudio`)
 4. Downloads what connectors need to exist at all — the **WhatsApp bridge**, **email**, a **memory backend**, and **business** tools (Slack, Jira, ServiceNow, Salesforce) if you opt in. Which connectors are actually switched on is asked in the window, not here
 5. Sets up **https://refugio** as a local domain (mkcert + Caddy — asks for your admin password once)
@@ -126,6 +160,11 @@ Only that path installs `uv`, the Python virtual environment and PyTorch, and on
 ~/refugio/uninstall-refugio --dry-run    # show what would go, change nothing
 ~/refugio/uninstall-refugio --all        # everything, no questions
 ```
+
+The Listener's copy is at `~/refugio-listener/uninstall-refugio` and removes
+the Listener — its own directory, conversations, credentials, logs and login
+item — and nothing of REFUGIO's. Each copy knows which product it belongs to
+from the marker the installer wrote beside it.
 
 Deleting `~/refugio` by hand is not the same thing: your **chat history lives inside it** (`~/refugio/data`), and your **WhatsApp link lives in `~/hermeneia`** — losing that means scanning the QR code again. The uninstaller asks about both, and about your Ollama models, before touching them. Everything else — the app, the login item, the tray, the `refugio` command — goes without asking, because a reinstall recreates it.
 
@@ -173,20 +212,24 @@ Everything that used to be a terminal prompt is a page now: **http://127.0.0.1:8
 
 ### Discussion modes
 
-A mode is a named frame around **one conversation**: a system prompt, a set of guardrails, and a smaller set of capabilities. You switch one on in **Settings ▸ Discussion modes**, then pick it in the composer *before the first message*. After that it is fixed — the system prompt is rebuilt on every turn, so changing it mid-thread would silently reframe everything already said. Leaving a mode means starting a new chat, and there is a **Leave** button that says so.
+A mode is a named frame around **one conversation**: a system prompt, a set of guardrails, and a smaller set of capabilities. You switch one on in **Settings**, then pick it in the composer *before the first message*. After that it is fixed — the system prompt is rebuilt on every turn, so changing it mid-thread would silently reframe everything already said. Leaving a mode means starting a new chat, and there is a **Leave** button that says so.
 
-| Mode | What it is for |
-|---|---|
-| **NVC Coach** | Nonviolent Communication. Think a situation through, or get a message reworded into observation, feeling, need and a request the other person can refuse. |
-| **Style Coach** | Communication styles (Merrill-Reid, 1981): how you come across, what you do under pressure, and how to reach one difficult person. |
-| **Career Coach** | Interview practice, negotiation wording, and decisions with their costs. No internet, so any number is one to check. |
-| **Life Coach** | One step small enough that you will do it, with the day and the place. Stops proposing steps when what you wanted was to be heard. |
-| **Spanish Tutor** | Conversation in Spanish at your level, corrected as you go, with a register switch (tú / usted) and drills on request. |
-| **Chat with WhatsApp** | Search, summarize and discuss your own message history. Read-only, and needs the WhatsApp connector. |
+**The coaching modes are a separate product.** Six modes are built here and each install offers the ones that are its own: REFUGIO offers the mode that reads a connector, and **REFUGIO Listener** offers the five coaching ones. Asking either for the other's mode is refused with the name of the product that has it, and switching products is an install, not a setting. The reasoning is in [`docs/editions.md`](docs/editions.md).
+
+| Mode | Product | What it is for |
+|---|---|---|
+| **Chat with WhatsApp** | REFUGIO | Search, summarize and discuss your own message history. Read-only, and needs the WhatsApp connector. |
+| **NVC Coach** | Listener | Nonviolent Communication. Think a situation through, or get a message reworded into observation, feeling, need and a request the other person can refuse. |
+| **Style Coach** | Listener | Communication styles (Merrill-Reid, 1981): how you come across, what you do under pressure, and how to reach one difficult person. |
+| **Career Coach** | Listener | Interview practice, negotiation wording, and decisions with their costs. No internet, so any number is one to check. |
+| **Life Coach** | Listener | One step small enough that you will do it, with the day and the place. Stops proposing steps when what you wanted was to be heard. |
+| **Spanish Tutor** | Listener | Conversation in Spanish at your level, corrected as you go, with a register switch (tú / usted) and drills on request. |
+
+Everything below is true of a mode in whichever product ships it. The code is one codebase and the guardrails are the same code.
 
 **What a mode takes away.** Web search is refused on a mode turn in two places, not hidden in one: the composer drops the arming button, the server forces it off, and the tool is refused again at the point it would run. A coaching mode is handed **no tools at all** — including memory, whose whole job is to persist and, in its GitHub-backed variant, upload what was said. And the sidebar title comes from the mode, not from what you typed: `NVC coaching — Aug 24`, never a summary of the thing you came here to say quietly.
 
-**Two modes may read, and only read.** NVC Coach can be opened as *NVC Coach + WhatsApp* when that connector is working, and the data mode reads it directly. Both are limited to `list_chats`, `list_messages` and `search_contacts` — the tool that sends a WhatsApp message is on the connector and in no mode's list, and a model that names it anyway is refused with an error it can read. Anything you want sent, you copy out and send yourself.
+**Two modes may read, and only read.** In the Listener, NVC Coach can be opened as *NVC Coach + WhatsApp* when that connector is working; in REFUGIO, the data mode reads it directly. Both are limited to `list_chats`, `list_messages` and `search_contacts` — the tool that sends a WhatsApp message is on the connector and in no mode's list, and a model that names it anyway is refused with an error it can read. Anything you want sent, you copy out and send yourself.
 
 **Safety, and what is prompt versus what is enforced.** Every coaching mode carries the same crisis text, and the copy in it was rewritten from measurements rather than written from intent. But prompt text is advisory: when your own words carry a signal and the reply did not already point at real help, **REFUGIO adds crisis resources itself**, in a separate box labelled *"From REFUGIO, not the model"* — because the floor exists precisely for the case where the model got it wrong, and a phone number should not inherit the model's authorship.
 

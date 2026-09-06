@@ -1,0 +1,22 @@
+#!/bin/bash
+# REFUGIO Listener Zero-Prereq Installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-listener | bash
+#
+# REFUGIO Listener is the private-coaching product built from this repository:
+# NVC, style, career, life and language modes, no connectors, no web search,
+# nothing leaving the machine. REFUGIO — the connector product — installs with
+# install-refugio instead, into a different directory, and a machine holds one
+# of them at a time. docs/editions.md is the whole story.
+#
+# This is deliberately a nine-line wrapper rather than a second copy of the
+# installer. Everything it would duplicate — installing Node and git, pinning
+# the version, handing the terminal to the Node installer — is logic that must
+# behave identically for both products, and two copies of it is two places for
+# a fix to land in only one.
+
+set -e
+
+export REFUGIO_EDITION=listener
+export REFUGIO_VERSION="${REFUGIO_VERSION:-v2.0.0-beta.2}"
+
+curl -fsSL "https://raw.githubusercontent.com/Phantazein-apps/refugio/${REFUGIO_VERSION}/install-refugio" | bash -s -- "$@"

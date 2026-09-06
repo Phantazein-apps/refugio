@@ -88,6 +88,16 @@ body {
   padding: 3px 5px; border-radius: var(--radius-sm);
 }
 .rail.collapsed .stage { display: none; }
+/* Which product this is, beside the wordmark rather than replacing it.
+   REFUGIO and REFUGIO Listener are one family and two installs, so the
+   wordmark is shared and the edition is the qualifier — and it is only ever
+   rendered when there is one to render, so the standard install looks exactly
+   as it always has. */
+.brand-edition {
+  font-family: var(--display); font-weight: 400; letter-spacing: .01em;
+  font-size: .8125rem; color: var(--ink-soft); margin-left: .25rem;
+}
+.rail.collapsed .brand-edition { display: none; }
 .empty .stage-note {
   max-width: 30rem; margin: var(--s5) auto 0; padding-top: var(--s4);
   border-top: 1px solid var(--border-subtle); font-size: .75rem; line-height: 1.1rem;

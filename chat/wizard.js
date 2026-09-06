@@ -8,7 +8,9 @@
 //
 // ── The dangerous part ──────────────────────────────────────
 //
-// This module writes ~/.refugio.env. That file is read by the supervisor and
+// This module writes the edition's credentials file — ~/.refugio.env for
+// REFUGIO, ~/.refugio-listener.env for the Listener; the caller passes the
+// path and the server resolves it from the edition. That file is read by the supervisor and
 // its values become environment variables for every child process it starts.
 // A caller who could put arbitrary keys in it could set NODE_OPTIONS, or
 // anything else Node reads from the environment, and get code execution on the

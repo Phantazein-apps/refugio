@@ -33,6 +33,7 @@ import {
   MODE_OPTION_DEFAULTS,
   enablementId, modeDef, modeOption, modeOptionOn, modePreamble, modeSummaries,
   modeTitle, modeToolFilter, pairedId, toolRefusal, tutorMode, validateMode, webAllowed,
+  modeOffered, offeredModes, offeredSummaries, modesUi, ownerEdition,
 } from "../chat/modes.js";
 import * as store from "../chat/store.js";
 
@@ -43,6 +44,18 @@ import * as store from "../chat/store.js";
 const PROMPT_BUDGET = BUDGET;
 
 const enabledFor = (...ids) => Object.fromEntries(ids.map((id) => [id, true]));
+
+// Which product a mode belongs to, said out loud at every call that enters one.
+//
+// The coaching modes are REFUGIO Listener's and the connector modes are
+// REFUGIO's, and validateMode defaults to whichever edition the process is
+// running as — standard, in a test run. That default is deliberate: a call
+// site that forgets to say gets the safe answer rather than a leak. Here it
+// means every coaching assertion has to name its product, which is not
+// ceremony: it is the assertion that these modes are only enterable from the
+// install that ships them.
+const LISTENER = "listener";
+const STANDARD = "standard";
 
 // Every id a surface can actually offer, base modes and paired variants alike.
 // definedModes() is only the base ones, and most of the doctrine below has to
@@ -92,7 +105,7 @@ test("an id that is planned but has no content yet is refused like any other unk
 test("a known mode that is switched off is refused, and says where to switch it on", () => {
   // A different refusal from the one above on purpose: this one is a trip to
   // Settings, not a bug report.
-  const r = validateMode("nvc", { nvc: false });
+  const r = validateMode("nvc", { nvc: false }, null, LISTENER);
   assert.equal(r.ok, false);
   assert.ok(r.error.includes(MODES.nvc.label));
   assert.ok(r.error.includes(MODES_UI.label));
@@ -105,7 +118,7 @@ test("no mode at all is the ordinary chat, not an error", () => {
 });
 
 test("an enabled, defined mode is accepted", () => {
-  assert.deepEqual(validateMode(" nvc ", enabledFor("nvc")), { ok: true, mode: "nvc" });
+  assert.deepEqual(validateMode(" nvc ", enabledFor("nvc"), null, LISTENER), { ok: true, mode: "nvc" });
 });
 
 // ── Never the web ───────────────────────────────────────────
@@ -724,29 +737,43 @@ test("one switch governs both ways of holding the conversation", () => {
   assert.equal(enablementId("nvc+whatsapp"), "nvc");
   assert.equal(enablementId("nvc"), "nvc");
   assert.equal(enablementId("whatsapp"), "whatsapp");
-  assert.equal(validateMode("nvc+whatsapp", enabledFor("nvc"), ready("whatsapp")).mode, "nvc+whatsapp");
+  assert.equal(validateMode("nvc+whatsapp", enabledFor("nvc"), ready("whatsapp"), LISTENER).mode, "nvc+whatsapp");
   // And switching NVC off closes both doors, with the message that sends
   // someone to Settings rather than to a bug report.
-  const off = validateMode("nvc+whatsapp", { nvc: false }, ready("whatsapp"));
+  const off = validateMode("nvc+whatsapp", { nvc: false }, ready("whatsapp"), LISTENER);
   assert.equal(off.ok, false);
   assert.match(off.error, /NVC Coach is switched off/);
+});
+
+test("pairing follows the base mode into its product, not the connector's", () => {
+  // NVC + WhatsApp is a coaching conversation that may read a connector, so it
+  // is the Listener's — and `whatsapp`, the mode that IS the connector, is
+  // REFUGIO's. The connector itself is in neither product's gift: both
+  // editions can run it, which is what makes the pairing possible at all.
+  assert.equal(modeOffered("nvc+whatsapp", LISTENER), true);
+  assert.equal(modeOffered("nvc+whatsapp", STANDARD), false);
+  assert.equal(modeOffered("whatsapp", STANDARD), true);
+  assert.equal(modeOffered("whatsapp", LISTENER), false);
 });
 
 test("a mode that needs a connector is refused when the connector is not ready", () => {
   // Not started with an empty tool array: the preamble would still be telling
   // the model it can read this person's messages, and this is a mode whose
   // inventions would be about real people they know.
-  for (const id of ["whatsapp", "nvc+whatsapp"]) {
-    const r = validateMode(id, enabledFor("nvc", "whatsapp"), ready());
+  // Each asked for from the install that offers it — the connector refusal is
+  // the same in both products, and it has to be, because it is the same
+  // connector and the same three read tools.
+  for (const [id, edition] of [["whatsapp", STANDARD], ["nvc+whatsapp", LISTENER]]) {
+    const r = validateMode(id, enabledFor("nvc", "whatsapp"), ready(), edition);
     assert.equal(r.ok, false, `${id} must be refused with no connector`);
     assert.equal(r.needsConnector, "whatsapp", "the caller can say which one");
     assert.match(r.error, /whatsapp/);
-    assert.equal(validateMode(id, enabledFor("nvc", "whatsapp"), ready("whatsapp")).mode, id);
+    assert.equal(validateMode(id, enabledFor("nvc", "whatsapp"), ready("whatsapp"), edition).mode, id);
   }
   // The unpaired coach is unaffected by any of it, which is why it is declared
   // as an OPTIONAL connector: a coaching mode that stopped existing when
   // WhatsApp fell over would be a worse mode than the one that shipped.
-  assert.equal(validateMode("nvc", enabledFor("nvc"), ready()).mode, "nvc");
+  assert.equal(validateMode("nvc", enabledFor("nvc"), ready(), LISTENER).mode, "nvc");
 });
 
 test("a paired mode is offered its three read tools and nothing else in the pool", () => {
@@ -1329,9 +1356,18 @@ test("the README names every mode that ships, and none that does not", () => {
   for (const id of definedModes()) {
     assert.ok(doc.includes(MODES[id].label), `the README does not mention ${MODES[id].label}`);
   }
-  // The count is stated in prose, so it has to be the count.
-  assert.match(doc, new RegExp(`\\*\\*Discussion modes, also off by default\\.\\*\\* ${["Zero","One","Two","Three","Four","Five","Six","Seven"][definedModes().length]} built-in`),
-    "the README's count of modes is not the number that ship");
+  // The count is stated in prose, so it has to be the count — and since the
+  // split it is a count of what THIS product offers, not of what the build
+  // contains. The bullet is in REFUGIO's install section and is read by
+  // someone deciding what they are about to install; "six modes" there would
+  // be advertising five that this install will refuse to enter.
+  const WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven"];
+  assert.match(doc, new RegExp(`\\*\\*Discussion modes, also off by default\\.\\*\\* ${WORDS[offeredModes("standard").length]} built-in`),
+    "the README's count of REFUGIO's modes is not the number REFUGIO offers");
+  // And the sentence that says where the others went names them all.
+  const listener = offeredModes("listener");
+  assert.match(doc, new RegExp(`The ${WORDS[listener.length].toLowerCase()} coaching frames`),
+    "the README's count of the Listener's modes is not the number it offers");
   // A mode with no content must not be advertised before it exists.
   for (const id of MODE_IDS.filter((i) => !MODES[i])) {
     assert.ok(!doc.includes(`**${id}`), `the README advertises ${id}, which has no content`);

@@ -1,11 +1,25 @@
 # REFUGIO Zero-Prereq Installer for Windows
 # Usage: irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio.ps1 | iex
+#
+# This repository builds two products. REFUGIO Listener has its own bootstrap,
+# install-listener.ps1, which presets REFUGIO_EDITION and runs this same file —
+# see docs/editions.md. Setting REFUGIO_EDITION by hand does the same thing.
 
 $ErrorActionPreference = "Stop"
 
+if (-not $env:REFUGIO_EDITION) { $env:REFUGIO_EDITION = "standard" }
+switch ($env:REFUGIO_EDITION) {
+    "standard" { $product = "REFUGIO" }
+    "listener" { $product = "REFUGIO Listener" }
+    default {
+        Write-Host "  X Unknown REFUGIO_EDITION '$($env:REFUGIO_EDITION)' — expected standard or listener" -ForegroundColor Red
+        exit 1
+    }
+}
+
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor White
-Write-Host " REFUGIO Installer" -ForegroundColor White
+Write-Host " $product Installer" -ForegroundColor White
 Write-Host "============================================================" -ForegroundColor White
 Write-Host ""
 
