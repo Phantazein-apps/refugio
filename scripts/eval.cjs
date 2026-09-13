@@ -414,22 +414,30 @@ async function runTask(base, task, { model, web = false, timeoutMs = 300000, fet
       answer: "", toolCalls: [], ms: Date.now() - started,
     };
   }
-  const out = await readStream(res);
+  // A stream can end without a `done` or an `error`: the server's own
+  // requestTimeout closes the socket, and undici throws `terminated` out of the
+  // iterator. Uncaught, that reaches main and the whole run exits unwritten,
+  // taking every task that did finish with it. So it becomes this task's error,
+  // and whatever arrived before the cut stays on the record.
+  const out = { answer: "", toolCalls: [], conversationId: null, error: null };
+  try {
+    await readStream(res, out);
+  } catch (e) {
+    return { ...out, error: `stream ended early: ${e.message}`, ms: Date.now() - started };
+  }
   return { ...out, ms: Date.now() - started };
 }
 
 /** Accumulate one SSE response into an answer, the tool calls behind it, and
  *  the conversation id — so a surprising score can be reopened in the window
- *  rather than argued about from a transcript. */
-async function readStream(res) {
-  let answer = "";
-  const toolCalls = [];
-  let conversationId = null;
-  let error = null;
+ *  rather than argued about from a transcript. Writes into `out` as it goes,
+ *  so a caller that catches a broken stream still holds the partial turn. */
+async function readStream(res, out = { answer: "", toolCalls: [], conversationId: null, error: null }) {
+  const { toolCalls } = out;
 
   for await (const evt of sseEvents(res.body)) {
-    if (evt.event === "token") answer += evt.data?.t || "";
-    else if (evt.event === "start") conversationId = evt.data?.conversation_id || null;
+    if (evt.event === "token") out.answer += evt.data?.t || "";
+    else if (evt.event === "start") out.conversationId = evt.data?.conversation_id || null;
     else if (evt.event === "tool") toolCalls.push({ name: evt.data?.name, args: evt.data?.args ?? null, ok: null });
     else if (evt.event === "tool_result") {
       // The `tool` event that opened this call is the one to complete; a model
@@ -440,10 +448,10 @@ async function readStream(res) {
       rec.resultChars = (evt.data?.text || "").length;
       rec.truncated = !!evt.data?.truncated;
       if (!open) toolCalls.push(rec);
-    } else if (evt.event === "error") error = evt.data?.error || "the turn failed";
-    else if (evt.event === "done") conversationId = evt.data?.conversation_id || conversationId;
+    } else if (evt.event === "error") out.error = evt.data?.error || "the turn failed";
+    else if (evt.event === "done") out.conversationId = evt.data?.conversation_id || out.conversationId;
   }
-  return { answer, toolCalls, conversationId, error };
+  return out;
 }
 
 /** Parse an SSE body into events. Written out rather than pulled in because a

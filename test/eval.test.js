@@ -315,6 +315,30 @@ test("a mid-stream error is carried, not swallowed", async () => {
   assert.equal(out.error, "model went away");
 });
 
+test("a stream the server cuts off is scored 0, and the partial turn is kept", async () => {
+  // What undici does when chat/server.js's requestTimeout closes the socket
+  // mid-answer: the body iterator throws `terminated`. Before this was caught it
+  // escaped to main and the run exited with no results written at all.
+  const fetchImpl = async () => ({
+    ok: true,
+    body: (async function* () {
+      yield Buffer.from('event: start\ndata: {"conversation_id":"cut"}\n\n');
+      yield Buffer.from('event: token\ndata: {"t":"Half "}\n\n');
+      yield Buffer.from('event: tool\ndata: {"name":"slack__search_messages","args":{"query":"q"}}\n\n');
+      yield Buffer.from('event: token\ndata: {"t":"an answer"}\n\n');
+      throw new TypeError("terminated");
+    })(),
+  });
+  const task = readTasks(TASK_DIR).find((t) => t.id === "b1-voice-rewrite");
+  const out = await runTask("http://x", task, { model: "m", fetchImpl });
+  assert.equal(out.error, "stream ended early: terminated");
+  assert.equal(out.answer, "Half an answer");
+  assert.equal(out.conversationId, "cut");
+  assert.deepEqual(out.toolCalls.map((c) => c.name), ["slack__search_messages"]);
+  assert.equal(typeof out.ms, "number");
+  assert.deepEqual(autoScore(task, out), { band: 0, notes: ["stream ended early: terminated"] });
+});
+
 test("a refused ask is reported, not thrown", async () => {
   const fetchImpl = async () => ({ ok: false, status: 503, text: async () => '{"error":"No model available."}' });
   const task = readTasks(TASK_DIR).find((t) => t.id === "b1-voice-rewrite");
