@@ -118,6 +118,11 @@ async function waitForServer(base, child, output, ms = 10000) {
 // spawned server runs with REFUGIO_TOOLS=0, so the SDK is loaded but never
 // used; when it is not installed, the import resolves to an empty stand-in
 // instead of failing. Where it is installed, the real package loads.
+//
+// This is a workaround, not the design. ci.yml asks for a seam instead: once
+// chat/mcp.js loads the SDK only when a connector starts, the server boots
+// without it and SDK_STUB, RESOLVE_HOOKS and the register() call below go.
+// https://github.com/Phantazein-apps/refugio/issues/38
 const SDK_STUB = "data:text/javascript," + encodeURIComponent(
   "export class Client {} export class StdioClientTransport {}"
 );
