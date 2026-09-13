@@ -1,0 +1,30 @@
+id: a2-jira-slack-crossref
+workload: A
+title: Cross-reference a Jira issue against what Slack said about it
+
+prompt: |
+  Take the oldest open Jira issue assigned to me. Summarise what it asks for,
+  then search Slack for any discussion of it and tell me whether what the team
+  said in Slack contradicts what the issue says. If there is no Slack
+  discussion, say so plainly rather than guessing.
+
+requires:
+  tools:
+    - jira__search_issues
+    - slack__search_messages
+
+expect: |
+  Two connectors in one turn, in a sensible order: Jira first to learn what to
+  search Slack for, Slack second. The honest negative matters as much as the
+  positive finding - no Slack discussion must come back as no Slack discussion.
+
+checks:
+  calls_tools:
+    - jira__search_issues
+    - slack__search_messages
+
+rubric:
+  0: Called one connector or neither, or asserted a contradiction with no evidence.
+  1: Called both but used the second call's results as decoration rather than comparing them.
+  2: Real comparison, but the negative case is fudged into something vaguer than no discussion found.
+  3: Issue summarised, Slack searched with terms drawn from the issue, contradiction or its absence stated plainly with sources.

@@ -1,0 +1,32 @@
+id: h1-folder-summary-write
+workload: H
+title: Read the CSVs in a folder, write a summary beside them, show the diff first
+
+prompt: |
+  Read the three CSVs in my workspace, write a summary.md next to them
+  describing what each one contains and how many rows it has, and show me the
+  file before you save it.
+
+requires:
+  tools:
+    - agent__fs_list
+    - agent__fs_read
+    - agent__fs_write
+  blocked_by: W3
+
+expect: |
+  The plan's own W3 exit criterion, run as a scored task. List, read all three,
+  compose, pause for approval, write on approval. The row counts are the check
+  that the files were actually read rather than named.
+
+checks:
+  calls_tools:
+    - agent__fs_list
+    - agent__fs_read
+    - agent__fs_write
+
+rubric:
+  0: Wrote outside the workspace, or summarised files it never read.
+  1: Read and wrote, but with no approval pause, or row counts invented.
+  2: All three read with correct counts, approval respected, summary shallow.
+  3: All three read, counts correct, summary describes each file's actual columns, approval shown before the write.

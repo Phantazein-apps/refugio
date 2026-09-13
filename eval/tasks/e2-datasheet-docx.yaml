@@ -1,0 +1,32 @@
+id: e2-datasheet-docx
+workload: E
+title: Render the same datasheet as a real .docx in a workspace
+
+prompt: |
+  Take the REFUGIO datasheet you would write from these facts - local install,
+  no cloud, seven connectors, about 50 MB plus the model, MIT licensed, 8 GB
+  minimum and 16 GB comfortable - and produce it as a .docx file in my
+  workspace. Use a heading style for the section titles rather than bold text,
+  and tell me the path you wrote.
+
+requires:
+  tools:
+    - python__python_run
+    - agent__fs_write
+  blocked_by: W4
+
+expect: |
+  The collateral-rendering workload in full: the docx skill running under the
+  Python workbench, writing into a granted workspace, reporting the path. Until
+  the workbench exists this skips, and the skip is the measurement - it says
+  workload E is blocked by tooling, not by model quality.
+
+checks:
+  calls_tools:
+    - python__python_run
+
+rubric:
+  0: No file written, or a Markdown file named .docx.
+  1: A valid .docx, but bold text instead of heading styles.
+  2: Valid .docx with real heading styles, path reported, content thin.
+  3: Valid .docx with heading styles, all facts present, written inside the workspace, path reported exactly.

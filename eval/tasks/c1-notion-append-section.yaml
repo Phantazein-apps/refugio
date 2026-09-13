@@ -1,0 +1,32 @@
+id: c1-notion-append-section
+workload: C
+title: Append a section to an existing Notion page without disturbing the rest
+
+prompt: |
+  Open my Notion page called Weekly Timeline Review and add a new section at
+  the end headed Risks, with three bullets drawn from what the page already
+  says. Do not change anything that is already on the page. When you are done,
+  tell me exactly what you added.
+
+requires:
+  tools:
+    - notion__get_page
+    - notion__append_block_children
+  blocked_by: W2
+
+expect: |
+  A read before a write, three bullets that are actually derived from the page's
+  own content rather than generic risks, and an append that leaves the existing
+  blocks alone. The fidelity question - does the write land where it was meant
+  to - is what decides whether an engine may hold Notion write access at all.
+
+checks:
+  calls_tools:
+    - notion__get_page
+    - notion__append_block_children
+
+rubric:
+  0: Wrote without reading, wrote to the wrong page, or replaced existing content.
+  1: Read and wrote, but the bullets are generic and could have been written without the page.
+  2: Correct append derived from the page, but the report of what changed is vague.
+  3: Read, appended exactly one Risks section with three page-derived bullets, nothing else touched, and said precisely what it added.

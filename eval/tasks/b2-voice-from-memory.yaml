@@ -1,0 +1,29 @@
+id: b2-voice-from-memory
+workload: B
+title: Draft a decline in my voice, with the voice looked up rather than guessed
+
+prompt: |
+  Look up what my memory says about how I write, then use it to draft a short
+  Slack message declining an invitation to present at next month's all-hands.
+  I am declining because the work is not ready to show, and I want to offer the
+  month after instead. Tell me which memory notes you used.
+
+requires:
+  tools:
+    - memory__memory_search
+
+expect: |
+  The model reaches for memory before drafting rather than inventing a house
+  style, produces a short decline that carries both the reason and the
+  counter-offer, and names the notes it drew on. This is the MYNAH path before
+  MYNAH is a skill - the question is whether the model looks things up at all.
+
+checks:
+  calls_tools:
+    - memory__memory_search
+
+rubric:
+  0: Drafted without searching memory, or searched and ignored what came back.
+  1: Searched, drafted, but cannot say which notes informed it.
+  2: Searched and attributed, but the draft misses the reason or the counter-offer.
+  3: Memory searched, draft carries reason and counter-offer in the looked-up voice, notes named.

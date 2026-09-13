@@ -1,0 +1,39 @@
+id: e1-datasheet-markdown
+workload: E
+title: Produce a one-page datasheet in Markdown from supplied facts
+
+prompt: |
+  Write a one-page product datasheet in Markdown for REFUGIO, using only these
+  facts and inventing nothing:
+
+  - It installs a local LLM and its own chat window with one command.
+  - Everything stays on the person's own machine. No account, no cloud.
+  - Connectors: WhatsApp, email, Apple Reminders, Things 3, Notion, Slack, Jira.
+  - About 50 MB of Node, plus whatever the model itself needs.
+  - MIT licensed.
+  - It needs 8 GB of RAM for a small model and 16 GB to be comfortable.
+
+  Use these four headings and no others: What it is, What it connects to,
+  What it needs, Licence.
+
+requires: none
+
+expect: |
+  Exactly the four headings asked for, every fact placed under the right one,
+  and nothing added. This is the text half of workload E - the part that needs
+  no workbench - and it isolates instruction-following from file production.
+
+checks:
+  no_tool_calls: true
+  answer_matches:
+    - What it is
+    - What it connects to
+    - What it needs
+    - Licence
+    - MIT
+
+rubric:
+  0: Invented facts, or ignored the heading list entirely.
+  1: All four headings present but facts misfiled, or extra headings added.
+  2: Correct headings and placement, but a fact dropped or a detail embellished.
+  3: Four headings exactly, every fact present and correctly placed, nothing invented.

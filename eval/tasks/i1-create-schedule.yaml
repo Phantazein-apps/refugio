@@ -1,0 +1,29 @@
+id: i1-create-schedule
+workload: I
+title: Set up a recurring brief and say exactly when it will run
+
+prompt: |
+  Every Monday at 08:00 my time, search Slack for anything said about the
+  migration over the weekend and post a short summary to my direct messages.
+  Set that up, then tell me when it will next run and what it will do.
+
+requires:
+  tools:
+    - schedule__create_schedule
+  blocked_by: W6
+
+expect: |
+  One schedule created with the right cron expression, the right delivery, and a
+  read-only tool set - a scheduled run has nobody there to approve anything. The
+  answer must state the next run time in the person's own timezone, because a
+  schedule whose timing is a surprise is worse than no schedule.
+
+checks:
+  calls_tools:
+    - schedule__create_schedule
+
+rubric:
+  0: No schedule created, or created with a different time or cadence than asked.
+  1: Created, but cannot say when it will next run.
+  2: Created correctly with the next run stated, delivery target vague.
+  3: Correct cron, correct delivery, next run stated in local time, and what it will do described as it was asked.

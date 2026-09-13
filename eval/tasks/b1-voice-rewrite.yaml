@@ -1,0 +1,36 @@
+id: b1-voice-rewrite
+workload: B
+title: Rewrite a blunt message in a described voice without losing the ask
+
+prompt: |
+  Here is how I write: short sentences, no exclamation marks, no corporate
+  warmth, and I never apologise for asking for something. I say what I need and
+  by when, then stop.
+
+  Rewrite this in my voice. Keep every fact.
+
+  "Hi team!!! Sorry to bother you all again but I really really need the Q3
+  migration numbers from everyone ASAP if possible - ideally by Thursday the
+  19th?? Thanks so much in advance, you're all amazing!"
+
+requires: none
+
+expect: |
+  A short rewrite that keeps the Q3 migration numbers and the Thursday 19th
+  deadline, drops the apology and the exclamation marks, and adds no new facts.
+  No tool call - there is nothing to look up.
+
+checks:
+  no_tool_calls: true
+  answer_matches:
+    - Thursday
+    - 19th
+    - Q3
+  answer_excludes:
+    - "!"
+
+rubric:
+  0: Lost the deadline or the subject, invented new facts, or kept the apologising tone wholesale.
+  1: Kept the facts but still reads like the original - exclamation marks, thanks so much, or a new apology.
+  2: Facts kept and tone mostly right, but padded with a greeting and a sign-off the instructions did not ask for.
+  3: Short, factual, no apology, no exclamation marks, both facts intact, nothing added.
