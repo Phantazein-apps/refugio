@@ -15,8 +15,10 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { EventEmitter } from "events";
 import {
   DEFAULT_TURN_TIMEOUT_MS, turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
+  DEFAULT_HEARTBEAT_MS, HEARTBEAT, heartbeatMs, armHeartbeat, thoughtWithoutAnswerMessage,
 } from "../chat/turn-deadline.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -69,21 +71,103 @@ test("the message names the limit in words a person reads", () => {
   assert.doesNotMatch(deadlineMessage(1800000), /REFUGIO_TURN_TIMEOUT_MS/);
 });
 
-/** A stand-in Ollama: a model list, and an /api/chat that sends one token and
- *  then holds the connection open, the way a model that will not stop does. */
+test("the heartbeat defaults to fifteen seconds and REFUGIO_HEARTBEAT_MS overrides it", () => {
+  assert.equal(DEFAULT_HEARTBEAT_MS, 15000);
+  assert.ok(DEFAULT_HEARTBEAT_MS < 300000 / 4, "well inside undici's 300 s body timeout");
+  assert.equal(heartbeatMs({}), 15000);
+  assert.equal(heartbeatMs({ REFUGIO_HEARTBEAT_MS: "250" }), 250);
+  assert.equal(heartbeatMs({ REFUGIO_HEARTBEAT_MS: "0" }), 0);
+  for (const bad of ["", "soon", "-5"]) assert.equal(heartbeatMs({ REFUGIO_HEARTBEAT_MS: bad }), 15000, bad);
+  // A comment line: no `event:`, no `data:`, so every SSE reader skips it.
+  assert.match(HEARTBEAT, /^:[^\n]*\n\n$/);
+});
+
+/** Enough of a ServerResponse to count writes and be closed. */
+function fakeResponse() {
+  const res = new EventEmitter();
+  res.writes = [];
+  res.writableEnded = false;
+  res.destroyed = false;
+  res.write = (s) => { res.writes.push(s); return true; };
+  return res;
+}
+
+test("the heartbeat writes on its interval and stops when the response closes", async () => {
+  const res = fakeResponse();
+  armHeartbeat(res, 10);
+  await new Promise((r) => setTimeout(r, 55));
+  const beforeClose = res.writes.length;
+  assert.ok(beforeClose >= 3, `wrote ${beforeClose}`);
+  assert.ok(res.writes.every((w) => w === HEARTBEAT));
+
+  // The tab goes away while the turn is still awaiting something. Nothing may
+  // be written after that, and the close listener goes with the timer.
+  res.destroyed = true;
+  res.emit("close");
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(res.writes.length, beforeClose);
+  assert.equal(res.listenerCount("close"), 0);
+});
+
+test("a cleared heartbeat writes nothing more, and 0 never arms one", async () => {
+  const res = fakeResponse();
+  const hb = armHeartbeat(res, 10);
+  hb.clear();
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(res.writes.length, 0);
+  assert.equal(res.listenerCount("close"), 0);
+
+  const off = fakeResponse();
+  armHeartbeat(off, 0).clear();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(off.writes.length, 0);
+  assert.equal(off.listenerCount("close"), 0);
+});
+
+test("thinking without an answer is explained, with the count", () => {
+  const msg = thoughtWithoutAnswerMessage(3411);
+  assert.match(msg, /3,411 tokens/);
+  assert.match(msg, /before it wrote an answer/);
+  assert.doesNotMatch(msg, /REFUGIO_/);
+});
+
+const THINK_MS = 700;
+
+/** A stand-in Ollama: a model list, and an /api/chat that does one of two
+ *  things by model. `fake:1b` sends one token and then holds the connection
+ *  open, the way a model that will not stop does. `thinker:4b` streams only
+ *  `thinking` for THINK_MS and then finishes with no content, the way qwen3:4b
+ *  did on an 8 GB machine. */
 function fakeOllama() {
   const held = new Set();
   const server = http.createServer((req, res) => {
     if (req.url === "/api/tags") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ models: [{ name: "fake:1b" }] }));
+      return res.end(JSON.stringify({ models: [{ name: "fake:1b" }, { name: "thinker:4b" }] }));
     }
     if (req.url === "/api/chat") {
-      req.resume();
-      res.writeHead(200, { "Content-Type": "application/x-ndjson" });
-      res.write(JSON.stringify({ message: { role: "assistant", content: "Still thinking" } }) + "\n");
-      held.add(res);
-      res.on("close", () => held.delete(res));
+      let raw = "";
+      req.on("data", (b) => { raw += b; });
+      req.on("end", () => {
+        const { model } = JSON.parse(raw);
+        res.writeHead(200, { "Content-Type": "application/x-ndjson" });
+        held.add(res);
+        res.on("close", () => held.delete(res));
+        if (model !== "thinker:4b") {
+          res.write(JSON.stringify({ message: { role: "assistant", content: "Still thinking" } }) + "\n");
+          return;
+        }
+        const until = Date.now() + THINK_MS;
+        const tick = setInterval(() => {
+          if (res.destroyed) return clearInterval(tick);
+          if (Date.now() < until) {
+            res.write(JSON.stringify({ message: { role: "assistant", content: "", thinking: "hmm " } }) + "\n");
+            return;
+          }
+          clearInterval(tick);
+          res.end(JSON.stringify({ message: { role: "assistant", content: "" }, done: true }) + "\n");
+        }, 20);
+      });
       return;
     }
     res.writeHead(404); res.end();
@@ -171,7 +255,9 @@ describe("the chat server, spawned", () => {
         REFUGIO_ENV_FILE: join(dataDir, "refugio.env"),
         REFUGIO_MCPO_CONFIG: join(dataDir, "no-mcp.json"),
         REFUGIO_TOOLS: "0",
-        REFUGIO_TURN_TIMEOUT_MS: "400",
+        // Longer than the thinker takes, so that turn ends on its own.
+        REFUGIO_TURN_TIMEOUT_MS: "1500",
+        REFUGIO_HEARTBEAT_MS: "100",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -200,10 +286,56 @@ describe("the chat server, spawned", () => {
     assert.equal(res.status, 200, chat.output);
     const body = await res.text();
 
-    const events = [...body.matchAll(/^event: (\w+)\ndata: (.*)$/gm)].map(([, event, data]) => ({ event, data: JSON.parse(data) }));
+    const events = parseEvents(body);
     const names = events.map((e) => e.event);
     assert.deepEqual(names.filter((n) => n !== "token"), ["start", "error"], body);
     assert.equal(names.at(-1), "error", "the error is the last thing on the stream");
-    assert.equal(events.at(-1).data.error, deadlineMessage(400));
+    assert.equal(events.at(-1).data.error, deadlineMessage(1500));
+  });
+
+  test("a turn that only thinks keeps its connection alive and ends with a reason", async () => {
+    // A client with an idle timer shorter than the thinker's silence, which is
+    // what undici's 300 s body timeout was to the eval runner. The first
+    // `thinking` event is sent at once and the next is not due for a second, so
+    // for the rest of THINK_MS the only bytes on the wire are heartbeats. Without
+    // them this request times out.
+    const IDLE_MS = 300;
+    const { body, gaps } = await new Promise((resolve, reject) => {
+      const payload = JSON.stringify({ message: "Find the bug", model: "thinker:4b" });
+      const req = http.request(`${chat.base}/api/chat/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+      }, (res) => {
+        let text = "";
+        let last = Date.now();
+        const gaps = [];
+        res.setEncoding("utf8");
+        res.on("data", (s) => { const now = Date.now(); gaps.push(now - last); last = now; text += s; });
+        res.on("end", () => resolve({ body: text, gaps }));
+        res.on("error", reject);
+      });
+      req.setTimeout(IDLE_MS, () => req.destroy(new Error(`idle for ${IDLE_MS} ms: the stream went quiet`)));
+      req.on("error", reject);
+      req.end(payload);
+    });
+
+    const beats = body.split("\n\n").filter((f) => f === ": keep-alive").length;
+    assert.ok(beats >= 3, `expected heartbeats across ${THINK_MS} ms, saw ${beats}:\n${body}`);
+    assert.ok(Math.max(...gaps) < IDLE_MS, `longest silence ${Math.max(...gaps)} ms`);
+
+    const events = parseEvents(body);
+    assert.deepEqual(events.map((e) => e.event), ["start", "thinking", "error"], body);
+    assert.equal(events[1].data.tokens, 1);
+    assert.match(events[2].data.error, /spent this turn thinking/);
+    assert.doesNotMatch(body, /hmm/, "the reasoning itself never reaches the stream");
+
+    // And nothing was stored as an answer.
+    const cid = events[0].data.conversation_id;
+    const convo = await (await fetch(`${chat.base}/api/chat/conversations/${cid}`)).json();
+    assert.deepEqual(convo.messages.map((m) => m.role), ["user"], JSON.stringify(convo));
   });
 });
+
+function parseEvents(body) {
+  return [...body.matchAll(/^event: (\w+)\ndata: (.*)$/gm)].map(([, event, data]) => ({ event, data: JSON.parse(data) }));
+}

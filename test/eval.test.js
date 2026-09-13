@@ -307,6 +307,26 @@ test("the same tool called twice is two calls, each with its own outcome", async
   assert.deepEqual(out.toolCalls.map((c) => c.args.query), ["a", "b"]);
 });
 
+test("heartbeats are skipped and the thinking count is kept, at any chunk boundary", async () => {
+  const frames = [
+    'event: start\ndata: {"conversation_id":"t"}\n\n',
+    ": keep-alive\n\n",
+    'event: thinking\ndata: {"tokens":1}\n\n',
+    ": keep-alive\n\n",
+    ": keep-alive\n\n",
+    'event: thinking\ndata: {"tokens":3411}\n\n',
+    ": keep-alive\n\n",
+    'event: error\ndata: {"error":"The model spent this turn thinking"}\n\n',
+  ];
+  for (const size of [1, 4, 4096]) {
+    const out = await readStream({ body: chunked(frames, size) });
+    assert.equal(out.answer, "", `chunk size ${size}`);
+    assert.equal(out.thinkingTokens, 3411);
+    assert.equal(out.conversationId, "t");
+    assert.match(out.error, /thinking/);
+  }
+});
+
 test("a mid-stream error is carried, not swallowed", async () => {
   const out = await readStream({
     body: chunked(['event: token\ndata: {"t":"part"}\n\n', 'event: error\ndata: {"error":"model went away"}\n\n'], 7),
@@ -361,6 +381,11 @@ test("the frames the runner parses are the frames the server actually sends", ()
   assert.match(turn, /send\("tool_result", \{\s*\n\s*name: call\.name,\s*\n\s*ok:/);
   assert.match(turn, /send\("done", \{ conversation_id: conversationId, title, model \}\)/);
   assert.match(turn, /send\("error", \{ error: err\.message \}\)/);
+  assert.match(turn, /send\("thinking", \{ tokens: thinkingTokens \}\)/);
+  // The heartbeat is a comment frame, which parseFrame must drop, not an event.
+  assert.match(turn, /armHeartbeat\(res, heartbeatMs\(\)\)/);
+  const deadlineSrc = readFileSync(join(root, "chat", "turn-deadline.js"), "utf-8");
+  assert.match(deadlineSrc, /export const HEARTBEAT = ": keep-alive\\n\\n";/);
   // And the frame shape itself: "event: NAME\ndata: JSON\n\n".
   assert.match(src, /event: \$\{event\}\\ndata: \$\{JSON\.stringify\(data\)\}\\n\\n/);
 });
