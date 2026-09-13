@@ -436,6 +436,7 @@ body {
 @keyframes skel { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
 .bubble.thinking { min-height: 20px; }
+.thinking-count { margin-left: 10px; font-size: 12px; color: var(--ink-faint); vertical-align: middle; }
 .dots { display: inline-flex; gap: 4px; align-items: center; height: 20px; }
 .dots i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint);

@@ -38,7 +38,10 @@ import {
 import { EDITION, PRODUCT } from "./edition.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
-import { turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage } from "./turn-deadline.js";
+import {
+  turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
+  heartbeatMs, armHeartbeat, THINKING_EVENT_MS, thoughtWithoutAnswerMessage,
+} from "./turn-deadline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, "static");
@@ -1045,7 +1048,9 @@ async function runTool(call, webArmed, mode) {
 
 /**
  * Run one turn and stream it to the client as SSE.
- * Events: `token` (incremental text), `done` (final metadata), `error`.
+ * Events: `start`, `token` (incremental text), `thinking` (a running count of
+ * reasoning tokens, never the reasoning), `tool`, `tool_result`, `done` (final
+ * metadata), `error`. Between them, `: keep-alive` comment lines.
  */
 async function streamTurn(res, { conversationId, message, model, persistUser, web = false, files = [], mode = null }) {
   res.writeHead(200, {
@@ -1056,6 +1061,10 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   });
   const send = (event, data) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // From the first byte to the last, so no stretch of the turn — the prompt
+  // being read, a model thinking, a slow tool, the title — can go quiet long
+  // enough for a client to hang up. See turn-deadline.js.
+  const heartbeat = armHeartbeat(res, heartbeatMs());
 
   // First turn writes the mode onto the row; every later turn is handed back
   // what the row already says, so `mode` from here down is the conversation's,
@@ -1133,6 +1142,21 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   let acc = "";
   const toolsUsed = [];
 
+  // Reasoning is counted, not kept. Ollama streams it a token per chunk, so the
+  // count is close to the model's own. The window shows it so that minutes of
+  // thinking look like work rather than a hang; the reasoning itself stays out
+  // of the transcript, the history, and the stream.
+  let thinkingTokens = 0;
+  let thinkingSentAt = 0;
+  const onThinking = () => {
+    thinkingTokens++;
+    const now = Date.now();
+    if (thinkingTokens === 1 || now - thinkingSentAt >= THINKING_EVENT_MS) {
+      thinkingSentAt = now;
+      send("thinking", { tokens: thinkingTokens });
+    }
+  };
+
   try {
     // Agentic loop: the model may call tools, read the results, and call more
     // before answering. Bounded so a model that loops on a failing tool can't
@@ -1140,7 +1164,8 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     for (let round = 0; ; round++) {
       const { text, toolCalls } = await chatStream(
         { model, messages, tools, signal: ac.signal },
-        (piece) => { acc += piece; send("token", { t: piece }); }
+        (piece) => { acc += piece; send("token", { t: piece }); },
+        onThinking
       );
 
       if (!toolCalls.length) break;
@@ -1189,6 +1214,7 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     // gets there by itself and a second referral stapled underneath the first
     // reads as a machine that was not listening. Appended to `acc` before the
     // message is stored, so reopening the conversation still shows it.
+    const answered = acc.length > 0;
     if (carriesCrisisLayer(activeMode)) {
       const lastUser = [...store.historyFor(conversationId)].reverse().find((m) => m.role === "user");
       const notice = crisisNotice(lastUser?.content, acc);
@@ -1197,6 +1223,21 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
         acc += block;
         if (!res.writableEnded) send("token", { t: block });
       }
+    }
+
+    // A model that thought and then wrote nothing ends with a reason, not with
+    // `done` over an empty answer. Checked after the crisis layer, not before
+    // it: a notice the person's words called for is still owed when the model
+    // said nothing, and it is kept. An empty reply is not stored, because an
+    // empty assistant turn is sent back as history on the next question.
+    if (!answered && thinkingTokens > 0) {
+      if (acc) store.addMessage(conversationId, "assistant", acc, model);
+      log(`turn ended after ${thinkingTokens} thinking tokens with no answer (${model})`);
+      if (!res.writableEnded) {
+        send("error", { error: thoughtWithoutAnswerMessage(thinkingTokens) });
+        res.end();
+      }
+      return;
     }
 
     store.addMessage(conversationId, "assistant", acc, model);
@@ -1234,6 +1275,7 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     res.end();
   } finally {
     deadline.clear();
+    heartbeat.clear();
   }
 }
 

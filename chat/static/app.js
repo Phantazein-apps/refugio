@@ -219,6 +219,20 @@ function setThinking(bubble, on) {
   bubble.innerHTML = on ? `<span class="dots"><i></i><i></i><i></i></span>` : "";
 }
 
+/** "Thinking · 1,204 tokens" beside the dots. Rewritten in place rather than
+ *  appended, and only ever inside a bubble that is still thinking, so clearing
+ *  the dots clears it too. */
+function setThinkingCount(bubble, tokens) {
+  if (!bubble.classList.contains("thinking") || !(tokens > 0)) return;
+  let note = bubble.querySelector(".thinking-count");
+  if (!note) {
+    note = document.createElement("span");
+    note.className = "thinking-count";
+    bubble.appendChild(note);
+  }
+  note.textContent = `Thinking · ${Number(tokens).toLocaleString()} tokens`;
+}
+
 // Only auto-scroll when the user is already near the bottom, so reading back
 // through a long answer isn't yanked away by incoming tokens.
 let stick = true;
@@ -1446,6 +1460,10 @@ async function send() {
           showTool(bubble, data.name, data.ok ? "ok" : "failed");
           addSource(data);
         }
+        // Only while nothing has been written: a count under the dots, so a
+        // model that reasons for minutes visibly is. The first token replaces
+        // it along with the dots.
+        else if (ev === "thinking") { if (!acc) setThinkingCount(bubble, data.tokens); }
         else if (ev === "token") {
           if (!acc) setThinking(bubble, false);
           acc += data.t;

@@ -414,12 +414,14 @@ async function runTask(base, task, { model, web = false, timeoutMs = 300000, fet
       answer: "", toolCalls: [], ms: Date.now() - started,
     };
   }
-  // A stream can end without a `done` or an `error`: the server's own
-  // requestTimeout closes the socket, and undici throws `terminated` out of the
-  // iterator. Uncaught, that reaches main and the whole run exits unwritten,
-  // taking every task that did finish with it. So it becomes this task's error,
-  // and whatever arrived before the cut stays on the record.
-  const out = { answer: "", toolCalls: [], conversationId: null, error: null };
+  // A stream can end without a `done` or an `error`: the socket closes under it
+  // — undici's own 300 s body timeout on a turn that went quiet was the one
+  // seen in practice, before the server learned to send a heartbeat — and
+  // undici throws `terminated` out of the iterator. Uncaught, that reaches main
+  // and the whole run exits unwritten, taking every task that did finish with
+  // it. So it becomes this task's error, and whatever arrived before the cut
+  // stays on the record.
+  const out = { answer: "", toolCalls: [], conversationId: null, error: null, thinkingTokens: 0 };
   try {
     await readStream(res, out);
   } catch (e) {
@@ -432,11 +434,15 @@ async function runTask(base, task, { model, web = false, timeoutMs = 300000, fet
  *  the conversation id — so a surprising score can be reopened in the window
  *  rather than argued about from a transcript. Writes into `out` as it goes,
  *  so a caller that catches a broken stream still holds the partial turn. */
-async function readStream(res, out = { answer: "", toolCalls: [], conversationId: null, error: null }) {
+async function readStream(res, out = { answer: "", toolCalls: [], conversationId: null, error: null, thinkingTokens: 0 }) {
   const { toolCalls } = out;
 
   for await (const evt of sseEvents(res.body)) {
     if (evt.event === "token") out.answer += evt.data?.t || "";
+    // A running count, not an increment, so the last one seen is the total. On
+    // the record because "thought for 3,400 tokens and never answered" and
+    // "answered badly" are different failures of a small model.
+    else if (evt.event === "thinking") out.thinkingTokens = Number(evt.data?.tokens) || out.thinkingTokens || 0;
     else if (evt.event === "start") out.conversationId = evt.data?.conversation_id || null;
     else if (evt.event === "tool") toolCalls.push({ name: evt.data?.name, args: evt.data?.args ?? null, ok: null });
     else if (evt.event === "tool_result") {
@@ -705,6 +711,7 @@ async function main(argv) {
       ...common, status: "ran", auto,
       answer: result.answer, toolCalls: result.toolCalls, error: result.error || null,
       conversationId: result.conversationId || null, ms: result.ms,
+      thinkingTokens: result.thinkingTokens || 0,
     });
   }
 

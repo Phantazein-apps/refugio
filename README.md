@@ -468,6 +468,9 @@ REFUGIO_MODEL=llama3.1:8b
 # How long one chat turn may run before it is stopped with a message, in
 # milliseconds. Default 30 minutes; 0 removes the ceiling.
 # REFUGIO_TURN_TIMEOUT_MS=1800000
+# How often a running turn writes a keep-alive line, so a model that thinks
+# for minutes before answering is not mistaken for a dropped connection.
+# REFUGIO_HEARTBEAT_MS=15000
 # For LM Studio instead — legacy Open WebUI path only. The v2 chat
 # window cannot use this engine yet; see docs/gaps.md §9.
 # REFUGIO_ENGINE=lmstudio

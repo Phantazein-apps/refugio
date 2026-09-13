@@ -71,8 +71,23 @@ export async function isUp() {
  * Streaming is non-negotiable here: a local model on modest hardware emits
  * tokens slowly enough that a request/response UI feels broken. This is the
  * main thing worth building that Open WebUI already had.
+ *
+ * A thinking model (qwen3, deepseek-r1) streams its reasoning in
+ * `message.thinking`, separately from `message.content`, and can spend minutes
+ * there before the first word of an answer. That reasoning is reported through
+ * onThinking(piece) and is never added to the returned text: it is not the
+ * answer, it is not stored, and it is not sent back as history. Ignoring it
+ * altogether was worse — a 4B model on an 8 GB machine thought for five
+ * minutes, the stream carried nothing, and every client concluded it had hung.
+ *
+ * `think` is deliberately not sent. Ollama already enables thinking for models
+ * that declare it, and sending `think: true` to a model that does not is a 400,
+ * so passing it explicitly would mean probing capabilities on every turn in
+ * order to change nothing. Turning it off would make small models answer sooner
+ * and worse, and that is a choice about quality, not about keeping a stream
+ * alive.
  */
-export async function chatStream({ model, messages, tools, signal }, onToken) {
+export async function chatStream({ model, messages, tools, signal }, onToken, onThinking = () => {}) {
   const res = await fetch(`${BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -127,6 +142,9 @@ export async function chatStream({ model, messages, tools, signal }, onToken) {
           });
         }
       }
+
+      const thought = evt.message?.thinking;
+      if (thought) onThinking(thought);
 
       const piece = evt.message?.content;
       if (piece) { full += piece; onToken(piece); }

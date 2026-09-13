@@ -62,6 +62,69 @@ function spell(ms) {
   return `${ms} ms`;
 }
 
+// ── Keeping a quiet turn visibly alive ──────────────────────
+//
+// Taking requestTimeout off was not enough on its own. A thinking model can go
+// minutes with no answer text, and until a `token` is due the turn wrote
+// nothing at all. Node's fetch (undici) gives up on a response body that has
+// been silent for 300000 ms, so scripts/eval.cjs reported `terminated` at five
+// and a half minutes, closed the socket, and the server aborted Ollama — the
+// same silent end #36 was meant to remove, reached from the other side. A
+// browser has no such timer, but a proxy in front of the window may.
+//
+// So a turn writes an SSE comment on an interval for as long as it is open.
+// Comments are part of the format and every SSE reader skips them: the window
+// and the eval runner both ignore a frame with no `data:` line. It says nothing
+// about progress — the `thinking` event does that — only that the server is
+// still there.
+
+/** Well under any idle timer worth worrying about, and cheap: one line, a few
+ *  times a minute, only while a turn runs. */
+export const DEFAULT_HEARTBEAT_MS = 15 * 1000;
+
+export const HEARTBEAT = ": keep-alive\n\n";
+
+/** REFUGIO_HEARTBEAT_MS, in milliseconds; 0 turns the heartbeat off. Same
+ *  fallback rule as the ceiling, for the same reason. */
+export function heartbeatMs(env = process.env) {
+  const raw = env.REFUGIO_HEARTBEAT_MS;
+  if (raw === undefined || String(raw).trim() === "") return DEFAULT_HEARTBEAT_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_HEARTBEAT_MS;
+}
+
+/** Write HEARTBEAT to `res` every `ms` until cleared or the response closes.
+ *  It clears itself on close as well as when the turn's `finally` does, because
+ *  a tab closed during a slow tool call leaves the turn awaiting the tool, and
+ *  an interval writing into a dead socket until then is a leak with a timer. */
+export function armHeartbeat(res, ms) {
+  if (!(ms > 0)) return { clear() {} };
+  const timer = setInterval(() => {
+    if (res.writableEnded || res.destroyed) return clear();
+    res.write(HEARTBEAT);
+  }, ms);
+  // Never the thing that keeps a process alive — a server shutting down should
+  // not wait on a comment line.
+  timer.unref?.();
+  function clear() { clearInterval(timer); res.off?.("close", clear); }
+  res.on("close", clear);
+  return { clear };
+}
+
+/** How often a `thinking` event may be sent. It carries a count, not the
+ *  reasoning, so there is nothing to gain from one per token and a browser
+ *  repainting a counter hundreds of times a second has something to lose. */
+export const THINKING_EVENT_MS = 1000;
+
+/** When a model thought and then wrote nothing. Without this the window said
+ *  "The model returned an empty response", which is true and useless: the model
+ *  worked hard, and the likely reason — its reasoning filled the context before
+ *  it reached an answer — is something the person can act on. */
+export function thoughtWithoutAnswerMessage(tokens) {
+  return `The model spent this turn thinking (about ${tokens.toLocaleString("en-US")} tokens) and stopped before it wrote an answer. ` +
+    "Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer.";
+}
+
 /** The sentence the window shows. Says what happened, that nothing written so
  *  far was lost, and what to try — not which variable to set, which belongs in
  *  the log for whoever runs the machine. */
