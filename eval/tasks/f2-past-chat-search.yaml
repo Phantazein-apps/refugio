@@ -1,0 +1,29 @@
+id: f2-past-chat-search
+workload: F
+title: Find the earlier conversation where something was worked out
+
+prompt: |
+  Search my past conversations for the one where we worked out the tool-calling
+  floor - the smallest model that could actually drive a connector. Tell me
+  which conversation it was, when, and what the conclusion was.
+
+requires:
+  tools:
+    - chats__search_chats
+  blocked_by: W7
+
+expect: |
+  Full-text search over the stored messages, surfacing a conversation by its
+  content rather than its title. Skips until W7 lands the search_chats tool,
+  and the skip records that continuity is a missing tool rather than a missing
+  capability - the data is already in the SQLite file.
+
+checks:
+  calls_tools:
+    - chats__search_chats
+
+rubric:
+  0: Did not search, or invented a conversation that does not exist.
+  1: Searched but reported only that something was found, with no date or conclusion.
+  2: Right conversation identified with a date, conclusion paraphrased loosely.
+  3: Right conversation, its date, and the conclusion stated as it was actually reached.

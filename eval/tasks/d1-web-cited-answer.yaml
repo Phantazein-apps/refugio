@@ -1,0 +1,30 @@
+id: d1-web-cited-answer
+workload: D
+title: Answer from a web search, with the URL it came from
+
+prompt: |
+  Search the web and tell me which Node.js release line is the current
+  long-term support version, and when that line stops receiving security
+  updates. Give me the URL you took each fact from.
+
+requires:
+  tools:
+    - web__search
+  web: true
+
+expect: |
+  A search, then an answer whose facts carry URLs from the results rather than
+  from the model's training. Web search is the one feature that leaves the
+  machine, so the citation is also the audit trail.
+
+checks:
+  calls_tools:
+    - web__search
+  answer_matches:
+    - https?://
+
+rubric:
+  0: Answered from memory with no search, or searched and then ignored the results.
+  1: Searched and answered, but with no URL, so the answer is indistinguishable from a recollection.
+  2: Searched, answered, cited - but one of the two facts is unsupported by the cited page.
+  3: Both facts present, each carrying a URL that actually appeared in the results.

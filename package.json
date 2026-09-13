@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node start-refugio.cjs",
     "start:server": "node server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "eval": "node scripts/eval.cjs"
   },
   "keywords": [
     "mcp",

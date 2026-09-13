@@ -1,0 +1,45 @@
+id: g1-diff-bug-hunt
+workload: G
+title: Find the bug in a short function that is given inline
+
+prompt: |
+  This function is meant to return every line of a newline-delimited stream,
+  handling chunks that split a line. It loses data. Tell me which line is
+  wrong, what it does instead, and what it should be.
+
+  ```js
+  function linesFrom(chunks) {
+    let buffer = "";
+    const out = [];
+    for (const chunk of chunks) {
+      buffer += chunk;
+      const lines = buffer.split("\n");
+      for (const line of lines) {
+        if (line.trim()) out.push(line);
+      }
+      buffer = "";
+    }
+    return out;
+  }
+  ```
+
+requires: none
+
+expect: |
+  The bug is that the trailing partial line is consumed rather than kept - the
+  loop pushes every element of split including the incomplete last one, and then
+  clears the buffer. The fix is to pop the last element back into buffer, which
+  is exactly what chat/ollama.js does. A model that names the symptom without
+  naming the line has not read the code.
+
+checks:
+  no_tool_calls: true
+  answer_matches:
+    - "buffer"
+    - "(pop|last|partial|trailing|incomplete)"
+
+rubric:
+  0: Named a different bug, or said the code is correct.
+  1: Said something vague about buffering without naming the offending lines.
+  2: Identified that the partial line is emitted and the buffer wrongly cleared.
+  3: Named the two lines, explained that the incomplete tail is emitted as a whole line, and gave the pop-and-retain fix.

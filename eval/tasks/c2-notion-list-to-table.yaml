@@ -1,0 +1,32 @@
+id: c2-notion-list-to-table
+workload: C
+title: Restructure a Notion list into a table without losing a single item
+
+prompt: |
+  On my Notion page called Connector Status, the connectors are a bulleted
+  list where each line carries a name, a state and a note. Turn that list into
+  a three-column table with those headings. Every item must survive. Tell me
+  the count before and after.
+
+requires:
+  tools:
+    - notion__get_block_children
+    - notion__update_page
+  blocked_by: W2
+
+expect: |
+  The hard part is not the table, it is the conservation law: the count before
+  and the count after must match, and the model has to state both. This is the
+  workload where a mid-tier model quietly drops the last two items, so the
+  count is the check and not a nicety.
+
+checks:
+  calls_tools:
+    - notion__get_block_children
+    - notion__update_page
+
+rubric:
+  0: Items lost or invented, or the page rewritten from the model's own idea of what was on it.
+  1: A table produced, but no counts given, so conservation cannot be checked.
+  2: Counts given and matching, but a column is mis-assigned on some rows.
+  3: Every item preserved, three columns correctly assigned, counts before and after stated and equal.

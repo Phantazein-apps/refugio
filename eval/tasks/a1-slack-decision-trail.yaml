@@ -1,0 +1,30 @@
+id: a1-slack-decision-trail
+workload: A
+title: Find the decision in a Slack thread and say who made it
+
+prompt: |
+  Search Slack for the discussion about the PostgreSQL 17 upgrade window.
+  Find the message where the date was actually agreed, then tell me: the
+  agreed date, who agreed it, and which channel it happened in. Quote the
+  message you are relying on.
+
+requires:
+  tools:
+    - slack__search_messages
+    - slack__get_thread
+
+expect: |
+  The model searches Slack rather than answering from memory, follows the hit
+  into its thread, and answers with a date, a person and a channel plus the
+  quoted message. An answer with no quote is unverifiable and scores low even
+  if the date happens to be right.
+
+checks:
+  calls_tools:
+    - slack__search_messages
+
+rubric:
+  0: No Slack call, or invented a date and a name from nothing.
+  1: Called Slack but answered from the search snippet alone, or named a date with no source.
+  2: Found the right thread and gave date, person and channel, but did not quote.
+  3: Date, person, channel and the quoted message, with the thread identified well enough to reopen.
