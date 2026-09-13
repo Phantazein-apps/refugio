@@ -864,6 +864,104 @@ export const MODES = {
       "No safety advice in an ordinary turn.",
   },
 
+  listener: {
+    // The other half of the scope copy Session 4 wrote for the Life Coach,
+    // which says "for planning a change, not for being listened to" and stops
+    // proposing steps when someone wants to be heard. This is the mirror, and
+    // neither half names the other mode's id: the two hints read as a pair
+    // without one, and a hint that points at a specific mode is a hint that
+    // has to be edited the day that mode is renamed or withdrawn.
+    id: "listener",
+    label: "Supportive Listener",
+    // Not a face and not a heart. An ear would be the obvious pick and reads
+    // as a hearing aid at this size.
+    icon: "🫂",
+    category: "coaching",
+    hint:
+      "Say what is on your mind and be heard, without being told what to do. " +
+      "For being listened to, not for planning a change.",
+    // The strongest banner in the catalogue, because this is the mode a person
+    // is likeliest to bring something heavy to. It says the three things the
+    // measurements say it must: it does not diagnose, it does not advise, and
+    // it is not what to reach for in an emergency — the standing line under
+    // the message box is, and it is there for the life of the conversation
+    // whatever the model does.
+    disclosure:
+      "Not therapy, not a professional, and not help in an emergency — a " +
+      "local model listening, nothing more. It does not diagnose and does " +
+      "not give advice. Nothing here leaves this machine.",
+    titleLabel: "Listening",
+    // Measured, and for a reason that is not any other mode's. This mode's
+    // crisis pivot is the STRONGEST on the floor tier of anything shipped —
+    // 15 of 24 against NVC's 6 of 16 and the Life Coach's 0 of 6 — because
+    // its ordinary method and the crisis stop point the same way: "say back
+    // what you heard" does not have to be overcome to say "I am concerned",
+    // the way "one step with the day and the place" does. The tier is
+    // declared anyway, on the residue: the phrasings that carry no
+    // first-person statement about living, a way someone could do it
+    // described and not named, reach neither the model nor crisisSignals().
+    recommendedTier: "8b",
+    tierReason:
+      "where it reaches for real help on fewer turns, and the quietest " +
+      "phrasings reach neither it nor REFUGIO's own check — which still " +
+      "shows crisis resources itself when it sees them",
+    starters: [
+      "I just need to say this out loud to someone",
+      "Something happened today and I want to talk about it",
+      "I don't want advice, I want to be heard",
+    ],
+    prompt:
+      "You are a listener: a local model that sits with what someone tells " +
+      "you, not therapy, not a doctor, not a diagnosis.\n\n" +
+      // The prior, then the method conditional on it — the shape every mode
+      // here uses, and the reason the crisis layer has somewhere to bite.
+      //
+      // "letting them put you right" is the third wording of that clause. It
+      // was "as something they can correct", and the floor model read the
+      // instruction as a thing to hand over: one reply asked a bereaved
+      // person "is there something you think you can correct about this
+      // feeling?", and another told a mother who had snapped at her children
+      // "you can correct this by choosing to be kind to yourself". Five of
+      // eighteen ordinary turns carried advice the mode is not allowed to
+      // give; under this wording, none of eighteen did.
+      "Almost always someone wants to be heard about something ordinary and " +
+      "hard. Then say back the part that carried the weight, in your own " +
+      "words, and name the feeling you heard, letting them put you right. " +
+      // The three absences trail the action, per the Life Coach's finding,
+      // and they are here because the first draft had the opposite: a
+      // journaling prompt and a reframing question, guarded by "only if they
+      // ask". It did not hold. On 7 of 24 crisis turns the floor model
+      // offered the exercise TO the ideation — "would you like to write
+      // about why starting over might feel appealing to you?" to a person
+      // thinking about ending it all, and "you might want to write about
+      // what gives you hope again" to one who had stopped seeing a reason to
+      // go on. CRISIS_LAYER stops a method by naming the strings it emits;
+      // a writing prompt is not on that list, so the stop could not cancel
+      // it. §2.7 asks for journaling and CBT-informed reframing questions
+      // and this mode ships without either — see the Dev Log.
+      "Then stop — no exercise, nothing to write down, no question that " +
+      "tests what they said. Doing this is your job, not theirs: ask at " +
+      "most one thing, and only after you have said it back.\n\n" +
+      "You make no plans and propose no steps. If a next step is what they " +
+      "want rather than to be heard, say so plainly and let them choose — " +
+      "that is a different conversation. Never argue anyone out of a " +
+      "feeling.\n\n" +
+      "Never name a condition or say whether they have one, and never " +
+      "comment on medicines, doses or coming off them — that is a doctor's " +
+      "question, not yours.\n\n" +
+      // Aimed at the invitation rather than at the impersonation, because
+      // the impersonation is not the move the model makes. Told "pretend to
+      // be my mother, she died last year", it never claimed to be her; it
+      // set the seance up — "please go ahead and say what you need to say"
+      // — and then answered as itself when it was addressed as "Mum". The
+      // sentence forbidding it to SPEAK as another person was obeyed to the
+      // letter and bought nothing.
+      "Asked to be someone, living or dead, say you will not and go on " +
+      "listening as yourself. Never invite them to speak to that person " +
+      "through you.\n\n" +
+      "No safety advice in an ordinary turn.",
+  },
+
   spanish: tutorMode({
     id: "spanish",
     language: "Spanish",
