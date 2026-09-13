@@ -3,11 +3,11 @@
 // REFUGIO's own ceiling is reached the window is told so in words, before the
 // stream closes, instead of watching it stop.
 //
-// The second is tested against the real chat/server.js, spawned with a fake
-// Ollama that starts an answer and never finishes it. A copy of the turn logic
-// in this file would pass while the server went on closing silently.
+// Both are tested against the real chat/server.js, spawned with a fake Ollama
+// that starts an answer and never finishes it. A copy of the turn logic in this
+// file would pass while the server went on closing silently.
 
-import { test, before, after } from "node:test";
+import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "http";
 import { spawn } from "child_process";
@@ -21,7 +21,7 @@ import {
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-test("the chat server's request timeout is off, not Node's 300000 ms default", () => {
+test("configureServerTimeouts takes Node's 300000 ms request timeout off a server", () => {
   const server = http.createServer();
   assert.equal(server.requestTimeout, 300000, "if Node's default moved, re-read why this exists");
   configureServerTimeouts(server);
@@ -103,22 +103,42 @@ function freePort() {
   });
 }
 
-async function waitForServer(base, child, ms = 10000) {
+async function waitForServer(base, child, output, ms = 10000) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
-    if (child.exitCode !== null) throw new Error(`chat server exited with ${child.exitCode}`);
+    if (child.exitCode !== null) throw new Error(`chat server exited with ${child.exitCode}:\n${output()}`);
     try { await fetch(`${base}/api/chat/status`, { signal: AbortSignal.timeout(500) }); return; } catch {}
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error("chat server did not start");
+  throw new Error(`chat server did not start:\n${output()}`);
 }
 
-// Loaded into the spawned server before chat/server.js runs. It reports the
-// value on the server object at the moment that server starts listening, so
-// the pin is on the http.Server the chat window actually talks to — the helper
-// test above passes just as well if server.js forgets to call the helper.
-const REPORT_TIMEOUT = "data:text/javascript," + encodeURIComponent(
+// CI runs these tests without `npm install` — the unit tests are meant to need
+// nothing — and server.js imports chat/mcp.js, which imports the MCP SDK. The
+// spawned server runs with REFUGIO_TOOLS=0, so the SDK is loaded but never
+// used; when it is not installed, the import resolves to an empty stand-in
+// instead of failing. Where it is installed, the real package loads.
+const SDK_STUB = "data:text/javascript," + encodeURIComponent(
+  "export class Client {} export class StdioClientTransport {}"
+);
+const RESOLVE_HOOKS = "data:text/javascript," + encodeURIComponent(
+  "export async function resolve(specifier, context, next) {" +
+  "  try { return await next(specifier, context); } catch (e) {" +
+  '    if (e?.code !== "ERR_MODULE_NOT_FOUND" || !specifier.startsWith("@modelcontextprotocol/sdk/")) throw e;' +
+  `    return { url: ${JSON.stringify(SDK_STUB)}, shortCircuit: true };` +
+  "  }" +
+  "}"
+);
+
+// Loaded into the spawned server before chat/server.js runs. Besides the hook
+// above, it reports the value on the server object at the moment that server
+// starts listening, so the pin is on the http.Server the chat window actually
+// talks to — the helper test above passes just as well if server.js forgets to
+// call the helper.
+const PRELOAD = "data:text/javascript," + encodeURIComponent(
   'import http from "node:http";' +
+  'import { register } from "node:module";' +
+  `register(${JSON.stringify(RESOLVE_HOOKS)});` +
   "const listen = http.Server.prototype.listen;" +
   "http.Server.prototype.listen = function (...a) {" +
   '  process.stdout.write(`requestTimeout=${this.requestTimeout}\\n`);' +
@@ -126,56 +146,59 @@ const REPORT_TIMEOUT = "data:text/javascript," + encodeURIComponent(
   "};"
 );
 
-const chat = { base: null, output: "" };
-let stopChat = () => {};
+// Scoped to its own block so that a server which will not start fails these
+// two tests, and not the ones above that never needed it.
+describe("the chat server, spawned", () => {
+  const chat = { base: null, output: "" };
+  let stopChat = () => {};
 
-before(async () => {
-  const ollama = await fakeOllama();
-  const dataDir = mkdtempSync(join(tmpdir(), "refugio-deadline-"));
-  const port = await freePort();
-  const child = spawn(process.execPath, [
-    "--import", REPORT_TIMEOUT, join(ROOT, "chat", "server.js"), "--port", String(port),
-  ], {
-    env: {
-      ...process.env,
-      OLLAMA_BASE_URL: ollama.base,
-      REFUGIO_DATA_DIR: dataDir,
-      REFUGIO_ENV_FILE: join(dataDir, "refugio.env"),
-      REFUGIO_MCPO_CONFIG: join(dataDir, "no-mcp.json"),
-      REFUGIO_TOOLS: "0",
-      REFUGIO_TURN_TIMEOUT_MS: "400",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
+  before(async () => {
+    const ollama = await fakeOllama();
+    const dataDir = mkdtempSync(join(tmpdir(), "refugio-deadline-"));
+    const port = await freePort();
+    const child = spawn(process.execPath, [
+      "--import", PRELOAD, join(ROOT, "chat", "server.js"), "--port", String(port),
+    ], {
+      env: {
+        ...process.env,
+        OLLAMA_BASE_URL: ollama.base,
+        REFUGIO_DATA_DIR: dataDir,
+        REFUGIO_ENV_FILE: join(dataDir, "refugio.env"),
+        REFUGIO_MCPO_CONFIG: join(dataDir, "no-mcp.json"),
+        REFUGIO_TOOLS: "0",
+        REFUGIO_TURN_TIMEOUT_MS: "400",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout.on("data", (b) => { chat.output += b; });
+    child.stderr.on("data", (b) => { chat.output += b; });
+    stopChat = () => { child.kill("SIGTERM"); ollama.close(); rmSync(dataDir, { recursive: true, force: true }); };
+
+    chat.base = `http://127.0.0.1:${port}`;
+    await waitForServer(chat.base, child, () => chat.output);
   });
-  child.stdout.on("data", (b) => { chat.output += b; });
-  child.stderr.on("data", (b) => { chat.output += b; });
-  stopChat = () => { child.kill("SIGTERM"); ollama.close(); rmSync(dataDir, { recursive: true, force: true }); };
 
-  chat.base = `http://127.0.0.1:${port}`;
-  await waitForServer(chat.base, child);
-});
+  after(() => stopChat());
 
-after(() => stopChat());
-
-test("the running chat server's http.Server has no request timeout", () => {
-  const reported = [...chat.output.matchAll(/^requestTimeout=(\d+)$/gm)].map((m) => Number(m[1]));
-  assert.deepEqual(reported, [0], chat.output);
-});
-
-test("a turn that reaches the ceiling ends with an error event, not a silent close", async () => {
-  const { base, output } = chat;
-  const res = await fetch(`${base}/api/chat/ask`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "Find the bug", model: "fake:1b" }),
-    signal: AbortSignal.timeout(10000),
+  test("its http.Server has no request timeout", () => {
+    const reported = [...chat.output.matchAll(/^requestTimeout=(\d+)$/gm)].map((m) => Number(m[1]));
+    assert.deepEqual(reported, [0], chat.output);
   });
-  assert.equal(res.status, 200, output);
-  const body = await res.text();
 
-  const events = [...body.matchAll(/^event: (\w+)\ndata: (.*)$/gm)].map(([, event, data]) => ({ event, data: JSON.parse(data) }));
-  const names = events.map((e) => e.event);
-  assert.deepEqual(names.filter((n) => n !== "token"), ["start", "error"], body);
-  assert.equal(names.at(-1), "error", "the error is the last thing on the stream");
-  assert.equal(events.at(-1).data.error, deadlineMessage(400));
+  test("a turn that reaches the ceiling ends with an error event, not a silent close", async () => {
+    const res = await fetch(`${chat.base}/api/chat/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Find the bug", model: "fake:1b" }),
+      signal: AbortSignal.timeout(10000),
+    });
+    assert.equal(res.status, 200, chat.output);
+    const body = await res.text();
+
+    const events = [...body.matchAll(/^event: (\w+)\ndata: (.*)$/gm)].map(([, event, data]) => ({ event, data: JSON.parse(data) }));
+    const names = events.map((e) => e.event);
+    assert.deepEqual(names.filter((n) => n !== "token"), ["start", "error"], body);
+    assert.equal(names.at(-1), "error", "the error is the last thing on the stream");
+    assert.equal(events.at(-1).data.error, deadlineMessage(400));
+  });
 });
