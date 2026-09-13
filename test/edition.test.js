@@ -122,7 +122,7 @@ test("the two catalogues partition the build with nothing left over", () => {
   assert.equal(new Set(union).size, union.length, "no mode is in both");
   // And the split is the one the products were separated on.
   assert.deepEqual(offeredModes("standard"), ["whatsapp"]);
-  assert.deepEqual(offeredModes("listener"), ["nvc", "styles", "spanish", "career", "life"]);
+  assert.deepEqual(offeredModes("listener"), ["nvc", "styles", "spanish", "career", "life", "listener"]);
 });
 
 test("a paired variant goes with its base mode", () => {

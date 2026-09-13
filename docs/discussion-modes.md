@@ -15,12 +15,13 @@ Every file:line below was read on `main` rather than recalled.
 ## What a mode is
 
 A named frame around **one conversation**: prompt layers, guardrails, UI copy,
-and — for two of them — a read-only connector allowlist. Six ship: `nvc`,
-`styles`, `whatsapp`, `spanish`, `career`, `life`, plus the derived pairing
-`nvc+whatsapp`. A seventh id, `listener`, is declared in the defaults and has
-no content, so it is not offerable.
+and — for two of them — a read-only connector allowlist. Seven ship: `nvc`,
+`styles`, `whatsapp`, `spanish`, `career`, `life`, `listener`, plus the derived
+pairing `nvc+whatsapp`. Every id declared in the defaults now has content, so
+the declared-but-empty refusal path is not exercised by any real id; the tests
+use a name nothing will ever ship.
 
-**Six ship in the build; no install offers all six.** The coaching modes are
+**Seven ship in the build; no install offers all seven.** The coaching modes are
 REFUGIO Listener's product and `whatsapp` is REFUGIO's, decided by category in
 `editions.cjs` and applied by `offeredModes()` / `modeOffered()`. Both products
 compile all of them — which is the point, because it means everything below is
@@ -30,8 +31,8 @@ split itself, and what it deliberately did not do, is
 is true in whichever product ships them.
 
 (The `listener` mode id and the `listener` EDITION are different things with
-the same name: the id is the Supportive Listener coaching mode that has not
-been written, and the edition is the product it would ship in.)
+the same name: the id is the Supportive Listener coaching mode, and the edition
+is the product that ships it.)
 
 The whole catalogue is one dependency-free module, `chat/modes.js`: the table,
 the copy the window renders, and the pure helpers every enforcement point
@@ -104,6 +105,21 @@ what happened, and they generalise past the mode that found them.
 8. **Measure both directions in the same pass.** Every wording that improved one
    number moved another. A probe that counts only the behaviour you want scores
    the version that shouts it at everyone highest.
+9. **"Only if they ask" does not guard an exercise.** The Supportive Listener's
+   first draft offered a journaling prompt and a reframing question on that
+   condition, and on 7 of 24 crisis turns the floor tier offered the exercise
+   *to* the ideation. The crisis layer stops a method by naming the strings it
+   emits (3 above), and a writing prompt is not one of them. The exercises came
+   out rather than the guard getting stronger.
+10. **A verb the model can hand over becomes advice.** "Name the feeling … as
+    something they can correct" was read as a thing to give the person — "you
+    can correct this by choosing to be kind to yourself" — on 5 of 18 ordinary
+    turns. "Letting them put you right" keeps the correction theirs: 0 of 18.
+11. **Forbid the move the model makes, not the one you imagined.** Told never to
+    speak as another person, the floor tier obeyed to the letter and set up the
+    séance instead — "please go ahead and say what you need to say" — then
+    answered as itself when addressed as "Mum". The sentence that holds is
+    aimed at the invitation.
 
 ## What is known not to work
 
@@ -125,6 +141,14 @@ what happened, and they generalise past the mode that found them.
 - **The floor tier gets tool arguments wrong** in the WhatsApp modes — it passes
   the parameter schema back as the value, matches nothing, and reports that a
   conversation is empty when it is not.
+- **The Supportive Listener ships without journaling or reframing questions,**
+  which the plan (§2.7) asks for. Offered as an option they reached crisis turns
+  (9 above), so the mode listens and nothing else until a way to offer them is
+  measured safe. Its crisis pivot is the strongest on the floor tier of any
+  mode — 15 of 24, against NVC's 6 of 16 and the Life Coach's 0 of 6 — because
+  saying back what was heard and saying "I am concerned" point the same way. It
+  still declares 8B: the quietest phrasings reach neither it nor
+  `crisisSignals()`.
 - **Nothing is remembered across conversations.** Within one, history is never
   truncated. The modes that would obviously want persistence say they do not
   have it rather than implying continuity.

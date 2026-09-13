@@ -65,6 +65,16 @@ const offeredIds = () => modeSummaries().map((r) => r.id);
 // A connector-readiness answer for validateMode, in one line.
 const ready = (...ids) => (id) => ids.includes(id);
 
+// The stand-in wherever a test means "an id this build does not define".
+//
+// It was `styles` until Session 4 shipped that mode, then `listener` until
+// this one shipped the last of them, and each time the borrowed id stopped
+// testing what its test was written to test on the day it gained content.
+// There is no eighth planned mode to borrow next, so this is a name the
+// registry will never hold, and the rule is now written down: an undefined-id
+// fixture is a name nobody plans to ship, never the next thing on the list.
+const UNKNOWN_MODE = "hypnotherapist";
+
 // ── Off by default ──────────────────────────────────────────
 
 test("every mode is off until someone switches it on", () => {
@@ -86,7 +96,12 @@ test("only modes with content are offerable", () => {
   // Declaring an id early is cheap; shipping half a coaching prompt is not.
   // In MODE_IDS order, which is the order a picker shows them in — this list
   // is the one place the whole catalogue's shipped state is visible at once.
-  assert.deepEqual(definedModes(), ["nvc", "styles", "whatsapp", "spanish", "career", "life"]);
+  assert.deepEqual(definedModes(), ["nvc", "styles", "whatsapp", "spanish", "career", "life", "listener"]);
+  // And with the last of them shipped, "declared but empty" is a state the
+  // catalogue is no longer in. This is the assertion that says so out loud: if
+  // an eighth id is ever declared ahead of its content, the refusal path below
+  // goes live again and this line is what says it has.
+  assert.deepEqual(definedModes(), MODE_IDS, "every declared id now has content");
 });
 
 // ── Which ids are accepted ──────────────────────────────────
@@ -98,8 +113,13 @@ test("a mode id this build does not define is refused", () => {
   assert.match(r.error, /no discussion mode called/);
 });
 
-test("an id that is planned but has no content yet is refused like any other unknown", () => {
-  assert.equal(validateMode("listener", { listener: true }).ok, false);
+test("switching on an id with no content would not make it reachable", () => {
+  // This was written against `listener` while it was declared and empty, and
+  // that is a state the catalogue is no longer in — so it is checked against a
+  // name that will never be in MODES rather than retired. The claim is the one
+  // that mattered: enablement is not the gate, having content is. A settings
+  // file naming anything at all does not conjure a mode.
+  assert.equal(validateMode(UNKNOWN_MODE, { [UNKNOWN_MODE]: true }).ok, false);
 });
 
 test("a known mode that is switched off is refused, and says where to switch it on", () => {
@@ -134,7 +154,7 @@ test("a mode turn refuses web search even when the user armed it and the setting
   assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: "nvc" }), false);
   // Including for a stored mode this build no longer defines: an id we cannot
   // explain gets fewer capabilities, never more.
-  assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: "listener" }), false);
+  assert.equal(armWebSearch({ requested: true, settingEnabled: true, mode: UNKNOWN_MODE }), false);
 });
 
 test("without a mode, web search still needs both the setting and the per-message arm", () => {
@@ -164,7 +184,7 @@ test("a coaching mode is offered no tools at all, memory included", () => {
 });
 
 test("an undefined mode id also ends up with nothing", () => {
-  assert.deepEqual(modeToolFilter("listener", POOL), []);
+  assert.deepEqual(modeToolFilter(UNKNOWN_MODE, POOL), []);
 });
 
 test("no mode leaves the ordinary tool list alone-but-changed", () => {
@@ -208,7 +228,7 @@ test("every mode's preamble fits the prompt budget", () => {
 
 test("no mode means no preamble, so an ordinary chat pays nothing", () => {
   assert.equal(modePreamble(null), "");
-  assert.equal(modePreamble("listener"), "", "an id with no content adds no instructions either");
+  assert.equal(modePreamble(UNKNOWN_MODE), "", "an id with no content adds no instructions either");
 });
 
 test("the preamble is appended, not substituted, so a custom system prompt survives", () => {
@@ -541,7 +561,7 @@ test("the prompt half and the enforced half cover exactly the same modes", () =>
   assert.equal(carriesCrisisLayer("nvc+whatsapp"), true);
   assert.ok(modePreamble("nvc+whatsapp").includes(CRISIS_LAYER));
   assert.equal(carriesCrisisLayer(null), false);
-  assert.equal(carriesCrisisLayer("listener"), false, "an id with no content gets neither");
+  assert.equal(carriesCrisisLayer(UNKNOWN_MODE), false, "an id with no content gets neither");
 });
 
 // ── What the window is told ─────────────────────────────────
@@ -552,7 +572,7 @@ test("a mode conversation is titled from the registry, never from what was said"
   const title = modeTitle("nvc", new Date("2026-08-24T12:00:00Z"));
   assert.ok(title.startsWith(MODES.nvc.titleLabel));
   assert.match(title, /Aug 24/);
-  assert.match(modeTitle("listener"), /^Private conversation/, "an unknown id still gets a quiet title");
+  assert.match(modeTitle(UNKNOWN_MODE), /^Private conversation/, "an unknown id still gets a quiet title");
 });
 
 test("the NVC coach declares the tier its guardrail was proven on", () => {
@@ -662,7 +682,7 @@ test("a database from before modes existed gains the column and keeps its histor
     assert.equal(store.ensureConversation("fresh", "nvc"), "nvc");
     assert.equal(store.ensureConversation("fresh", "spanish"), "nvc",
       "the mode is fixed at creation — a later turn cannot change it");
-    assert.equal(store.ensureConversation("fresh", "listener"), "nvc",
+    assert.equal(store.ensureConversation("fresh", UNKNOWN_MODE), "nvc",
       "including a mode this build does not define");
     assert.equal(store.ensureConversation("fresh"), "nvc",
       "and a turn that sends no mode still runs in the conversation's mode");

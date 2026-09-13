@@ -111,7 +111,7 @@ This installs the **v2 beta** — REFUGIO's own chat window. It replaces Open We
 - **Fewer moving parts.** MCPO exists only because Open WebUI can't speak MCP. The chat UI can, so it isn't started.
 - **Sources.** Every answer built from your data can show exactly which tool calls produced it — which chats were read, which reminders listed.
 - **Web search, off by default.** The one thing that leaves your machine. It has to be switched on, and then armed for each individual message, with a warning saying what is sent.
-- **Discussion modes, also off by default.** One built-in frame for one conversation — reading your own WhatsApp history. It *removes* capability rather than adding it: no web search, three read-only tools, no generated titles. The five coaching frames — NVC, communication styles, career, life, a Spanish tutor — are **REFUGIO Listener**, installed separately. See below.
+- **Discussion modes, also off by default.** One built-in frame for one conversation — reading your own WhatsApp history. It *removes* capability rather than adding it: no web search, three read-only tools, no generated titles. The six coaching frames — NVC, communication styles, career, life, a supportive listener, a Spanish tutor — are **REFUGIO Listener**, installed separately. See below.
 
 ### Known rough edges
 
@@ -214,7 +214,7 @@ Everything that used to be a terminal prompt is a page now: **http://127.0.0.1:8
 
 A mode is a named frame around **one conversation**: a system prompt, a set of guardrails, and a smaller set of capabilities. You switch one on in **Settings**, then pick it in the composer *before the first message*. After that it is fixed — the system prompt is rebuilt on every turn, so changing it mid-thread would silently reframe everything already said. Leaving a mode means starting a new chat, and there is a **Leave** button that says so.
 
-**The coaching modes are a separate product.** Six modes are built here and each install offers the ones that are its own: REFUGIO offers the mode that reads a connector, and **REFUGIO Listener** offers the five coaching ones. Asking either for the other's mode is refused with the name of the product that has it, and switching products is an install, not a setting. The reasoning is in [`docs/editions.md`](docs/editions.md).
+**The coaching modes are a separate product.** Seven modes are built here and each install offers the ones that are its own: REFUGIO offers the mode that reads a connector, and **REFUGIO Listener** offers the six coaching ones. Asking either for the other's mode is refused with the name of the product that has it, and switching products is an install, not a setting. The reasoning is in [`docs/editions.md`](docs/editions.md).
 
 | Mode | Product | What it is for |
 |---|---|---|
@@ -223,6 +223,7 @@ A mode is a named frame around **one conversation**: a system prompt, a set of g
 | **Style Coach** | Listener | Communication styles (Merrill-Reid, 1981): how you come across, what you do under pressure, and how to reach one difficult person. |
 | **Career Coach** | Listener | Interview practice, negotiation wording, and decisions with their costs. No internet, so any number is one to check. |
 | **Life Coach** | Listener | One step small enough that you will do it, with the day and the place. Stops proposing steps when what you wanted was to be heard. |
+| **Supportive Listener** | Listener | Being heard rather than advised. It says back what carried the weight and names the feeling, and makes no plans, gives no advice and names no condition. Not therapy, and not help in an emergency. |
 | **Spanish Tutor** | Listener | Conversation in Spanish at your level, corrected as you go, with a register switch (tú / usted) and drills on request. |
 
 Everything below is true of a mode in whichever product ships it. The code is one codebase and the guardrails are the same code.
