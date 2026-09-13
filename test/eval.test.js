@@ -21,7 +21,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -448,6 +448,51 @@ test("a model tag becomes a filename without losing which model it was", () => {
   assert.equal(json, "/tmp/ollama-qwen2.5-14b-2026-09-13.json");
   assert.equal(md, "/tmp/ollama-qwen2.5-14b-2026-09-13.md");
   assert.equal(slug("hf.co/org/Model-GGUF:Q4_K_M"), "hf.co-org-Model-GGUF-Q4_K_M");
+});
+
+test("an --only run never writes the day's full scorecard", () => {
+  // What happened on 2026-09-13: re-running g1-diff-bug-hunt alone to check a
+  // fix replaced the committed qwen3:4b scorecard with a one-row one.
+  const day = { engine: "ollama", model: "qwen3:4b", date: "2026-09-13", dir: "/tmp" };
+  const full = resultPaths(day);
+  const one = resultPaths({ ...day, only: ["g1-diff-bug-hunt"] });
+  assert.equal(one.json, "/tmp/ollama-qwen3-4b-2026-09-13.only-g1-diff-bug-hunt.json");
+  assert.equal(one.md, "/tmp/ollama-qwen3-4b-2026-09-13.only-g1-diff-bug-hunt.md");
+  assert.notEqual(one.json, full.json);
+  assert.notEqual(one.md, full.md);
+
+  // An empty --only is not a partial run.
+  assert.deepEqual(resultPaths({ ...day, only: [] }), full);
+
+  // The same subset in any order, or with a repeat, is the same file.
+  const ab = resultPaths({ ...day, only: ["d2-web-off-honesty", "b1-voice-rewrite"] });
+  assert.deepEqual(resultPaths({ ...day, only: ["b1-voice-rewrite", "d2-web-off-honesty", "b1-voice-rewrite"] }), ab);
+  assert.equal(ab.json, "/tmp/ollama-qwen3-4b-2026-09-13.only-b1-voice-rewrite+d2-web-off-honesty.json");
+
+  // A long subset still names itself as partial, stays short, and differs from
+  // another long subset.
+  const ids = readTasks(TASK_DIR).map((t) => t.id);
+  const many = resultPaths({ ...day, only: ids });
+  assert.match(many.json, new RegExp(`\\.only-${ids.length}-tasks-[0-9a-f]{8}\\.json$`));
+  assert.ok(basename(many.json).length < 120, many.json);
+  assert.notEqual(resultPaths({ ...day, only: ids.slice(1) }).json, many.json);
+});
+
+test("a partial scorecard says so, and main names its files by the subset", () => {
+  const rows = [{ id: "g1", workload: "G", title: "t", expect: "e", status: "ran", auto: { band: 2, notes: ["fine"] }, answer: "a", toolCalls: [] }];
+  const common = {
+    engine: "ollama", model: "qwen3:4b", date: "2026-09-13", base: "http://127.0.0.1:8090",
+    capability: { product: "REFUGIO", version: "2.0.0-beta.2" }, rows,
+  };
+  assert.match(scorecard({ ...common, only: ["g1"] }), /- Partial run: `--only g1`/);
+  assert.doesNotMatch(scorecard(common), /Partial run/);
+
+  // resultPaths is only half of it; main has to hand it the subset.
+  const src = readFileSync(join(root, "scripts", "eval.cjs"), "utf-8");
+  const body = src.slice(src.indexOf("async function main"), src.indexOf("module.exports"));
+  assert.match(body, /resultPaths\(\{ engine, model, date, only \}\)/);
+  assert.match(body, /scorecard\(\{ engine, model, date, base, capability, rows, only \}\)/);
+  assert.match(body, /const only = args\.only\?\.length/);
 });
 
 test("the scorecard leaves the human column empty and says why", () => {

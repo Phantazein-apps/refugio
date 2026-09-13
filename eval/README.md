@@ -28,6 +28,13 @@ It writes two files per run into `results/`:
 - `<engine>-<model>-<date>.md` — the scorecard. A model tag carries `:` and
   sometimes `/`; both are flattened to `-` in the filename.
 
+A run with `--only` is a partial run and never writes those two names. It writes
+`<engine>-<model>-<date>.only-<ids>.json` and `.md` instead, with the ids sorted
+and joined by `+` (a long list becomes `only-<n>-tasks-<hash>`), and its scorecard
+says it is partial. Re-running one task to check a fix used to replace the day's
+full scorecard with a one-row one; now the full card stays as it was, and
+re-running the same subset the same day replaces only that subset's file.
+
 REFUGIO must be running. The runner reads `/api/chat/status` first to learn what
 the server actually has, so it knows before it asks anything which tasks can run.
 
