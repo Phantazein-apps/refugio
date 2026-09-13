@@ -30,10 +30,13 @@
 //   node scripts/eval.cjs --dry-run                       # plan only, no server
 //   node scripts/eval.cjs --engine ollama --model qwen2.5:3b --only a1,d2
 //
-// Writes eval/results/<engine>-<model>-<date>.json and .md.
+// Writes eval/results/<engine>-<model>-<date>.json and .md. A run with --only
+// writes <engine>-<model>-<date>.only-<ids>.json and .md, and leaves the day's
+// full scorecard alone.
 
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
@@ -542,8 +545,27 @@ function autoScore(task, result) {
  *  than discovered when a result file fails to write on Windows. */
 const slug = (s) => String(s).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
 
-function resultPaths({ engine, model, date, dir = RESULT_DIR }) {
-  const stem = `${slug(engine)}-${slug(model)}-${date}`;
+/** The longest `only-<ids>` part spelled out in full. Past it the ids become a
+ *  count and a hash: the file still says it is partial and which subset it is,
+ *  and the name stays well inside every filesystem's limit. */
+const ONLY_SPELLED_MAX = 80;
+
+/** Where a run's two files go. A partial run (`only`) gets a name of its own.
+ *  It used to share the full run's, so re-running one task to check a fix
+ *  replaced the day's twenty-task scorecard with a one-row one — and a scorecard
+ *  that quietly shrinks is worse than none, because it still reads as the day's
+ *  result. The ids are sorted so that `--only a,b` and `--only b,a` are the same
+ *  subset and the same file; running that subset again the same day replaces
+ *  only its own file. */
+function resultPaths({ engine, model, date, only = null, dir = RESULT_DIR }) {
+  let stem = `${slug(engine)}-${slug(model)}-${date}`;
+  if (only?.length) {
+    const ids = [...new Set(only)].sort();
+    const spelled = ids.map(slug).join("+");
+    stem += spelled.length <= ONLY_SPELLED_MAX
+      ? `.only-${spelled}`
+      : `.only-${ids.length}-tasks-${crypto.createHash("sha1").update(ids.join("\n")).digest("hex").slice(0, 8)}`;
+  }
   return { json: path.join(dir, `${stem}.json`), md: path.join(dir, `${stem}.md`) };
 }
 
@@ -559,12 +581,15 @@ function summarise(rows) {
   };
 }
 
-function scorecard({ engine, model, date, base, capability, rows }) {
+function scorecard({ engine, model, date, base, capability, rows, only = null }) {
   const s = summarise(rows);
   const L = [];
   L.push(`# Eval scorecard — ${engine} / ${model}`);
   L.push("");
   L.push(`- Run: ${date}`);
+  // Said in the card as well as in the filename, because a card gets pasted and
+  // forwarded without its filename, and its totals are then read as the day's.
+  if (only?.length) L.push(`- Partial run: \`--only ${[...new Set(only)].sort().join(",")}\` — not the full set, so these totals are not the day's`);
   L.push(`- Server: ${base} (${capability.product}, v${capability.version || "unknown"})`);
   L.push(`- Tasks: ${s.total} · ran ${s.ran} · skipped ${s.skipped}`);
   L.push(`- Auto band total: **${s.autoTotal} / ${s.autoMax}** across the ${s.ran} that ran`);
@@ -709,16 +734,20 @@ async function main(argv) {
   }
 
   fs.mkdirSync(RESULT_DIR, { recursive: true });
-  const out = resultPaths({ engine, model, date });
+  const only = args.only?.length ? [...new Set(args.only)].sort() : null;
+  const out = resultPaths({ engine, model, date, only });
   fs.writeFileSync(out.json, JSON.stringify({
     engine, model, date, base,
+    // null for a full run. Present so a file read without its name still says
+    // which subset it is.
+    only,
     server: { product: capability.product, edition: capability.edition, version: capability.version },
     capability: { tools: capability.tools, webEnabled: capability.webEnabled, models: capability.models },
     autoCeiling: AUTO_CEILING,
     summary: summarise(rows),
     tasks: rows,
   }, null, 2) + "\n");
-  fs.writeFileSync(out.md, scorecard({ engine, model, date, base, capability, rows }));
+  fs.writeFileSync(out.md, scorecard({ engine, model, date, base, capability, rows, only }));
 
   const s = summarise(rows);
   console.log(`\n${s.autoTotal}/${s.autoMax} auto across ${s.ran} task(s), ${s.skipped} skipped`);
