@@ -464,6 +464,9 @@ Create `~/.refugio.env` (or run the installer, which writes it for you):
 REFUGIO_ENGINE=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 REFUGIO_MODEL=llama3.1:8b
+# How long one chat turn may run before it is stopped with a message, in
+# milliseconds. Default 30 minutes; 0 removes the ceiling.
+# REFUGIO_TURN_TIMEOUT_MS=1800000
 # For LM Studio instead — legacy Open WebUI path only. The v2 chat
 # window cannot use this engine yet; see docs/gaps.md §9.
 # REFUGIO_ENGINE=lmstudio

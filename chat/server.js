@@ -7,7 +7,8 @@
 // equivalent single-user chat window with zero extra dependencies.
 //
 // Usage: node chat/server.js [--port 8090]
-// Env:   REFUGIO_CHAT_PORT, REFUGIO_CHAT_MODEL, OLLAMA_BASE_URL, REFUGIO_DATA_DIR
+// Env:   REFUGIO_CHAT_PORT, REFUGIO_CHAT_MODEL, OLLAMA_BASE_URL, REFUGIO_DATA_DIR,
+//        REFUGIO_TURN_TIMEOUT_MS (one turn's ceiling; default 30 min, 0 = none)
 
 import http from "http";
 import { readFile } from "fs/promises";
@@ -37,6 +38,7 @@ import {
 import { EDITION, PRODUCT } from "./edition.js";
 import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 import * as catalog from "./model-catalog.js";
+import { turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage } from "./turn-deadline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, "static");
@@ -1118,6 +1120,11 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   // closed tab doesn't leave the model generating.
   const ac = new AbortController();
   res.on("close", () => ac.abort());
+  // The turn's own ceiling, which replaced Node's five-minute socket timer —
+  // see turn-deadline.js. Read per turn, like the rest of the environment the
+  // turn depends on, and cleared however the turn ends.
+  const ceilingMs = turnTimeoutMs();
+  const deadline = armTurnDeadline(ac, ceilingMs);
 
   // Keep the text as it arrives. If the client disconnects (tab closed, page
   // reloaded, network blip) we still persist what was generated — otherwise
@@ -1212,10 +1219,21 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   } catch (err) {
     // Salvage a partial answer on disconnect or mid-stream failure.
     if (acc) store.addMessage(conversationId, "assistant", acc, model);
+    // The ceiling and a closed tab both abort the same controller, and only one
+    // of them has someone still listening. Checked first, because the abort it
+    // caused would otherwise be mistaken for the tab going away.
+    if (deadline.expired && !res.writableEnded) {
+      log(`turn stopped at the ${ceilingMs} ms ceiling (REFUGIO_TURN_TIMEOUT_MS; 0 removes it)`);
+      send("error", { error: deadlineMessage(ceilingMs) });
+      res.end();
+      return;
+    }
     if (ac.signal.aborted) { try { res.end(); } catch {} return; }
     log(`turn failed: ${err.message}`);
     send("error", { error: err.message });
     res.end();
+  } finally {
+    deadline.clear();
   }
 }
 
@@ -1844,6 +1862,9 @@ const server = http.createServer((req, res) => {
     else try { res.end(); } catch {}
   });
 });
+// A turn and a model download both outlive Node's five-minute request timer,
+// and the timer cannot tell the window why it hung up. turn-deadline.js.
+configureServerTimeouts(server);
 
 // A bind failure is the one startup error worth explaining. Unhandled, it
 // prints a stack trace and exits 1 — and under the supervisor, which restarts
