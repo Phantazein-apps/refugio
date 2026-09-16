@@ -146,6 +146,29 @@ test("absurd or missing memory figures are dropped", () => {
   }
 });
 
+test("an entry can call its own memory figure an estimate", () => {
+  const parsed = parseCatalog(doc([
+    entry({ tag: "qwen3:4b", estimated: true }),
+    entry({ tag: "llama3.2:3b", ramGb: 3, estimated: false }),
+    entry({ tag: "llama3.1:8b", ramGb: 5.8 }),
+  ]));
+  assert.equal(parsed.models[0].estimated, true);
+  assert.equal(parsed.models[1].estimated, false);
+  // Silence keeps its old meaning. Every catalog written before this field
+  // existed omits it, and every one of them meant "somebody measured this".
+  assert.equal(parsed.models[2].estimated, false);
+});
+
+test("a malformed honesty flag resolves to the unflattering reading", () => {
+  // The opposite of how `tools` and `verified` treat garbage, deliberately. A
+  // dropped entry or a false `verified` costs a model a recommendation; a false
+  // `estimated` puts a guess on screen wearing a measurement's clothes.
+  for (const bad of ["yes", "false", 1, 0, {}, []]) {
+    const parsed = parseCatalog(doc([entry({ estimated: bad })]));
+    assert.equal(parsed.models[0].estimated, true, String(bad));
+  }
+});
+
 test("a duplicate tag cannot shadow the first one", () => {
   const parsed = parseCatalog(doc([entry({ ramGb: 3.3 }), entry({ ramGb: 0.1 })]));
   assert.equal(parsed.models.length, 1);
@@ -183,6 +206,34 @@ test("every unverified entry says why in its note", () => {
   }
 });
 
+// The guard that would have caught the bug this field exists to fix: three
+// entries said "RAM estimated from the download" in their own note while the
+// merge stamped them measured, and nothing failed.
+//
+// Those three are exempted by name rather than corrected here. PR #42 is
+// measuring them on a 24 GB Mac and owns the `models` array, so editing it from
+// this branch would collide. The exemption is what makes the test useful now: a
+// FOURTH entry that admits a guess in its note without setting the flag fails
+// immediately. When #42 lands, whoever writes the measured figures deletes this
+// list and the guard covers the whole catalog.
+const PENDING_MEASUREMENT = new Set(["lfm2.5:8b", "gemma4:e4b", "muse-glimmer:30b"]);
+
+test("an entry whose note admits a guess sets the flag", () => {
+  for (const m of shipped.models) {
+    if (PENDING_MEASUREMENT.has(m.tag)) continue;
+    if (!/estimat/i.test(m.note || "")) continue;
+    assert.equal(m.estimated, true,
+      `${m.tag} says its RAM is estimated in its note but renders as a measured figure`);
+  }
+});
+
+test("the measurement exemptions still name models the catalog lists", () => {
+  // Keeps the list above from rotting into a silent free pass for a tag that
+  // was renamed or dropped.
+  const tags = new Set(shipped.models.map((m) => m.tag));
+  for (const tag of PENDING_MEASUREMENT) assert.ok(tags.has(tag), `${tag} is exempted but no longer in the catalog`);
+});
+
 // ── Merging the three sources ───────────────────────────────
 
 const LADDER = memFit.MODEL_LADDER;
@@ -215,6 +266,42 @@ test("a probe fills a gap and never overwrites a measurement", () => {
   assert.equal(probed.rank, null);          // unranked: describable, never recommended
   assert.equal(probed.verified, false);
   assert.equal(probed.note, "7B · Q4_K_M");
+});
+
+test("an estimate declared in the catalog survives the merge", () => {
+  const index = mergeIndex({
+    builtin: LADDER,
+    catalog: [
+      entry({ tag: "gemma4:e4b", ramGb: 11, estimated: true }),
+      entry({ tag: "llama3.1:8b", ramGb: 5.8 }),
+    ],
+  });
+  // The bug this replaced: `estimated` was hard-coded false for every catalog
+  // entry, so an entry could not say the number was a guess however plainly it
+  // said so in its note, and Settings showed it without the ~ it promises.
+  assert.equal(index.get("gemma4:e4b").estimated, true);
+  assert.equal(index.get("llama3.1:8b").estimated, false);
+});
+
+test("a catalog estimate overrides a shipped measurement rather than inheriting it", () => {
+  // `verified` has a "a shipped model stays verified" rule. This must NOT: if
+  // the catalog replaces a ladder figure with a guess, the guess is what is on
+  // screen, and it says so.
+  const index = mergeIndex({
+    builtin: LADDER,
+    catalog: [entry({ tag: "qwen2.5:3b", ramGb: 2.2, estimated: true })],
+  });
+  assert.equal(index.get("qwen2.5:3b").estimated, true);
+  assert.equal(index.get("qwen2.5:3b").verified, true);   // still shipped, still verified
+});
+
+test("the built-in ladder is not an estimate and a probe always is", () => {
+  const index = mergeIndex({
+    builtin: LADDER,
+    probes: [{ tag: "mystery:7b", ramGb: 4.4, tools: true }],
+  });
+  for (const m of LADDER) assert.equal(index.get(m.tag).estimated, false, m.tag);
+  assert.equal(index.get("mystery:7b").estimated, true);
 });
 
 test("an ollama name carrying a digest still matches its rating", () => {

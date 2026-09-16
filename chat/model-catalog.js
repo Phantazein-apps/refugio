@@ -140,6 +140,21 @@ function validateEntry(raw, seen) {
     // does not tell you to switch to something nobody has watched call a
     // connector — see recommend() below.
     verified: raw.verified === true,
+    // Whether anyone MEASURED ramGb, as opposed to reading it off a download
+    // size. Only the person who wrote the entry knows, so only they can say —
+    // and before this field existed they could not, which is how three entries
+    // came to admit in their own `note` that they were estimates while the
+    // interface presented them as measured figures.
+    //
+    // Absent means false, because every catalog written before this field
+    // existed is silent and all of them meant "measured". But a value that is
+    // PRESENT and not a boolean resolves to true, which is the one place this
+    // function bends its own no-coercion rule. `verified` above can safely take
+    // `=== true`: its unsafe direction is the generous one, and garbage there
+    // costs a model a recommendation. Here the unsafe direction is the
+    // flattering one, and garbage would turn `estimated: "yes"` into a claim
+    // that somebody measured it.
+    estimated: raw.estimated === undefined ? false : raw.estimated !== false,
     note: clip(raw.note, 240),
     added: clip(raw.added, 32),
   };
@@ -276,6 +291,13 @@ export function mergeIndex({ builtin = [], catalog = [], probes = [] } = {}) {
       verified: true,
       source: "builtin",
       isNew: false,
+      // Examined and left alone. This file's own docstring, and
+      // chat/server.js, both call the built-in ladder "measured, shipped" —
+      // scripts/mem-fit.cjs says "approx" only in the sense of a measured
+      // figure rounded to a tenth. Flipping seven shipped models to "estimated"
+      // on the strength of the word "approx" would be asserting something
+      // nobody has checked, which is the exact habit this field exists to
+      // break. If a ladder figure turns out to be a guess, correct that figure.
       estimated: false,
       note: null,
     });
@@ -294,7 +316,14 @@ export function mergeIndex({ builtin = [], catalog = [], probes = [] } = {}) {
       // The answer to "what did checking actually find?" — a model this build
       // could not have known about.
       isNew: !builtinTags.has(m.tag),
-      estimated: false,
+      // Take the entry at its word. The catalog overrides built-in figures by
+      // tag, so if its author says the replacement is an estimate, it is one —
+      // there is no "a shipped model stays measured" rule to apply here the way
+      // `verified` above has one. A number and how it was obtained travel
+      // together, or the label ends up decided by which file the number
+      // arrived in. Strict here because validateEntry has already normalised
+      // this to a real boolean; this is not the trust boundary.
+      estimated: m.estimated === true,
       note: m.note,
       added: m.added,
     });
