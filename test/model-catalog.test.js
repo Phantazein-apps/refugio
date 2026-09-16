@@ -200,6 +200,22 @@ test("nothing in the shipped catalog claims tools below the floor's size", () =>
   }
 });
 
+test("no shipped note is cut short by the parser", () => {
+  // validateEntry clips notes to fit one line in Settings, and it does so
+  // silently. Measurement notes put the caveat LAST, so a clipped one keeps the
+  // confident number and drops exactly the part that qualifies it — this
+  // shipped once with muse-glimmer:30b cut at "the default wi", losing "not a
+  // clean GPU-resident figure". Compared against the raw file rather than a
+  // hard-coded length, so the guard moves with the limit.
+  const raw = JSON.parse(readFileSync(join(root, "models.json"), "utf8")).models;
+  for (const r of raw) {
+    if (typeof r.note !== "string") continue;
+    const parsed = shipped.models.find((m) => m.tag === r.tag);
+    assert.equal(parsed.note, r.note,
+      `${r.tag}: note is ${r.note.length} chars and the parser clips it to ${parsed.note.length}`);
+  }
+});
+
 test("every unverified entry says why in its note", () => {
   for (const m of shipped.models.filter((x) => !x.verified)) {
     assert.ok(m.note && m.note.length > 20, `${m.tag} is unverified with no explanation`);
@@ -210,28 +226,16 @@ test("every unverified entry says why in its note", () => {
 // entries said "RAM estimated from the download" in their own note while the
 // merge stamped them measured, and nothing failed.
 //
-// Those three are exempted by name rather than corrected here. PR #42 is
-// measuring them on a 24 GB Mac and owns the `models` array, so editing it from
-// this branch would collide. The exemption is what makes the test useful now: a
-// FOURTH entry that admits a guess in its note without setting the flag fails
-// immediately. When #42 lands, whoever writes the measured figures deletes this
-// list and the guard covers the whole catalog.
-const PENDING_MEASUREMENT = new Set(["lfm2.5:8b", "gemma4:e4b", "muse-glimmer:30b"]);
-
+// Those three — lfm2.5:8b, gemma4:e4b and muse-glimmer:30b — were exempted by
+// name while PR #42 measured them on a 24 GB Mac. All three now carry measured
+// figures, so the exemption list is gone and the guard covers the whole catalog
+// with nothing spared: any entry whose note admits a guess must set the flag.
 test("an entry whose note admits a guess sets the flag", () => {
   for (const m of shipped.models) {
-    if (PENDING_MEASUREMENT.has(m.tag)) continue;
     if (!/estimat/i.test(m.note || "")) continue;
     assert.equal(m.estimated, true,
       `${m.tag} says its RAM is estimated in its note but renders as a measured figure`);
   }
-});
-
-test("the measurement exemptions still name models the catalog lists", () => {
-  // Keeps the list above from rotting into a silent free pass for a tag that
-  // was renamed or dropped.
-  const tags = new Set(shipped.models.map((m) => m.tag));
-  for (const tag of PENDING_MEASUREMENT) assert.ok(tags.has(tag), `${tag} is exempted but no longer in the catalog`);
 });
 
 // ── Merging the three sources ───────────────────────────────
