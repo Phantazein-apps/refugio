@@ -98,7 +98,7 @@
       "nativeTools": true,
       "rank": 52,
       "verified": true,
-      "note": "Liquid's edge MoE (8B total, ~1B active), built for tool calling on consumer hardware; 125K context. RAM measured 2026-09-16 on an Apple M4 Pro / 24 GB, macOS 26.7, Ollama 0.34.1: 5.3 GB resident, 100% GPU, at REFUGIO's 4096-token context — a longer context raises it. Needs Ollama 0.34+ to pull at all; older runtimes are refused with HTTP 412. Watched driving memory__memory_search in eval b2-voice-from-memory.",
+      "note": "Liquid's edge MoE, ~1B active; 125K ctx. Measured 2026-09-16, M4 Pro / 24 GB, Ollama 0.34.1: 5.3 GB resident, 100% GPU at REFUGIO's 4096 ctx; longer raises it. Needs Ollama 0.34+. Called memory_search in eval b2; f1 returned nothing.",
       "added": "2026-08-19"
     },
     {
@@ -108,7 +108,7 @@
       "nativeTools": true,
       "rank": 58,
       "verified": true,
-      "note": "Gemma 4 with native function calling (4.5B effective, 128K context). RAM measured 2026-09-16 on an Apple M4 Pro / 24 GB, macOS 26.7, Ollama 0.34.1: 9.5 GB resident, 100% GPU, at REFUGIO's 4096-token context — a longer context raises it. Needs Ollama 0.34+ to pull at all; older runtimes are refused with HTTP 412. Watched driving memory__memory_search in eval f1-memory-recall and b2-voice-from-memory.",
+      "note": "Gemma 4, native function calling; 4.5B effective, 128K ctx. Measured 2026-09-16, M4 Pro / 24 GB, Ollama 0.34.1: 9.5 GB resident, 100% GPU at REFUGIO's 4096 ctx; longer raises it. Needs Ollama 0.34+. Called memory_search in b2 and f1.",
       "added": "2026-08-19"
     },
     {
@@ -118,7 +118,7 @@
       "nativeTools": true,
       "rank": 80,
       "verified": true,
-      "note": "Meta's 30B agentic model, tuned for tool use and failure recovery; 128K context. RAM measured 2026-09-16 on an Apple M4 Pro / 24 GB, macOS 26.7, Ollama 0.34.1: 17 GB resident, but only 86% of it on the GPU — 14% ran on CPU at the default wired limit (iogpu.wired_limit_mb=0, ~18 GB of 24). Not a clean GPU-resident figure. Tool calls were correct but 4-8x slower than the smaller two. Needs Ollama 0.34+ to pull at all. Watched driving memory__memory_search in eval f1-memory-recall and b2-voice-from-memory.",
+      "note": "Meta's 30B agentic model; 128K ctx. Measured 2026-09-16, M4 Pro / 24 GB: 17 GB resident but only 86% on GPU, 14% on CPU at the default wired limit, so not a clean figure, and 4-8x slower. Needs Ollama 0.34+. Called memory_search in b2, f1.",
       "added": "2026-08-19"
     }
   ]

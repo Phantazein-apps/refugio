@@ -200,6 +200,22 @@ test("nothing in the shipped catalog claims tools below the floor's size", () =>
   }
 });
 
+test("no shipped note is cut short by the parser", () => {
+  // validateEntry clips notes to fit one line in Settings, and it does so
+  // silently. Measurement notes put the caveat LAST, so a clipped one keeps the
+  // confident number and drops exactly the part that qualifies it — this
+  // shipped once with muse-glimmer:30b cut at "the default wi", losing "not a
+  // clean GPU-resident figure". Compared against the raw file rather than a
+  // hard-coded length, so the guard moves with the limit.
+  const raw = JSON.parse(readFileSync(join(root, "models.json"), "utf8")).models;
+  for (const r of raw) {
+    if (typeof r.note !== "string") continue;
+    const parsed = shipped.models.find((m) => m.tag === r.tag);
+    assert.equal(parsed.note, r.note,
+      `${r.tag}: note is ${r.note.length} chars and the parser clips it to ${parsed.note.length}`);
+  }
+});
+
 test("every unverified entry says why in its note", () => {
   for (const m of shipped.models.filter((x) => !x.verified)) {
     assert.ok(m.note && m.note.length > 20, `${m.tag} is unverified with no explanation`);
