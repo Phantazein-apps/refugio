@@ -9,6 +9,7 @@
     "nativeTools": "Can it drive Open WebUI's native function calling, as opposed to OWUI's prompt-based mode?",
     "rank": "Hand-assigned capability score, higher is better. Independent of ramGb — that is the point: a newer small model can outrank an older large one. Built-in ladder entries are 10, 20, 30... so a catalog entry can land between them.",
     "verified": "Has someone actually watched this model call a REFUGIO connector? Unverified models are listed and downloadable, and are NEVER recommended.",
+    "estimated": "Optional, default false. TRUE means nobody has measured ramGb — it was inferred from the download size or otherwise guessed. Settings then shows the figure with a ~ and says so on hover, instead of presenting a guess as a measurement. Set it honestly: an entry that omits this is claiming the number was measured.",
     "note": "One line shown next to the model in Settings.",
     "added": "When this entry was added to the catalog."
   },
