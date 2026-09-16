@@ -195,3 +195,79 @@ grant itself access to Notes, Reminders or Messages, and no amount of packaging
 work will change that. It requires a PPPC profile pushed by MDM alongside the
 package, keyed to the app's Developer ID signature. Listed here so it stops
 being re-raised as something that was forgotten.
+
+## 12. The model ladder is sized by file
+
+Every `ramGb` in REFUGIO is a number someone wrote down, and whether the
+interface calls it an estimate depends on which **file** it arrived in rather
+than on whether anybody measured it.
+
+There are three sources, merged by `mergeIndex` in `chat/model-catalog.js`:
+
+- the built-in ladder, `scripts/mem-fit.cjs:27` — `estimated: false`
+  (`chat/model-catalog.js:279`)
+- `models.json`, fetched by "Check for better models" — `estimated: false`
+  (`chat/model-catalog.js:297`)
+- a probe of an installed model REFUGIO has no rating for — `estimated: true`
+  (`chat/model-catalog.js:322`)
+
+The flag is hard-coded per source. A catalog entry cannot declare itself an
+estimate: pass `estimated: true` in `models.json` and `mergeIndex` discards it
+and writes `false`. `models.json`'s own `fields` block documents nine keys, and
+neither `estimated` nor `source` is among them, so there is no supported way to
+say it either.
+
+This matters because the interface acts on the flag. `chat/static/settings.js:548`
+prefixes a tilde, and `:549` attaches *"Estimated from the download size —
+nobody has measured this one"* — but only when `estimated` is true. The rescan
+aside at `:747` promises that sizes for models nobody has measured "are
+estimated from their download size and shown with a ~".
+`chat/server.js:303-304` states the rule outright: *"An estimate presented as a
+measurement is the one thing this page must not do."*
+
+Three catalog entries say in their own `note` that their size is estimated from
+the download. All three render without the tilde and without the tooltip:
+
+| tag | `ramGb` | own note says estimated | Settings renders |
+|---|---|---|---|
+| `lfm2.5:8b` | 6.1 | yes | `6.1 GB`, no tooltip |
+| `gemma4:e4b` | 11.0 | yes | `11 GB`, no tooltip |
+| `muse-glimmer:30b` | 20.2 | yes | `20.2 GB`, no tooltip |
+
+Meanwhile an unrated model found on the machine — the one case where REFUGIO
+genuinely knows nothing — is the only one that gets the honest label. The page
+is most careful where it has least reason to be, and least careful about the
+numbers a person is most likely to act on, because a catalog entry is what
+"Check for better models" puts in front of them.
+
+The built-in ladder is not exempt. `scripts/mem-fit.cjs:27` calls its column
+"approx resident RAM under Ollama (Q4 + a modest KV cache)", and only the 3B
+floor carries a note that it was "observed directly rather than assumed". The
+rest are ship-dated approximations, flagged `estimated: false`.
+
+**What closing it takes.** Two things, and only the second is a code change:
+
+1. Measured resident figures for the three estimated entries — `ollama ps` SIZE
+   and the CPU/GPU split, taken while the model is loaded and has served a turn
+   that actually touches the KV cache and any expert pages.
+2. An `estimated`/`source` field on a catalog entry that survives `mergeIndex`,
+   so a number and its provenance travel together instead of the provenance
+   being re-derived from which file the number arrived in.
+
+**Why this entry is open rather than closed.** The measurement needs a machine
+the models fit on, and the Mac it was attempted on is not one:
+
+| | |
+|---|---|
+| Machine | Apple M3, macOS 26.6.2 (25G83) |
+| Total RAM | 8.00 GB |
+| Free at the time (`availableMemGb()`) | 1.27 GB |
+| `machineSupport()` | `supported: false`, `transient: true`, `needGb: 3.7` |
+
+`gemma4:e4b`'s weights are 9.61 GB and `lfm2.5:8b`'s are 5.16 GB — read from
+their registry manifests, which match the download sizes the notes quote. The
+tags resolve and both are pullable; neither can be resident on an 8 GB machine,
+and `machineSupport()` was refusing even the 2.6 GB floor model at the time. A
+figure obtained by loading a 9.6 GB model on an 8 GB Mac would measure swap
+behaviour, not the model — and writing that down as "measured" is the failure
+this entry exists to record.
