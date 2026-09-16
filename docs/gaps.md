@@ -199,75 +199,84 @@ being re-raised as something that was forgotten.
 ## 12. The model ladder is sized by file
 
 Every `ramGb` in REFUGIO is a number someone wrote down, and whether the
-interface calls it an estimate depends on which **file** it arrived in rather
-than on whether anybody measured it.
+interface calls it an estimate used to depend on which **file** it arrived in
+rather than on whether anybody measured it.
 
-There are three sources, merged by `mergeIndex` in `chat/model-catalog.js`:
+**Two of the three things this entry recorded are now closed.** What remains is
+the larger half.
 
-- the built-in ladder, `scripts/mem-fit.cjs:27` — `estimated: false`
-  (`chat/model-catalog.js:279`)
-- `models.json`, fetched by "Check for better models" — `estimated: false`
-  (`chat/model-catalog.js:297`)
-- a probe of an installed model REFUGIO has no rating for — `estimated: true`
-  (`chat/model-catalog.js:322`)
+### Closed: a catalog entry can declare its own provenance (#43)
 
-The flag is hard-coded per source. A catalog entry cannot declare itself an
-estimate: pass `estimated: true` in `models.json` and `mergeIndex` discards it
-and writes `false`. `models.json`'s own `fields` block documents nine keys, and
-neither `estimated` nor `source` is among them, so there is no supported way to
-say it either.
+`mergeIndex` in `chat/model-catalog.js` hard-coded the `estimated` flag per
+source, so a catalog entry could not declare itself a guess: `estimated: true`
+in `models.json` was discarded and rewritten to `false`. PR #43 added the field
+to `validateEntry` and carried it through the merge to the Settings tilde, and
+`models.json`'s `fields` block now documents it. An entry that omits the flag is
+claiming the number was measured, and `test/model-catalog.test.js` fails any
+entry whose own note admits a guess without setting it.
 
-This matters because the interface acts on the flag. `chat/static/settings.js:548`
-prefixes a tilde, and `:549` attaches *"Estimated from the download size —
-nobody has measured this one"* — but only when `estimated` is true. The rescan
-aside at `:747` promises that sizes for models nobody has measured "are
-estimated from their download size and shown with a ~".
-`chat/server.js:303-304` states the rule outright: *"An estimate presented as a
-measurement is the one thing this page must not do."*
+### Closed: the three catalog estimates are measured (#42)
 
-Three catalog entries say in their own `note` that their size is estimated from
-the download. All three render without the tilde and without the tooltip:
+`lfm2.5:8b`, `gemma4:e4b` and `muse-glimmer:30b` carried `ramGb` values inferred
+from their download sizes. All three were measured on 2026-09-16, on an Apple M4
+Pro / 24 GB, macOS 26.7, Ollama 0.34.1, at REFUGIO's 4096-token context, each
+after a turn that drove `memory__memory_search` through the real connector pool:
 
-| tag | `ramGb` | own note says estimated | Settings renders |
-|---|---|---|---|
-| `lfm2.5:8b` | 6.1 | yes | `6.1 GB`, no tooltip |
-| `gemma4:e4b` | 11.0 | yes | `11 GB`, no tooltip |
-| `muse-glimmer:30b` | 20.2 | yes | `20.2 GB`, no tooltip |
+| tag | was | measured | `ollama ps` PROCESSOR | wired delta | verified by |
+|---|---|---|---|---|---|
+| `lfm2.5:8b` | 6.1 | **5.3** | 100% GPU | 4.906 GiB | `b2-voice-from-memory` |
+| `gemma4:e4b` | 11.0 | **9.5** | 100% GPU | 9.945 GiB | `f1`, `b2` |
+| `muse-glimmer:30b` | 20.2 | **17.0** | **14%/86% CPU/GPU** | 15.373 GiB | `f1`, `b2` |
 
-Meanwhile an unrated model found on the machine — the one case where REFUGIO
-genuinely knows nothing — is the only one that gets the honest label. The page
-is most careful where it has least reason to be, and least careful about the
-numbers a person is most likely to act on, because a catalog entry is what
-"Check for better models" puts in front of them.
+Every estimate was **high** — sizing by download file over-stated all three by
+14–19%. `muse-glimmer:30b` is not a clean GPU-resident figure: at the default
+wired limit (`iogpu.wired_limit_mb = 0`, ~18 GB of 24) 14% of it ran on CPU, and
+wired memory sat at 18.222 GiB, hard against that ceiling. It called tools
+correctly and 4–8x slower than the other two (95–125 s per eval task against
+5–32 s). The entry's note says so; the number alone would not.
 
-The built-in ladder is not exempt. `scripts/mem-fit.cjs:27` calls its column
-"approx resident RAM under Ollama (Q4 + a modest KV cache)", and only the 3B
-floor carries a note that it was "observed directly rather than assumed". The
-rest are ship-dated approximations, flagged `estimated: false`.
+### Three things measuring turned up that the old entry did not predict
 
-**What closing it takes.** Two things, and only the second is a code change:
+1. **The figure is context-dependent, and REFUGIO never says which context.**
+   REFUGIO sends no `options` block to Ollama, so every turn runs at Ollama's
+   default 4096. `lfm2.5:8b` advertises 125K and `gemma4:e4b` 128K; KV cache
+   scales with context, so all three figures above are figures *at 4096*, not
+   figures full stop. `ramGb` has no field for the context it was taken at, and
+   the notes carry it in prose instead.
 
-1. Measured resident figures for the three estimated entries — `ollama ps` SIZE
-   and the CPU/GPU split, taken while the model is loaded and has served a turn
-   that actually touches the KV cache and any expert pages.
-2. An `estimated`/`source` field on a catalog entry that survives `mergeIndex`,
-   so a number and its provenance travel together instead of the provenance
-   being re-derived from which file the number arrived in.
+2. **On Apple Silicon, process RSS under-reports badly, and the runner is no
+   longer called `ollama runner`.** Under Ollama 0.34.1 the child process is
+   `llama-server`. Worse, weights live in a Metal wired heap *outside* the
+   process resident set: `gemma4:e4b` showed 4.4 GiB RSS against 9.5 GB of real
+   residency. The figure that tracks reality is `ollama ps` SIZE, confirmed
+   against the wired-memory delta across a load/unload cycle. Anyone repeating
+   this measurement from RSS alone will write down roughly half the truth.
 
-**Why this entry is open rather than closed.** The measurement needs a machine
-the models fit on, and the Mac it was attempted on is not one:
+3. **All three need Ollama 0.34+ to pull at all.** On 0.18.2 the registry
+   refuses the manifest with HTTP 412 and the runtime never sees the weights —
+   while `curl` fetches the same manifest and blobs happily, so a manifest check
+   proves the tag resolves and proves nothing about whether the model will load.
+   `models.json` has no field for a minimum runtime version; the notes carry it
+   in prose.
 
-| | |
-|---|---|
-| Machine | Apple M3, macOS 26.6.2 (25G83) |
-| Total RAM | 8.00 GB |
-| Free at the time (`availableMemGb()`) | 1.27 GB |
-| `machineSupport()` | `supported: false`, `transient: true`, `needGb: 3.7` |
+### Still open: the built-in ladder is unmeasured, and at least one entry is wrong
 
-`gemma4:e4b`'s weights are 9.61 GB and `lfm2.5:8b`'s are 5.16 GB — read from
-their registry manifests, which match the download sizes the notes quote. The
-tags resolve and both are pullable; neither can be resident on an 8 GB machine,
-and `machineSupport()` was refusing even the 2.6 GB floor model at the time. A
-figure obtained by loading a 9.6 GB model on an 8 GB Mac would measure swap
-behaviour, not the model — and writing that down as "measured" is the failure
-this entry exists to record.
+`scripts/mem-fit.cjs:27` calls its column "approx resident RAM under Ollama
+(Q4 + a modest KV cache)", and only the 3B floor carries a note that it was
+"observed directly rather than assumed". The rest are ship-dated approximations,
+and `chat/model-catalog.js` still stamps every one of them `estimated: false` —
+correctly per the new field's meaning only if somebody actually measured them.
+
+Measuring the catalog gave a free check on one of them. `llama3.1:8b` ships as
+`ramGb: 5.8`; on the same machine, same context, same method it measures **5.3
+GB `ollama ps` / 4.915 GiB wired** — the shipped figure is ~10–18% high, in the
+same direction and roughly the same proportion as the three download-sized
+estimates were. One sample is not a pattern, but it is the only ladder entry
+anybody has re-checked, and it did not survive the check.
+
+**What closing this takes.** The same measurement, run over the seven ladder
+entries, and either measured figures in `mem-fit.cjs` or `estimated: true`
+reaching them the way it now reaches the catalog. Until then the ladder is the
+larger surface: it is the installer's source of truth and the fallback whenever
+`models.json` cannot be fetched, so it decides what gets downloaded on a machine
+that has never reached the network for a catalog.

@@ -1,0 +1,143 @@
+{
+  "engine": "ollama",
+  "model": "muse-glimmer:30b",
+  "date": "2026-09-16",
+  "base": "http://127.0.0.1:8090",
+  "only": [
+    "b2-voice-from-memory",
+    "f1-memory-recall"
+  ],
+  "server": {
+    "product": "REFUGIO",
+    "edition": "standard",
+    "version": "2.0.0-beta.2"
+  },
+  "capability": {
+    "tools": [
+      "memory__memory_search",
+      "memory__memory_save"
+    ],
+    "webEnabled": false,
+    "models": [
+      "muse-glimmer:30b",
+      "llama3.2:3b",
+      "llama3.1:8b",
+      "qwen3:14b",
+      "mistral:latest",
+      "llama3.2:latest"
+    ]
+  },
+  "autoCeiling": 2,
+  "summary": {
+    "total": 2,
+    "ran": 2,
+    "skipped": 0,
+    "autoTotal": 4,
+    "autoMax": 4
+  },
+  "tasks": [
+    {
+      "id": "b2-voice-from-memory",
+      "workload": "B",
+      "title": "Draft a decline in my voice, with the voice looked up rather than guessed",
+      "expect": "The model reaches for memory before drafting rather than inventing a house\nstyle, produces a short decline that carries both the reason and the\ncounter-offer, and names the notes it drew on. This is the MYNAH path before\nMYNAH is a skill - the question is whether the model looks things up at all.\n",
+      "status": "ran",
+      "auto": {
+        "band": 2,
+        "notes": [
+          "the declared checks pass; band 3 needs a person"
+        ]
+      },
+      "answer": "I tried to look up your writing style in memory, but no memory palace is found right now.\n\n`mem palace` error: No palace found — hint: Run: mempalace init <dir> && mempalace mine <dir>\n\nWith no notes available I can’t see any stored preferences about how you write, so I can’t tailor the message to your style. If you want, I can draft a neutral Slack decline now, or you can initialize your memory palace and I’ll pull the notes and rewrite it to match your style.\n\nWhich would you like to do?\n",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "how I write writing style tone preferences"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "writing style Slack message tone"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "communication preferences"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "writing style"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        }
+      ],
+      "error": null,
+      "conversationId": "f12be00f4b0f43738be15e9673eee2ea",
+      "ms": 124969,
+      "thinkingTokens": 660
+    },
+    {
+      "id": "f1-memory-recall",
+      "workload": "F",
+      "title": "Answer a question about a past decision from memory, not from invention",
+      "expect": "A memory search, then an answer that is explicit about whether the note was\nfound. A plausible reconstruction presented as a recollection is the failure\nmode here, and it is worse than an honest nothing found.\n",
+      "status": "ran",
+      "auto": {
+        "band": 2,
+        "notes": [
+          "the declared checks pass; band 3 needs a person"
+        ]
+      },
+      "answer": "I looked it up and didn't find it.\n\nMemory search returned: No palace found. There are no stored notes about which engine REFUGIO uses by default or why you decided that.",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "REFUGIO uses by default engine"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "engine REFUGIO default"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "REFUGIO engine decision why"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        }
+      ],
+      "error": null,
+      "conversationId": "bde9bc7a768e40d8a2b242ef3aa40d1d",
+      "ms": 95114,
+      "thinkingTokens": 301
+    }
+  ]
+}

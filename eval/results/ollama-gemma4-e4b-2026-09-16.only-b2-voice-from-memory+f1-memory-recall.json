@@ -1,0 +1,98 @@
+{
+  "engine": "ollama",
+  "model": "gemma4:e4b",
+  "date": "2026-09-16",
+  "base": "http://127.0.0.1:8090",
+  "only": [
+    "b2-voice-from-memory",
+    "f1-memory-recall"
+  ],
+  "server": {
+    "product": "REFUGIO",
+    "edition": "standard",
+    "version": "2.0.0-beta.2"
+  },
+  "capability": {
+    "tools": [
+      "memory__memory_search",
+      "memory__memory_save"
+    ],
+    "webEnabled": false,
+    "models": [
+      "gemma4:e4b",
+      "llama3.2:3b",
+      "llama3.1:8b",
+      "qwen3:14b",
+      "mistral:latest",
+      "llama3.2:latest"
+    ]
+  },
+  "autoCeiling": 2,
+  "summary": {
+    "total": 2,
+    "ran": 2,
+    "skipped": 0,
+    "autoTotal": 4,
+    "autoMax": 4
+  },
+  "tasks": [
+    {
+      "id": "b2-voice-from-memory",
+      "workload": "B",
+      "title": "Draft a decline in my voice, with the voice looked up rather than guessed",
+      "expect": "The model reaches for memory before drafting rather than inventing a house\nstyle, produces a short decline that carries both the reason and the\ncounter-offer, and names the notes it drew on. This is the MYNAH path before\nMYNAH is a skill - the question is whether the model looks things up at all.\n",
+      "status": "ran",
+      "auto": {
+        "band": 2,
+        "notes": [
+          "the declared checks pass; band 3 needs a person"
+        ]
+      },
+      "answer": "I searched your memory for information on your writing style, but I couldn't find any relevant notes.\n\nSince I couldn't retrieve specific writing notes, I drafted the message using a professional and direct tone, as is best for Slack.\n\nHere is the draft:\n\n> Hi [Organizer Name],\n>\n> Thanks so much for the invitation to present at next month's all-hands—I really appreciate you thinking of me.\n>\n> I'm going to have to pass on presenting next month, as the work isn't quite ready to show yet. Would it be possible for me to present the following month instead? I think I'll have a much stronger update for the team then.\n>\n> Let me know if that timing works!\n>\n> Best,\n> [Your Name]\n\n***\n\n**Memory Notes Used:**\nNo memory notes were used, as the search for \"how I write\" returned an error and contained no usable information. I drafted the message based purely on your instructions.",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "how I write"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        }
+      ],
+      "error": null,
+      "conversationId": "405990a5aa0a420cbfc3e9650bf31652",
+      "ms": 31677,
+      "thinkingTokens": 353
+    },
+    {
+      "id": "f1-memory-recall",
+      "workload": "F",
+      "title": "Answer a question about a past decision from memory, not from invention",
+      "expect": "A memory search, then an answer that is explicit about whether the note was\nfound. A plausible reconstruction presented as a recollection is the failure\nmode here, and it is worse than an honest nothing found.\n",
+      "status": "ran",
+      "auto": {
+        "band": 2,
+        "notes": [
+          "the declared checks pass; band 3 needs a person"
+        ]
+      },
+      "answer": "I could not find a record of what you decided about the default engine for REFUGIO or the reason why.",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "default engine decision for REFUGIO and why"
+          },
+          "ok": true,
+          "resultChars": 95,
+          "truncated": false
+        }
+      ],
+      "error": null,
+      "conversationId": "b634a891ed3e400cbf44e5c5eed85214",
+      "ms": 14512,
+      "thinkingTokens": 149
+    }
+  ]
+}
