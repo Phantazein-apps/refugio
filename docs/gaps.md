@@ -220,13 +220,22 @@ entry whose own note admits a guess without setting it.
 `lfm2.5:8b`, `gemma4:e4b` and `muse-glimmer:30b` carried `ramGb` values inferred
 from their download sizes. All three were measured on 2026-09-16, on an Apple M4
 Pro / 24 GB, macOS 26.7, Ollama 0.34.1, at REFUGIO's 4096-token context, each
-after a turn that drove `memory__memory_search` through the real connector pool:
+after a turn that called `memory__memory_search` through the real connector pool:
 
 | tag | was | measured | `ollama ps` PROCESSOR | wired delta | verified by |
 |---|---|---|---|---|---|
 | `lfm2.5:8b` | 6.1 | **5.3** | 100% GPU | 4.906 GiB | `b2-voice-from-memory` |
 | `gemma4:e4b` | 11.0 | **9.5** | 100% GPU | 9.945 GiB | `f1`, `b2` |
 | `muse-glimmer:30b` | 20.2 | **17.0** | **14%/86% CPU/GPU** | 15.373 GiB | `f1`, `b2` |
+
+Those calls went through the pool and reached nothing. The memory backend was
+never initialised on that machine, and every one of the eleven calls returned
+`null` (`No palace found`). That does not weaken the RAM figures — each turn still
+generated, called a tool, took a result back and generated again, which is what
+fills the KV cache. It does qualify `verified`: all three chose the right tool with
+a sensible query, which is what the field asks, but none was ever seen reading a
+stored note. The hand scores in the three scorecards are capped at 2 for the same
+reason, and say so.
 
 Every estimate was **high** — sizing by download file over-stated all three by
 14–19%. `muse-glimmer:30b` is not a clean GPU-resident figure: at the default
