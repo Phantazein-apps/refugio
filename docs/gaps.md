@@ -195,3 +195,58 @@ grant itself access to Notes, Reminders or Messages, and no amount of packaging
 work will change that. It requires a PPPC profile pushed by MDM alongside the
 package, keyed to the app's Developer ID signature. Listed here so it stops
 being re-raised as something that was forgotten.
+
+## 12. The model ladder is sized by file, and the machine minimum follows from it
+
+**Added 2026-09-16**, after slvDev's
+[esp32-ai](https://github.com/slvDev/esp32-ai) ran a 28.9M-parameter
+TinyStories model on an ESP32-S3 — 512 KB of SRAM, 8 MB of PSRAM, 16 MB of
+flash — at 9.5 tokens a second. Not because REFUGIO should run on a
+microcontroller, but because the way it fits exposes an assumption in ours.
+
+The 28.9M figure is a count of parameters *stored*. About 25M of them are a
+per-layer embedding table — Google's Per-Layer Embeddings, from Gemma 3n —
+that is indexed by token id and read, never multiplied against. It stays
+memory-mapped in flash and each token touches about six 512-byte rows of it.
+The part that does matrix maths is ~559K parameters, 273 KB at 4-bit, and
+runs from SRAM. The three memory tiers are assigned by how often something is
+touched per token, not by how big it is. The author's own ablation
+([RESULTS.md](https://github.com/slvDev/esp32-ai/blob/main/RESULTS.md)) is
+blunt about the limit: the model writes children's stories and cannot answer a
+question, follow an instruction or call a tool. Nothing about it lowers the 3B
+floor in `scripts/mem-fit.cjs:27–35`, which was observed rather than assumed
+and stays where it is.
+
+What it does expose is that REFUGIO's ladder has one number per model — `ramGb`,
+*"approximate resident RAM under Ollama at Q4"* — and that number is, for most
+entries, the size of the file. That was true when every model on the ladder
+was dense: a dense model touches every weight on every token, so file size and
+working set are the same thing. Two entries in `models.json` are not dense.
+`gemma4:e4b` is exactly the PLE split above — 8B stored, 4.5B effective — and
+`lfm2.5:8b` is an MoE with ~1B active. Both carry a `ramGb` *"estimated from
+the download"*, which measures the wrong thing for a model whose hot set per
+token is a fraction of its file, and both are `verified: false`, so neither is
+ever recommended. The README's **Minimum: 8 GB RAM** and the installer's
+refusal below the floor model both descend from the same file-sized figure.
+
+Two things in the tree already lean the right way and stop short:
+
+- `start-refugio.cjs:557–562` unloads the model 30 seconds after idle on a
+  tight machine. That is the same instinct as keeping almost nothing resident
+  between tokens; it just applies to the whole model rather than to the part
+  of it a token needs.
+- `chat/server.js:273` corrects the free-RAM budget for the running model
+  having made *itself* look too big. It still asks `modelRamGb`, so the
+  correction is only as good as the figure being corrected.
+
+Cost to close is measurement before code. Load `gemma4:e4b` and `lfm2.5:8b`
+under Ollama on an 8 GB and a 16 GB Mac, read resident memory after a tool
+call rather than after `ollama pull`, and replace the two estimates in
+`models.json` with what was seen. Run the `eval/` tasks against both; if either
+drives a connector, flip `verified` and it becomes recommendable at a tier the
+ladder currently has nothing for. Only if one of them calls tools reliably
+inside 8 GB does the README minimum and the ladder's shape become worth
+revisiting — and then the change is a second column, working set alongside
+file size, not a lower floor. The floor is about what a model can *do*, and
+the ESP32 model is the clearest demonstration yet that stored parameters say
+nothing about that.
