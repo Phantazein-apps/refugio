@@ -259,6 +259,32 @@ correctly and 4–8x slower than the other two (95–125 s per eval task against
    `models.json` has no field for a minimum runtime version; the notes carry it
    in prose.
 
+### Not decided here: a tool-calling model now measures under 8 GB
+
+`lfm2.5:8b` calls tools and measures 5.3 GB resident. The task behind #42 said
+that combination must not lower the README's 8 GB minimum or `TOOL_FLOOR` in the
+same PR, and must be written down instead so the change can be its own decision.
+This is that record.
+
+"Under 8 GB" is true of the resident figure and false by REFUGIO's own
+accounting. `machineSupport()` in `scripts/mem-fit.cjs` reserves 2.5 GB for
+macOS, then adds 0.05 GB for the chat UI and 1.0 GB of headroom to the floor
+model's figure:
+
+| model | `ramGb` | `needGb` | usable on an 8 GB Mac | supported |
+|---|---|---|---|---|
+| `qwen2.5:3b` (today's `TOOL_FLOOR`) | 2.6 | 3.65 | 5.5 | yes |
+| `lfm2.5:8b` | 5.3 | 6.35 | 5.5 | **no** |
+
+So making `lfm2.5:8b` the floor would not bring a better model to 8 GB Macs — it
+would stop REFUGIO supporting them. Nor is its capability above the floor
+settled: it called `memory__memory_search` in both eval tasks, but `f1` returned
+an empty answer after ~553 tokens of thinking, which is a completion failure
+rather than a tool-calling one. What it could plausibly become is a recommended
+step up on 12–16 GB machines — rank 52 against the floor's 30, with ~1B active
+parameters keeping it quick. That is a ladder-shape decision, and it is left for
+one.
+
 ### Still open: the built-in ladder is unmeasured, and at least one entry is wrong
 
 `scripts/mem-fit.cjs:27` calls its column "approx resident RAM under Ollama
