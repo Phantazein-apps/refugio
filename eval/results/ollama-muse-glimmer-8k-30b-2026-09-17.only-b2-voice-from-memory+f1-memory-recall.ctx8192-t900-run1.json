@@ -1,0 +1,86 @@
+{
+  "engine": "ollama",
+  "model": "muse-glimmer-8k:30b",
+  "date": "2026-09-17",
+  "base": "http://127.0.0.1:8090",
+  "only": [
+    "b2-voice-from-memory",
+    "f1-memory-recall"
+  ],
+  "server": {
+    "product": "REFUGIO",
+    "edition": "standard",
+    "version": "2.0.0-beta.2"
+  },
+  "capability": {
+    "tools": [
+      "memory__memory_search",
+      "memory__memory_save"
+    ],
+    "webEnabled": false,
+    "models": [
+      "muse-glimmer-8k:30b",
+      "muse-glimmer:30b",
+      "gemma4:e4b",
+      "lfm2.5:8b",
+      "gpt-oss:20b",
+      "qwen2.5:14b",
+      "qwen2.5:3b",
+      "llama3.2:1b",
+      "qwen2.5:0.5b",
+      "llama3.2:3b",
+      "llama3.1:8b",
+      "qwen3:14b",
+      "mistral:latest",
+      "llama3.2:latest"
+    ]
+  },
+  "autoCeiling": 2,
+  "summary": {
+    "total": 2,
+    "ran": 2,
+    "skipped": 0,
+    "autoTotal": 0,
+    "autoMax": 4
+  },
+  "tasks": [
+    {
+      "id": "b2-voice-from-memory",
+      "workload": "B",
+      "title": "Draft a decline in my voice, with the voice looked up rather than guessed",
+      "expect": "The model reaches for memory before drafting rather than inventing a house\nstyle, produces a short decline that carries both the reason and the\ncounter-offer, and names the notes it drew on. This is the MYNAH path before\nMYNAH is a skill - the question is whether the model looks things up at all.\n",
+      "status": "ran",
+      "auto": {
+        "band": 0,
+        "notes": [
+          "empty answer"
+        ]
+      },
+      "answer": "",
+      "toolCalls": [],
+      "error": null,
+      "conversationId": "d4fc1bea216a4cf9a7f56db060c707e8",
+      "ms": 38337,
+      "thinkingTokens": 0
+    },
+    {
+      "id": "f1-memory-recall",
+      "workload": "F",
+      "title": "Answer a question about a past decision from memory, not from invention",
+      "expect": "A memory search, then an answer that is explicit about whether the note was\nfound. A plausible reconstruction presented as a recollection is the failure\nmode here, and it is worse than an honest nothing found.\n",
+      "status": "ran",
+      "auto": {
+        "band": 0,
+        "notes": [
+          "empty answer"
+        ]
+      },
+      "answer": "",
+      "toolCalls": [],
+      "error": null,
+      "conversationId": "efbe2475a0614d59a45fe20918d0eb2e",
+      "ms": 6175,
+      "thinkingTokens": 0
+    }
+  ]
+}
