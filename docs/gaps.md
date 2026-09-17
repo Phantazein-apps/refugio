@@ -342,7 +342,8 @@ attempts, never writing an answer, though every one of its searches returned the
 notes. Its scorecards set out the likely cause, which is not specific to that
 model. Each search returns both notes, about 1,300 tokens. Three searches fill
 most of the 4,096-token context REFUGIO runs every model at, and leave no room to
-answer. That is inference, not something the run checked.
+answer. That was inference when it was written; it has since been measured, and
+it holds — see *Answered* below.
 
 The runner has a related blind spot. On 2026-09-16 it recorded every "No palace
 found" reply as a successful tool call (`ok: true`), which is how empty memory
@@ -365,6 +366,63 @@ Ollama's own log cannot help here: the supervisor starts `ollama serve` with
 stdin, stdout and stderr on `/dev/null`, so it writes nothing at all. Every run
 before this one left no record of its prompt sizes anywhere.
 
+### Answered: three memory searches exhaust the context
+
+Measured 2026-09-18 on the M4 Pro / 24 GB with the per-round logging above
+(#51). One run of `b2-voice-from-memory` and `f1-memory-recall` against
+`muse-glimmer:30b`, from `~/.refugio-logs/chat.log`:
+
+| task | round | prompt | generated | ended |
+|---|---|---|---|---|
+| `b2` | 1 | 700 | 301 | `stop` |
+| `b2` | 2 | **3,775** | 321 | **`length`** |
+| `f1` | 1 | 672 | 258 | `stop` |
+| `f1` | 2 | **3,781** | 315 | **`length`** |
+
+3,775 + 321 = 4,096. 3,781 + 315 = 4,096. Both turns generated exactly the
+budget left between the prompt and Ollama's default context, then stopped at the
+ceiling with no answer written. The three memory searches happen in round 1; by
+round 2 their results are in the prompt, and there is no room to answer from
+them.
+
+**This is not about `muse-glimmer:30b`.** Nothing in the mechanism is specific
+to it. REFUGIO sends Ollama no context option, so every model runs at the
+default — 4,096 on this machine's VRAM. `servers/memory-lite.js` asks for five
+results; a palace holding just the two fixture notes returned about 5,200
+characters per search, and a real one would return more. `chat/server.js` allows
+five tool rounds. Any model that searches memory three times in a turn arrives
+at the same ceiling. `lfm2.5:8b` and `gemma4:e4b` scored 5/6 on the same tasks
+because they searched **once**, not because they are better at this.
+
+So a model that uses its tools more thoroughly is punished for it, and the
+failure looks like the model's fault: it stops mid-turn with nothing written,
+which reads as a weak model rather than a budget it was never told about.
+
+**The instrument now records this.** #52 fixed two holes behind the measurement:
+the scorecard row dropped `usage` on the way to the file, and `autoScore`
+returned on an error or an empty answer before it could add the "ran out of
+context" note — which are exactly the turns that run out. A run like this one
+now says so in its own scorecard.
+
+**What to do about it is a design decision, not a measurement**, and all three
+options cost something:
+
+- **Send a larger `num_ctx`.** The most direct fix, and it changes the RAM
+  figures measured above: KV cache scales with context, so every `ramGb` in this
+  entry is a figure *at 4096* and would have to be re-taken. It also spends RAM
+  on every turn to buy room a few turns need.
+- **Cap what memory returns.** `memory-lite.js` chooses `limit: 5` and passes
+  results through whole. Truncating them, or asking for fewer, keeps the budget
+  but throws away what the model asked for — and the cap would be REFUGIO's
+  guess at what matters in a note.
+- **Cap total tool-result size per turn.** The general form, since any verbose
+  connector can do this and memory is only the one that did. It is also the most
+  work, and needs a rule for what to drop when the budget is spent.
+
+Whichever is chosen, `REFUGIO_MAX_TOOL_ROUNDS` (default 5) sets how many times
+this can compound, and nothing today tells a person why a turn stopped. The
+`done=length` line is in the log, not in the window.
+
 **What closing this takes.** Measuring is done. What remains is a decision, not
 a measurement: whether to write these figures into `mem-fit.cjs` and
 `models.json`. They are not independent of the rest of this entry. Lowering
@@ -373,3 +431,9 @@ and lowering the ladder overall changes which model the installer picks for a
 given amount of RAM. That belongs with the 8 GB-minimum question above.
 `muse-glimmer:30b`'s 17.0 → 17.6 was the exception, a correction to a recorded
 measurement with no policy in it, and it has been applied.
+
+Two decisions now, and they are entangled. The context question above is the
+other one, and it cannot be settled independently: every figure in this entry
+was taken at 4096, so raising the context re-opens the measurements, while
+capping tool results leaves them standing. Whoever takes one should take both
+in the same breath.
