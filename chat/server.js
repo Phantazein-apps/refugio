@@ -42,6 +42,7 @@ import {
   turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
   heartbeatMs, armHeartbeat, THINKING_EVENT_MS, thoughtWithoutAnswerMessage,
 } from "./turn-deadline.js";
+import { toolResultBudget, applyBudget } from "./tool-budget.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, "static");
@@ -1142,6 +1143,12 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   let acc = "";
   const toolsUsed = [];
 
+  // What tool results may take of this turn's context, across every round.
+  // Read per turn, like the deadline: the environment a turn depends on is read
+  // when the turn starts, not when the process did.
+  const toolBudget = toolResultBudget();
+  let toolCharsSpent = 0;
+
   // Reasoning is counted, not kept. Ollama streams it a token per chunk, so the
   // count is close to the model's own. The window shows it so that minutes of
   // thinking look like work rather than a hang; the reasoning itself stays out
@@ -1221,7 +1228,15 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
           truncated: result.length > SOURCE_CHARS,
           links,
         });
-        messages.push({ role: "tool", content: result, tool_name: call.name });
+        // The browser got the result above, up to SOURCE_CHARS. THIS is what the
+        // model gets, and it is what has to fit in the context — see
+        // chat/tool-budget.js for why the two are deliberately different.
+        const budgeted = applyBudget(result, toolBudget === 0 ? Infinity : Math.max(0, toolBudget - toolCharsSpent));
+        toolCharsSpent += budgeted.kept;
+        if (budgeted.truncated) {
+          log(`tool budget: ${call.name} kept ${budgeted.kept} of ${result.length} chars (${toolCharsSpent}/${toolBudget} spent this turn)`);
+        }
+        messages.push({ role: "tool", content: budgeted.content, tool_name: call.name });
       }
     }
 
