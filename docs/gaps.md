@@ -350,6 +350,21 @@ still earned auto band 2. Fixed 2026-09-17: `scripts/eval.cjs` now records that
 reply as a miss, caps the task at band 1 with a note naming the fix, and shares
 `isNoPalace()` with `scripts/memory-probe.cjs` so the two cannot disagree.
 
+There was a second blind spot behind it. `muse-glimmer:30b` stopped mid-turn
+with nothing written, and nothing on the machine could say whether it had run
+out of room: REFUGIO sent Ollama no context option, so every model runs at
+Ollama's default, and one memory search returns about 5,000 characters. Ollama
+reports `prompt_eval_count` and `done_reason` on the final message of each round
+and REFUGIO discarded both. Since 2026-09-17 the chat server logs them per round
+and streams them as a `usage` event, the eval keeps them in its scorecards, and a
+round that ends `done_reason: "length"` is noted as having run out of context —
+a diagnosis, not a band change. That is the measurement the context question was
+missing; #49 could only infer it.
+
+Ollama's own log cannot help here: the supervisor starts `ollama serve` with
+stdin, stdout and stderr on `/dev/null`, so it writes nothing at all. Every run
+before this one left no record of its prompt sizes anywhere.
+
 **What closing this takes.** Measuring is done. What remains is a decision, not
 a measurement: whether to write these figures into `mem-fit.cjs` and
 `models.json`. They are not independent of the rest of this entry. Lowering
