@@ -60,6 +60,78 @@ owes the tool.
 Seven of the twenty run on a bare install with no connector at all. That is
 deliberate: Phase 0's first scorecard has to be non-empty.
 
+## Memory fixture
+
+`b2-voice-from-memory` and `f1-memory-recall` can only score above 2 if memory
+holds something to find. On 2026-09-16 three models were scored on a machine
+whose MemPalace had never been initialised: every search came back empty, every
+score was capped at 2, and nothing said so until the scorecards were read.
+
+`fixtures/memory/` holds the two notes those tasks look for:
+
+- `writing-style.md` — an **invented** voice, with rules specific enough to
+  check a draft against: the answer first, no exclamation marks, no
+  "unfortunately", a named month as the alternative, no greeting or sign-off.
+- `engine-decision.md` — the **real** decision that Ollama is the default
+  engine, with its reasons and date, so a correct answer to `f1` is also a true
+  one.
+
+Nothing else belongs in that folder. Whatever is in it gets mined into memory,
+including a README.
+
+### Loading it (MemPalace)
+
+> **Untested.** These are the commands MemPalace's own error message suggests.
+> They were written on a machine without MemPalace, which needs about 16 GB.
+> Check them against `mempalace --help` on first use, and correct this section.
+
+```sh
+mempalace init eval/fixtures/memory
+mempalace mine eval/fixtures/memory
+node scripts/memory-probe.cjs          # both queries must say FOUND
+```
+
+Run the probe before the eval, every time. It asks memory the way a chat turn
+does — through `servers/memory-lite.js`, not the MemPalace CLI — so it fails for
+the same reasons a turn would. That matters because the wrapper starts
+`mempalace-mcp` with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`
+in its environment. A palace the CLI can reach through some other variable is
+not one REFUGIO can reach, so there is no separate test palace you can point
+REFUGIO at.
+
+**This is your real memory.** On a machine that already has a palace, the
+fixture's notes land next to your own, and later chats can find them. Load it on
+a machine with no palace, or remove the fixture's notes once you are done.
+
+Then run both tasks for each model:
+
+```sh
+node scripts/eval.cjs --engine ollama --model gemma4:e4b --only b2-voice-from-memory,f1-memory-recall
+```
+
+With the fixture loaded, band 3 is reachable, and the reviewer has something
+to check it against. For `b2`: does the draft follow the writing-style note's
+rules? For `f1`: does the answer say Ollama, and give the reason?
+
+## Measuring RAM
+
+`scripts/measure-models.cjs` measures what a model actually occupies under
+Ollama. It needs no model harness and no REFUGIO, only Ollama running.
+
+```sh
+node scripts/measure-models.cjs                              # the built-in ladder, installed models only
+node scripts/measure-models.cjs --pull --json ram.json       # download what is missing too
+node scripts/measure-models.cjs --pull --remove-pulled       # ...and delete those again afterwards
+node scripts/measure-models.cjs --only gemma4:e4b,lfm2.5:8b  # any tags
+```
+
+It unloads everything, loads one model with a short prompt, and reads what
+Ollama and macOS report. It then prints a table ready for `docs/gaps.md` §12.
+**SIZE** is the figure `ramGb` means. Anything under 100% GPU depends on that
+machine's wired limit, so it is not a clean figure. By default the script
+downloads nothing and deletes nothing. Even with `--remove-pulled`, it deletes
+only models it downloaded itself.
+
 ## Workloads
 
 `A`–`J` from §3 of the plan. `G-mobile` is not a workload here — it is a

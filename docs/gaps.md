@@ -309,6 +309,15 @@ same direction and roughly the same proportion as the three download-sized
 estimates were. One sample is not a pattern, but it is the only ladder entry
 anybody has re-checked, and it did not survive the check.
 
+A second has since. `qwen2.5:3b` — `TOOL_FLOOR` itself — ships as `ramGb: 2.6`
+and measured **2.2 GB** `ollama ps`, 100% GPU at 4096, runner RSS 1.94 GiB, on
+2026-09-17 on an Apple M3 / 8 GB, macOS 26.6.2, Ollama 0.34.0, via
+`scripts/measure-models.cjs`. That is ~15% high, in the same direction as every
+other figure checked so far. It was left alone deliberately: the floor's figure
+is what `machineSupport()` adds headroom to, so correcting it changes which
+machines REFUGIO says it supports, and that belongs with the 8 GB-minimum
+decision above rather than in a measurement.
+
 **What closing this takes.** The same measurement, run over the seven ladder
 entries, and either measured figures in `mem-fit.cjs` or `estimated: true`
 reaching them the way it now reaches the catalog. Until then the ladder is the
