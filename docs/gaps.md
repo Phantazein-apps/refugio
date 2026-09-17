@@ -328,8 +328,8 @@ Two things this run corrects or adds:
 
 - **`muse-glimmer:30b` is 17.6, not 17.0.** Re-measured, it came to 17642039538
   bytes, still 86% GPU. #42 recorded 17.0, most likely read from `ollama ps`'s
-  display, which drops the decimal above 10 GB. The raw bytes decide, and
-  `models.json` still says 17.0. `lfm2.5:8b` (5.3) and `gemma4:e4b` (9.5)
+  display, which drops the decimal above 10 GB. The raw bytes decide;
+  `models.json` was corrected to 17.6 on 2026-09-17. `lfm2.5:8b` (5.3) and `gemma4:e4b` (9.5)
   re-measured exactly as #42 recorded them.
 - **Runner RSS is not a stand-in for SIZE.** For `gemma4:e4b` the runner's
   resident memory was 4.67 GiB against 9.5 GB SIZE and a 10.18 GiB wired delta.
@@ -355,5 +355,5 @@ a measurement: whether to write these figures into `mem-fit.cjs` and
 `qwen2.5:3b` from 2.6 to 2.2 lowers what `machineSupport()` asks of an 8 GB Mac,
 and lowering the ladder overall changes which model the installer picks for a
 given amount of RAM. That belongs with the 8 GB-minimum question above.
-`muse-glimmer:30b`'s 17.0 → 17.6 is the exception: a correction to a recorded
-measurement, with no policy in it.
+`muse-glimmer:30b`'s 17.0 → 17.6 was the exception, a correction to a recorded
+measurement with no policy in it, and it has been applied.

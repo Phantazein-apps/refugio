@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-16",
+  "updated": "2026-09-17",
   "note": "REFUGIO's model catalog. Settings > Models > 'Check for better models' fetches this file from the branch you installed, so a newly-rated model reaches people WITHOUT them updating REFUGIO. scripts/mem-fit.cjs stays the installer's source of truth and the fallback when this file cannot be reached; entries here add to that ladder and override its figures by tag.",
   "fields": {
     "tag": "Ollama model name, with an explicit size tag. Required.",
@@ -113,12 +113,12 @@
     },
     {
       "tag": "muse-glimmer:30b",
-      "ramGb": 17.0,
+      "ramGb": 17.6,
       "tools": true,
       "nativeTools": true,
       "rank": 80,
       "verified": true,
-      "note": "Meta's 30B agentic model; 128K ctx. Measured 2026-09-16, M4 Pro / 24 GB: 17 GB resident but only 86% on GPU, 14% on CPU at the default wired limit, so not a clean figure, and 4-8x slower. Needs Ollama 0.34+. Called memory_search in b2, f1.",
+      "note": "Meta's 30B agentic model; 128K ctx. Measured 2026-09-17, M4 Pro / 24 GB: 17.6 GB but only 86% on GPU, 14% on CPU at the default wired limit, so not a clean figure, and 4-8x slower. Needs Ollama 0.34+. Called memory_search in b2, f1.",
       "added": "2026-08-19"
     }
   ]
