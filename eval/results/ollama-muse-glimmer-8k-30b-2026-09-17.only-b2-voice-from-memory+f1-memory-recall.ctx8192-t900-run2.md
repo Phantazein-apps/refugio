@@ -36,3 +36,7 @@ Expected: A memory search, then an answer that is explicit about whether the not
 ```
 (nothing)
 ```
+
+## Addendum — direct `ollama run` check (after #49 merged)
+
+Run directly with `ollama run muse-glimmer-8k:30b "Say hello in one sentence."`, bypassing REFUGIO entirely — no tools, no memory search. The 8k copy thought and answered normally (`Hello!`). So the copy itself was not broken: the zero-tool-call empty answers recorded above point at REFUGIO's request path when tools are attached, not at the model weights. This says nothing about the memory-fill question above, because no tool calls were made in this check. The copy was removed again afterward.

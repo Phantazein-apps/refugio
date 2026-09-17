@@ -1,0 +1,141 @@
+{
+  "engine": "ollama",
+  "model": "muse-glimmer:30b",
+  "date": "2026-09-17",
+  "base": "http://127.0.0.1:8090",
+  "only": [
+    "b2-voice-from-memory",
+    "f1-memory-recall"
+  ],
+  "server": {
+    "product": "REFUGIO",
+    "edition": "standard",
+    "version": "2.0.0-beta.2"
+  },
+  "capability": {
+    "tools": [
+      "memory__memory_search",
+      "memory__memory_save"
+    ],
+    "webEnabled": false,
+    "models": [
+      "muse-glimmer:30b",
+      "gemma4:e4b",
+      "lfm2.5:8b",
+      "gpt-oss:20b",
+      "qwen2.5:14b",
+      "qwen2.5:3b",
+      "llama3.2:1b",
+      "qwen2.5:0.5b",
+      "llama3.2:3b",
+      "llama3.1:8b",
+      "qwen3:14b",
+      "mistral:latest",
+      "llama3.2:latest"
+    ]
+  },
+  "autoCeiling": 2,
+  "summary": {
+    "total": 2,
+    "ran": 2,
+    "skipped": 0,
+    "autoTotal": 0,
+    "autoMax": 4
+  },
+  "tasks": [
+    {
+      "id": "b2-voice-from-memory",
+      "workload": "B",
+      "title": "Draft a decline in my voice, with the voice looked up rather than guessed",
+      "expect": "The model reaches for memory before drafting rather than inventing a house\nstyle, produces a short decline that carries both the reason and the\ncounter-offer, and names the notes it drew on. This is the MYNAH path before\nMYNAH is a skill - the question is whether the model looks things up at all.\n",
+      "status": "ran",
+      "auto": {
+        "band": 0,
+        "notes": [
+          "The model spent this turn thinking (about 451 tokens) and stopped before it wrote an answer. Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer."
+        ]
+      },
+      "answer": "",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "how I write writing style tone preferences"
+          },
+          "ok": true,
+          "resultChars": 5258,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "writing style Slack message tone"
+          },
+          "ok": true,
+          "resultChars": 5247,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "how user writes communication style"
+          },
+          "ok": true,
+          "resultChars": 5251,
+          "truncated": false
+        }
+      ],
+      "error": "The model spent this turn thinking (about 451 tokens) and stopped before it wrote an answer. Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer.",
+      "conversationId": "d029ecd3ca124bcab8300624db90e76f",
+      "ms": 133316,
+      "thinkingTokens": 449
+    },
+    {
+      "id": "f1-memory-recall",
+      "workload": "F",
+      "title": "Answer a question about a past decision from memory, not from invention",
+      "expect": "A memory search, then an answer that is explicit about whether the note was\nfound. A plausible reconstruction presented as a recollection is the failure\nmode here, and it is worse than an honest nothing found.\n",
+      "status": "ran",
+      "auto": {
+        "band": 0,
+        "notes": [
+          "The model spent this turn thinking (about 397 tokens) and stopped before it wrote an answer. Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer."
+        ]
+      },
+      "answer": "",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "REFUGIO uses by default engine"
+          },
+          "ok": true,
+          "resultChars": 5237,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "which engine REFUGIO uses by default"
+          },
+          "ok": true,
+          "resultChars": 5244,
+          "truncated": false
+        },
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "REFUGIO default engine decision why"
+          },
+          "ok": true,
+          "resultChars": 5249,
+          "truncated": false
+        }
+      ],
+      "error": "The model spent this turn thinking (about 397 tokens) and stopped before it wrote an answer. Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer.",
+      "conversationId": "b40279e2761b4b248feea4265639e9cd",
+      "ms": 134779,
+      "thinkingTokens": 394
+    }
+  ]
+}

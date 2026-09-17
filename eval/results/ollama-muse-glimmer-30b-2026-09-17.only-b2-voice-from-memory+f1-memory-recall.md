@@ -1,4 +1,4 @@
-# Eval scorecard — ollama / muse-glimmer-8k:30b
+# Eval scorecard — ollama / muse-glimmer:30b
 
 - Run: 2026-09-17
 - Partial run: `--only b2-voice-from-memory,f1-memory-recall` — not the full set, so these totals are not the day's
@@ -13,8 +13,8 @@ band, is what feeds `verified` and `rank` in `models.json`.
 
 | Task | W | Status | Auto | Score | Tools called | Why |
 |---|---|---|---|---|---|---|
-| `b2-voice-from-memory` | B | ran | 0 | _ | — | empty answer |
-| `f1-memory-recall` | F | ran | 0 | _ | — | empty answer |
+| `b2-voice-from-memory` | B | ran | 0 | _ | memory__memory_search, memory__memory_search, memory__memory_search | The model spent this turn thinking (about 451 tokens) and stopped before it wrote an answer. Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer. |
+| `f1-memory-recall` | F | ran | 0 | _ | memory__memory_search, memory__memory_search, memory__memory_search | The model spent this turn thinking (about 397 tokens) and stopped before it wrote an answer. Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer. |
 
 ## Skipped, and what would un-skip it
 Nothing skipped — every task had what it needed.
@@ -36,7 +36,3 @@ Expected: A memory search, then an answer that is explicit about whether the not
 ```
 (nothing)
 ```
-
-## Addendum — direct `ollama run` check (after #49 merged)
-
-Run directly with `ollama run muse-glimmer-8k:30b "Say hello in one sentence."`, bypassing REFUGIO entirely — no tools, no memory search. The 8k copy thought and answered normally (`Hello!`). So the copy itself was not broken: the zero-tool-call empty answers recorded above point at REFUGIO's request path when tools are attached, not at the model weights. This says nothing about the memory-fill question above, because no tool calls were made in this check. The copy was removed again afterward.
