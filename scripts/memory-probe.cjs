@@ -22,8 +22,6 @@
 // Exits 0 when every query returns something that is not an error, 1 otherwise.
 
 const path = require("path")
-const { Client } = require("@modelcontextprotocol/sdk/client/index.js")
-const { StdioClientTransport } = require("@modelcontextprotocol/sdk/client/stdio.js")
 
 const WRAPPER = path.join(__dirname, "..", "servers", "memory-lite.js")
 
@@ -52,6 +50,11 @@ function verdict(result) {
 }
 
 async function main(queries) {
+  // Required here, not at the top: CI runs the unit tests without installing
+  // dependencies, and verdict() above must be testable there. Only an actual
+  // probe needs the SDK, and REFUGIO's own install always has it.
+  const { Client } = require("@modelcontextprotocol/sdk/client/index.js")
+  const { StdioClientTransport } = require("@modelcontextprotocol/sdk/client/stdio.js")
   const client = new Client({ name: "refugio-memory-probe", version: "1.0.0" }, { capabilities: {} })
   await client.connect(new StdioClientTransport({ command: process.execPath, args: [WRAPPER], stderr: "ignore" }))
   let failed = 0
