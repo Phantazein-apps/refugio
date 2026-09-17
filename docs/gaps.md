@@ -419,6 +419,26 @@ options cost something:
   connector can do this and memory is only the one that did. It is also the most
   work, and needs a rule for what to drop when the budget is spent.
 
+**Chosen 2026-09-18: the third.** `chat/tool-budget.js` gives each turn
+`REFUGIO_TOOL_RESULT_BUDGET` characters of tool results, default 8,000 — about
+2,000 tokens, which leaves room to answer inside the 4,096 default after the
+~700 tokens a turn's system prompt and tool list cost. The rule for what to
+drop: earlier results are kept whole and later ones pay, because the first
+search is the one the model chose with the most context about what it wanted.
+Whatever is cut, the model is told in the tool message itself — a result quietly
+shortened is worse than one refused, since the model then answers confidently
+from half a note. On the measured case, three ~5,250-character searches become
+one whole, one truncated at the boundary and one refused, instead of 15,750
+characters of prompt and no answer.
+
+What this does not do: it does not change what the person sees. The sources
+panel still receives the result up to `REFUGIO_SOURCE_CHARS`, because "where did
+this come from?" is the first question anyone asks of an answer built from their
+own data. The budget is about what the model is handed, which is what has to
+fit. Nor does it settle the context size: it makes 4,096 survivable, so raising
+`num_ctx` stays open, and stays the thing that would re-open every RAM figure
+in this entry.
+
 Whichever is chosen, `REFUGIO_MAX_TOOL_ROUNDS` (default 5) sets how many times
 this can compound, and nothing today tells a person why a turn stopped. The
 `done=length` line is in the log, not in the window.
@@ -432,8 +452,6 @@ given amount of RAM. That belongs with the 8 GB-minimum question above.
 `muse-glimmer:30b`'s 17.0 → 17.6 was the exception, a correction to a recorded
 measurement with no policy in it, and it has been applied.
 
-Two decisions now, and they are entangled. The context question above is the
-other one, and it cannot be settled independently: every figure in this entry
-was taken at 4096, so raising the context re-opens the measurements, while
-capping tool results leaves them standing. Whoever takes one should take both
-in the same breath.
+The context question above took the option that leaves these standing: capping
+tool results per turn does not touch the context, so every figure here is still
+good. Raising `num_ctx` would re-open all of them, and remains open.

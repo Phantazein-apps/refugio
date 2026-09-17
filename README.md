@@ -471,6 +471,11 @@ REFUGIO_MODEL=llama3.1:8b
 # How often a running turn writes a keep-alive line, so a model that thinks
 # for minutes before answering is not mistaken for a dropped connection.
 # REFUGIO_HEARTBEAT_MS=15000
+# Characters of tool results one turn may put in front of the model, across
+# every round. Three memory searches used to fill a 4,096-token context and
+# leave the model no room to answer (docs/gaps.md §12). What you see in the
+# sources panel is not affected. 0 removes the budget.
+# REFUGIO_TOOL_RESULT_BUDGET=8000
 # For LM Studio instead — legacy Open WebUI path only. The v2 chat
 # window cannot use this engine yet; see docs/gaps.md §9.
 # REFUGIO_ENGINE=lmstudio
