@@ -82,10 +82,14 @@ including a README.
 ### Loading it (MemPalace)
 
 Verified on MemPalace 3.5.0. `mempalace init` prompts interactively to confirm
-detected entities, which is a EOF crash under a non-interactive shell — pass
+detected entities, which is an EOF crash under a non-interactive shell — pass
 `--yes` to auto-accept. It then asks a separate `Mine this directory now?
 [Y/n]`; with no answer available it defaults to skip, so run `mempalace mine`
 as its own step regardless.
+
+`init` also writes `mempalace.yaml` into the fixture folder, holding the entities
+it detected on that machine. It is generated, so git ignores it. It is the one
+file allowed in that folder besides the notes.
 
 ```sh
 mempalace init eval/fixtures/memory --yes

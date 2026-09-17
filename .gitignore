@@ -26,3 +26,6 @@ data/
 
 # Which product this install is (written by the installer)
 .refugio-edition
+
+# Written by `mempalace init` into the eval memory fixture; generated per machine.
+eval/fixtures/memory/mempalace.yaml
