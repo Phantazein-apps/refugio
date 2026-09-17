@@ -508,6 +508,26 @@ function parseFrame(frame) {
   return { event, data };
 }
 
+/**
+ * The row a scorecard keeps for a task that ran.
+ *
+ * Its own function because it used to be an object literal inside the loop, and
+ * an object literal is where a field goes missing quietly: `usage` was
+ * collected by readStream, used by autoScore, and never written to the file, so
+ * the run that proved a turn had run out of context could only be read from
+ * chat.log. A scorecard that cannot answer "how full was the context" is the
+ * gap this instrument exists to close.
+ */
+function resultRow(common, result, auto) {
+  return {
+    ...common, status: "ran", auto,
+    answer: result.answer, toolCalls: result.toolCalls, error: result.error || null,
+    conversationId: result.conversationId || null, ms: result.ms,
+    thinkingTokens: result.thinkingTokens || 0,
+    usage: result.usage || [],
+  };
+}
+
 // ── Scoring ────────────────────────────────────────────────────────────────
 
 /**
@@ -522,8 +542,16 @@ function autoScore(task, result) {
   const checks = task.checks || {};
   const names = (result.toolCalls || []).map((c) => c.name);
 
-  if (result.error) return { band: 0, notes: [result.error] };
-  if (!(result.answer || "").trim()) return { band: 0, notes: ["empty answer"] };
+  // Why the turn stopped, if Ollama said. Computed BEFORE the early returns:
+  // a turn that runs out of context ends with an error or with nothing written,
+  // so a note placed after them could never fire for the case it describes.
+  const ranOut = (result.usage || []).find((u) => u?.doneReason === "length");
+  const outOfRoom = ranOut
+    ? `ran out of context: round ${ranOut.round ?? "?"} ended done=length${ranOut.promptTokens == null ? "" : ` at ${ranOut.promptTokens} prompt tokens`}`
+    : null;
+
+  if (result.error) return { band: 0, notes: [result.error, ...(outOfRoom ? [outOfRoom] : [])] };
+  if (!(result.answer || "").trim()) return { band: 0, notes: ["empty answer", ...(outOfRoom ? [outOfRoom] : [])] };
 
   let band = AUTO_CEILING;
 
@@ -561,11 +589,7 @@ function autoScore(task, result) {
   // Not a band change — a diagnosis. A turn that ends `done=length` stopped for
   // lack of context, which is a property of what it was handed, not of how well
   // it answered, and the reviewer should see it either way.
-  const ranOut = (result.usage || []).filter((u) => u?.doneReason === "length");
-  if (ranOut.length) {
-    const r = ranOut[0];
-    notes.push(`ran out of context: round ${r.round ?? "?"} ended done=length${r.promptTokens == null ? "" : ` at ${r.promptTokens} prompt tokens`}`);
-  }
+  if (outOfRoom) notes.push(outOfRoom);
   if (!notes.length) notes.push(`the declared checks pass; band 3 needs a person`);
   return { band, notes };
 }
@@ -758,12 +782,7 @@ async function main(argv) {
     const result = await runTask(base, task, { model, timeoutMs: args.timeoutMs });
     const auto = autoScore(task, result);
     console.log(`  ${String(auto.band)}/${AUTO_CEILING}   ${task.id.padEnd(28)} ${auto.notes.join("; ")}`);
-    rows.push({
-      ...common, status: "ran", auto,
-      answer: result.answer, toolCalls: result.toolCalls, error: result.error || null,
-      conversationId: result.conversationId || null, ms: result.ms,
-      thinkingTokens: result.thinkingTokens || 0,
-    });
+    rows.push(resultRow(common, result, auto));
   }
 
   fs.mkdirSync(RESULT_DIR, { recursive: true });
@@ -792,7 +811,7 @@ async function main(argv) {
 module.exports = {
   parseYaml, YamlError, readTasks, validateTask, WORKLOADS, RUBRIC_BANDS,
   planTask, capabilities, refuseListener, runTask, readStream, sseEvents,
-  autoScore, AUTO_CEILING, resultPaths, scorecard, summarise, parseArgs, slug, main,
+  autoScore, AUTO_CEILING, resultRow, resultPaths, scorecard, summarise, parseArgs, slug, main,
 };
 
 if (require.main === module) {

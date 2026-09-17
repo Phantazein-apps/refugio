@@ -17,7 +17,7 @@ import { chatStream } from "../chat/ollama.js";
 
 const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const { readStream, autoScore, readTasks } = require(join(root, "scripts", "eval.cjs"));
+const { readStream, autoScore, readTasks, resultRow } = require(join(root, "scripts", "eval.cjs"));
 const TASK_DIR = join(root, "eval", "tasks");
 
 /** An Ollama /api/chat body: newline-delimited JSON, chunked unhelpfully. */
@@ -113,4 +113,46 @@ test("a turn that never ran out says nothing about context", async () => {
     usage: [{ round: 1, promptTokens: 1400, doneReason: "stop" }],
   });
   assert.doesNotMatch(s.notes.join(" "), /ran out of context/);
+});
+
+// ── what actually reaches the file ──────────────────────────
+
+test("the scorecard row keeps the usage records", () => {
+  // They were collected, used for scoring, and dropped on the way to the file:
+  // the run that proved muse-glimmer:30b ran out of context could only be read
+  // from chat.log, which is not the record.
+  const usage = [{ round: 2, promptTokens: 3775, evalTokens: 321, doneReason: "length", toolsOffered: 2 }];
+  const row = resultRow({ id: "b2-voice-from-memory" }, {
+    answer: "", toolCalls: [], error: null, conversationId: "c", ms: 1, thinkingTokens: 451, usage,
+  }, { band: 0, notes: ["empty answer"] });
+  assert.deepEqual(row.usage, usage);
+  assert.equal(JSON.parse(JSON.stringify(row)).usage[0].doneReason, "length");
+});
+
+test("a row from a run with no usage carries an empty list, not undefined", () => {
+  const row = resultRow({ id: "x" }, { answer: "hi", toolCalls: [], ms: 1 }, { band: 2, notes: [] });
+  assert.deepEqual(row.usage, []);
+});
+
+test("a turn that failed still says it ran out of context", () => {
+  // The whole point: a turn that runs out of room ends with an error or with
+  // nothing written, so a note that fires only on the success path can never
+  // describe the case it was written for. Both of muse-glimmer:30b's tasks on
+  // 2026-09-18 ended this way.
+  const task = readTasks(TASK_DIR).find((t) => t.id === "b2-voice-from-memory");
+  const usage = [
+    { round: 1, promptTokens: 700, evalTokens: 301, doneReason: "stop" },
+    { round: 2, promptTokens: 3775, evalTokens: 321, doneReason: "length" },
+  ];
+  const empty = autoScore(task, { answer: "", toolCalls: [], usage });
+  assert.equal(empty.band, 0);
+  assert.deepEqual(empty.notes, ["empty answer", "ran out of context: round 2 ended done=length at 3775 prompt tokens"]);
+
+  const errored = autoScore(task, { error: "stream ended early: terminated", answer: "", toolCalls: [], usage });
+  assert.deepEqual(errored.notes, ["stream ended early: terminated", "ran out of context: round 2 ended done=length at 3775 prompt tokens"]);
+});
+
+test("a failure with no usage keeps exactly the reason it had", () => {
+  const task = readTasks(TASK_DIR).find((t) => t.id === "b2-voice-from-memory");
+  assert.deepEqual(autoScore(task, { error: "timed out", answer: "" }).notes, ["timed out"]);
 });
