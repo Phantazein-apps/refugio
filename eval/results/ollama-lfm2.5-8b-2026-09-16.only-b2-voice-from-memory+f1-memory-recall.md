@@ -23,10 +23,17 @@ Scored by hand against each task's rubric on 2026-09-16 — the first Score colu
 anyone has filled in, so the method is written down here for the next one.
 
 **The memory backend was not initialised on the machine this ran on.** Every
-`memory__memory_search` call, on all three models scored that day, returned
-`null`; `muse-glimmer:30b` surfaced the cause as `No palace found — hint: Run:
-mempalace init`. So no model was observed reading a stored note, only choosing the
-right tool and deciding what to do when it came back empty.
+`memory__memory_search` call, on all three models scored that day, returned the
+same 95-character message, recorded as a successful call (`ok: true`).
+`muse-glimmer:30b` quoted it: `No palace found — hint: Run: mempalace init`. So no
+model was observed reading a stored note, only choosing the right tool and
+deciding what to do when it came back empty.
+
+*Corrected 2026-09-17.* This paragraph first said every call "returned `null`".
+The scorecard JSON never stores a result's text, only `ok`, `resultChars` and
+`truncated`, and the reviewer's script read a field that does not exist. The
+conclusion is unchanged; the evidence is the 95-character length and the answers
+that quote the message.
 
 That caps both tasks at **2**. Each rubric defines band 3 by what memory returned
 — `b2` by "the looked-up voice, notes named", `f1` by "quoted or located what it

@@ -1,0 +1,105 @@
+{
+  "engine": "ollama",
+  "model": "lfm2.5:8b",
+  "date": "2026-09-17",
+  "base": "http://127.0.0.1:8090",
+  "only": [
+    "b2-voice-from-memory",
+    "f1-memory-recall"
+  ],
+  "server": {
+    "product": "REFUGIO",
+    "edition": "standard",
+    "version": "2.0.0-beta.2"
+  },
+  "capability": {
+    "tools": [
+      "memory__memory_search",
+      "memory__memory_save"
+    ],
+    "webEnabled": false,
+    "models": [
+      "muse-glimmer:30b",
+      "gemma4:e4b",
+      "lfm2.5:8b",
+      "gpt-oss:20b",
+      "qwen2.5:14b",
+      "qwen2.5:3b",
+      "llama3.2:1b",
+      "qwen2.5:0.5b",
+      "llama3.2:3b",
+      "llama3.1:8b",
+      "qwen3:14b",
+      "mistral:latest",
+      "llama3.2:latest"
+    ]
+  },
+  "autoCeiling": 2,
+  "summary": {
+    "total": 2,
+    "ran": 2,
+    "skipped": 0,
+    "autoTotal": 4,
+    "autoMax": 4
+  },
+  "tasks": [
+    {
+      "id": "b2-voice-from-memory",
+      "workload": "B",
+      "title": "Draft a decline in my voice, with the voice looked up rather than guessed",
+      "expect": "The model reaches for memory before drafting rather than inventing a house\nstyle, produces a short decline that carries both the reason and the\ncounter-offer, and names the notes it drew on. This is the MYNAH path before\nMYNAH is a skill - the question is whether the model looks things up at all.\n",
+      "status": "ran",
+      "auto": {
+        "band": 2,
+        "notes": [
+          "the declared checks pass; band 3 needs a person"
+        ]
+      },
+      "answer": "Memory note used: **How I write** (writing‑style.md)  \n\nSlack draft:  \nNo I cannot present next month's all-hands because my work isn’t ready to show. I would like to propose the following month instead.",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "writing style"
+          },
+          "ok": true,
+          "resultChars": 5226,
+          "truncated": false
+        }
+      ],
+      "error": null,
+      "conversationId": "a0df68fb064840f5996290cbb47c9025",
+      "ms": 19477,
+      "thinkingTokens": 677
+    },
+    {
+      "id": "f1-memory-recall",
+      "workload": "F",
+      "title": "Answer a question about a past decision from memory, not from invention",
+      "expect": "A memory search, then an answer that is explicit about whether the note was\nfound. A plausible reconstruction presented as a recollection is the failure\nmode here, and it is worse than an honest nothing found.\n",
+      "status": "ran",
+      "auto": {
+        "band": 2,
+        "notes": [
+          "the declared checks pass; band 3 needs a person"
+        ]
+      },
+      "answer": "I found that you decided **Ollama is REFUGIO’s default engine** (Decided 2026‑08‑28) because the v2 chat window uses Ollama’s native API, while the installer does not read the OpenAI‑compatible URL required for LM Studio; the installer can install and manage Ollama itself, so it doesn’t ask.",
+      "toolCalls": [
+        {
+          "name": "memory__memory_search",
+          "args": {
+            "query": "REFUGIO engine default"
+          },
+          "ok": true,
+          "resultChars": 5234,
+          "truncated": false
+        }
+      ],
+      "error": null,
+      "conversationId": "558e914bf0ae40ef8b38ab5bfe588b30",
+      "ms": 8871,
+      "thinkingTokens": 528
+    }
+  ]
+}
