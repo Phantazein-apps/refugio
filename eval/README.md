@@ -105,6 +105,12 @@ in its environment. A palace the CLI can reach through some other variable is
 not one REFUGIO can reach, so there is no separate test palace you can point
 REFUGIO at.
 
+The runner catches a missing palace too, but only after the model time is spent.
+A memory tool that answers "No palace found" is recorded as a miss
+(`miss: "no palace"` in the JSON). The task is then capped at band 1, with a note
+saying memory is not initialised. MemPalace sends that reply as a successful
+call, which is how an empty memory once passed.
+
 **This is your real memory.** On a machine that already has a palace, the
 fixture's notes land next to your own, and later chats can find them. Load it on
 a machine with no palace, or remove the fixture's notes once you are done.

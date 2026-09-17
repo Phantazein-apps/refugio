@@ -38,14 +38,30 @@ function textOf(result) {
     .trim()
 }
 
-// A search "found something" only if it is neither an error nor empty, and
-// does not carry MemPalace's own no-palace message — which arrives as ordinary
-// text, not as an error, and is exactly what scored all three models down.
+// Longest result still read as MemPalace's no-palace message. The real one
+// was 95 characters on 2026-09-16; a real hit on the eval fixture ran about
+// 5,200. The bound is what stops a genuine hit on a stored note that merely
+// QUOTES the message — REFUGIO's own gap register does — from being scored as
+// an empty memory.
+const NO_PALACE_MAX_CHARS = 300
+
+/**
+ * Is this tool result MemPalace saying no palace exists? It arrives as
+ * ordinary text with ok: true, not as an error, which is how an uninitialised
+ * memory earned passing auto bands on 2026-09-16. Shared with scripts/eval.cjs
+ * so the probe and the runner cannot disagree about what a miss is.
+ */
+function isNoPalace(text) {
+  return typeof text === "string" && text.length <= NO_PALACE_MAX_CHARS && /no palace found/i.test(text)
+}
+
+// A search "found something" only if it is neither an error nor empty, nor
+// MemPalace's no-palace message.
 function verdict(result) {
   const text = textOf(result)
   if (result?.isError) return { ok: false, why: "error", text }
   if (!text) return { ok: false, why: "empty", text }
-  if (/no palace found/i.test(text)) return { ok: false, why: "no palace", text }
+  if (isNoPalace(text)) return { ok: false, why: "no palace", text }
   return { ok: true, why: "found", text }
 }
 
@@ -73,7 +89,7 @@ async function main(queries) {
   return failed ? 1 : 0
 }
 
-module.exports = { verdict, textOf, DEFAULT_QUERIES }
+module.exports = { verdict, textOf, isNoPalace, NO_PALACE_MAX_CHARS, DEFAULT_QUERIES }
 
 if (require.main === module) {
   const args = process.argv.slice(2)

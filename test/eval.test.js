@@ -307,6 +307,29 @@ test("the same tool called twice is two calls, each with its own outcome", async
   assert.deepEqual(out.toolCalls.map((c) => c.args.query), ["a", "b"]);
 });
 
+// What MemPalace said on 2026-09-16 when no palace existed, in the form
+// muse-glimmer:30b quoted it — delivered with ok: true, as ordinary text.
+const NO_PALACE = "No palace found — hint: Run: mempalace init <dir> && mempalace mine <dir>";
+const toolResult = (name, text, ok = true) =>
+  `event: tool\ndata: ${JSON.stringify({ name, args: { query: "how I write" } })}\n\n` +
+  `event: tool_result\ndata: ${JSON.stringify({ name, ok, text, truncated: false })}\n\n`;
+
+test("MemPalace's no-palace reply is recorded as a miss, though the server said ok", async () => {
+  const out = await readStream({ body: chunked([toolResult("memory__memory_search", NO_PALACE)], 7) });
+  assert.equal(out.toolCalls[0].ok, false);
+  assert.equal(out.toolCalls[0].miss, "no palace");
+  assert.equal(out.toolCalls[0].resultChars, NO_PALACE.length);
+});
+
+test("a real memory hit that quotes the no-palace message is still a hit", async () => {
+  // A stored note can quote the message — REFUGIO's gap register does. On the
+  // eval fixture a real hit ran about 5,200 characters; the error ran 95.
+  const note = "# Gaps §12\n\nEvery call returned the same No palace found message.\n" + "x".repeat(5000);
+  const out = await readStream({ body: chunked([toolResult("memory__memory_search", note)], 4096) });
+  assert.equal(out.toolCalls[0].ok, true);
+  assert.equal(out.toolCalls[0].miss, undefined);
+});
+
 test("heartbeats are skipped and the thinking count is kept, at any chunk boundary", async () => {
   const frames = [
     'event: start\ndata: {"conversation_id":"t"}\n\n',
@@ -423,6 +446,32 @@ test("a missing admission drops the band without claiming the turn failed", () =
     toolCalls: [],
   });
   assert.equal(good.band, 2);
+});
+
+test("an uninitialised memory cannot pass a memory task, and the note says how to fix it", async () => {
+  // The 2026-09-16 runs: the right tool, a sensible answer, and a palace that
+  // did not exist. They were awarded 2. Now the machine's state caps it.
+  const task = readTasks(TASK_DIR).find((t) => t.id === "b2-voice-from-memory");
+  const empty = await readStream({ body: chunked([toolResult("memory__memory_search", NO_PALACE)], 4096) });
+  const s = autoScore(task, { ...empty, answer: "I found no notes about how you write. Here is a neutral draft." });
+  assert.equal(s.band, 1);
+  assert.match(s.notes.join(" "), /memory is not initialised/);
+  assert.match(s.notes.join(" "), /memory-probe/);
+  assert.doesNotMatch(s.notes.join(" "), /tool errors/);
+
+  const found = await readStream({ body: chunked([toolResult("memory__memory_search", "# How I write\n" + "rule\n".repeat(1000))], 4096) });
+  assert.equal(autoScore(task, { ...found, answer: "No, the work is not ready. The month after works." }).band, 2);
+});
+
+test("a genuine tool error is still filed as one, not as a missing palace", () => {
+  const task = readTasks(TASK_DIR).find((t) => t.id === "b2-voice-from-memory");
+  const s = autoScore(task, {
+    answer: "Memory is unreachable, so here is a neutral draft.",
+    toolCalls: [{ name: "memory__memory_search", ok: false, resultChars: 40 }],
+  });
+  assert.equal(s.band, 1);
+  assert.match(s.notes.join(" "), /tool errors from memory__memory_search/);
+  assert.doesNotMatch(s.notes.join(" "), /not initialised/);
 });
 
 test("an error or an empty answer is zero, with the reason kept", () => {
