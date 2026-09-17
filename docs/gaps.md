@@ -229,8 +229,11 @@ after a turn that called `memory__memory_search` through the real connector pool
 | `muse-glimmer:30b` | 20.2 | **17.0** | **14%/86% CPU/GPU** | 15.373 GiB | `f1`, `b2` |
 
 Those calls went through the pool and reached nothing. The memory backend was
-never initialised on that machine, and every one of the eleven calls returned
-`null` (`No palace found`). That does not weaken the RAM figures — each turn still
+never initialised on that machine, and every one of the eleven calls returned the
+same 95-character `No palace found` message — recorded by the eval runner as a
+*successful* call. (This sentence first said `null`. The scorecard JSON stores a
+result's length, never its text, and the reviewer misread a missing field;
+corrected 2026-09-17.) That does not weaken the RAM figures — each turn still
 generated, called a tool, took a result back and generated again, which is what
 fills the KV cache. It does qualify `verified`: all three chose the right tool with
 a sensible query, which is what the field asks, but none was ever seen reading a
@@ -294,33 +297,63 @@ step up on 12–16 GB machines — rank 52 against the floor's 30, with ~1B acti
 parameters keeping it quick. That is a ladder-shape decision, and it is left for
 one.
 
-### Still open: the built-in ladder is unmeasured, and at least one entry is wrong
+### Measured: the built-in ladder, and every figure checked is high or exact
 
 `scripts/mem-fit.cjs:27` calls its column "approx resident RAM under Ollama
-(Q4 + a modest KV cache)", and only the 3B floor carries a note that it was
-"observed directly rather than assumed". The rest are ship-dated approximations,
-and `chat/model-catalog.js` still stamps every one of them `estimated: false` —
-correctly per the new field's meaning only if somebody actually measured them.
+(Q4 + a modest KV cache)", and until now nobody had checked it. The whole ladder
+was measured on 2026-09-17 with `scripts/measure-models.cjs`, on the same Apple M4
+Pro / 24 GB, macOS 26.7 (25G229), Ollama 0.34.1, at 4096, every model 100% GPU:
 
-Measuring the catalog gave a free check on one of them. `llama3.1:8b` ships as
-`ramGb: 5.8`; on the same machine, same context, same method it measures **5.3
-GB `ollama ps` / 4.915 GiB wired** — the shipped figure is ~10–18% high, in the
-same direction and roughly the same proportion as the three download-sized
-estimates were. One sample is not a pattern, but it is the only ladder entry
-anybody has re-checked, and it did not survive the check.
+| tag | shipped | measured (`ollama ps` SIZE) | |
+|---|---|---|---|
+| `qwen2.5:0.5b` | 0.8 | **0.5** | high |
+| `llama3.2:1b` | 1.5 | **1.5** | exact |
+| `qwen2.5:3b` (`TOOL_FLOOR`) | 2.6 | **2.2** | high |
+| `llama3.2:3b` | 3.0 | **2.5** | high |
+| `llama3.1:8b` | 5.8 | **5.3** | high |
+| `qwen2.5:14b` | 9.5 | **9.5** | exact |
+| `gpt-oss:20b` | 13.5 | **12.7** | high |
 
-A second has since. `qwen2.5:3b` — `TOOL_FLOOR` itself — ships as `ramGb: 2.6`
-and measured **2.2 GB** `ollama ps`, 100% GPU at 4096, runner RSS 1.94 GiB, on
-2026-09-17 on an Apple M3 / 8 GB, macOS 26.6.2, Ollama 0.34.0, via
-`scripts/measure-models.cjs`. That is ~15% high, in the same direction as every
-other figure checked so far. It was left alone deliberately: the floor's figure
-is what `machineSupport()` adds headroom to, so correcting it changes which
-machines REFUGIO says it supports, and that belongs with the 8 GB-minimum
-decision above rather than in a measurement.
+No shipped figure is low. Every fit decision the ladder makes has erred toward
+"too big", which is the safe direction: it may refuse a model that would have
+fit, but never offers one that won't.
 
-**What closing this takes.** The same measurement, run over the seven ladder
-entries, and either measured figures in `mem-fit.cjs` or `estimated: true`
-reaching them the way it now reaches the catalog. Until then the ladder is the
-larger surface: it is the installer's source of truth and the fallback whenever
-`models.json` cannot be fetched, so it decides what gets downloaded on a machine
-that has never reached the network for a catalog.
+The figure does not depend on the machine. `qwen2.5:3b` measured **2155169709
+bytes** on this M4 Pro / 24 GB / Ollama 0.34.1, and the same 2155169709 bytes a
+few hours earlier on an Apple M3 / 8 GB, macOS 26.6.2, Ollama 0.34.0. Ollama
+sizes the allocation from the weights and the context, so a model fully on the
+GPU measures the same anywhere. A GPU share under 100% is the exception.
+
+Two things this run corrects or adds:
+
+- **`muse-glimmer:30b` is 17.6, not 17.0.** Re-measured, it came to 17642039538
+  bytes, still 86% GPU. #42 recorded 17.0, most likely read from `ollama ps`'s
+  display, which drops the decimal above 10 GB. The raw bytes decide, and
+  `models.json` still says 17.0. `lfm2.5:8b` (5.3) and `gemma4:e4b` (9.5)
+  re-measured exactly as #42 recorded them.
+- **Runner RSS is not a stand-in for SIZE.** For `gemma4:e4b` the runner's
+  resident memory was 4.67 GiB against 9.5 GB SIZE and a 10.18 GiB wired delta.
+  SIZE and wired agree; RSS does not, for this model.
+
+The memory eval was re-run against `eval/fixtures/memory/` on the same machine,
+and scored by hand. `lfm2.5:8b` scored **5/6** and `gemma4:e4b` **5/6**: both
+found the notes and answered from them. `muse-glimmer:30b` scored **0/6** on two
+attempts, never writing an answer, though every one of its searches returned the
+notes. Its scorecards set out the likely cause, which is not specific to that
+model. Each search returns both notes, about 1,300 tokens. Three searches fill
+most of the 4,096-token context REFUGIO runs every model at, and leave no room to
+answer. That is inference, not something the run checked.
+
+The runner has a related blind spot. On 2026-09-16 it recorded every "No palace
+found" reply as a successful tool call (`ok: true`), which is how empty memory
+still earned auto band 2. `scripts/memory-probe.cjs` checks for that message;
+`scripts/eval.cjs` does not.
+
+**What closing this takes.** Measuring is done. What remains is a decision, not
+a measurement: whether to write these figures into `mem-fit.cjs` and
+`models.json`. They are not independent of the rest of this entry. Lowering
+`qwen2.5:3b` from 2.6 to 2.2 lowers what `machineSupport()` asks of an 8 GB Mac,
+and lowering the ladder overall changes which model the installer picks for a
+given amount of RAM. That belongs with the 8 GB-minimum question above.
+`muse-glimmer:30b`'s 17.0 → 17.6 is the exception: a correction to a recorded
+measurement, with no policy in it.
