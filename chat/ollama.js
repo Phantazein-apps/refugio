@@ -110,6 +110,13 @@ export async function chatStream({ model, messages, tools, signal }, onToken, on
   let buffer = "";
   let full = "";
   const toolCalls = [];
+  // Ollama reports these once, on the final message of the round. They are the
+  // only view REFUGIO has of how full the context was, and `done_reason` is the
+  // only direct statement of why generation stopped: "length" means the model
+  // ran out of room rather than finishing. Kept because a turn that stops for
+  // lack of context and a turn that stops because the model had nothing more to
+  // say are indistinguishable from the outside, and one of them is a bug.
+  let usage = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -148,9 +155,19 @@ export async function chatStream({ model, messages, tools, signal }, onToken, on
 
       const piece = evt.message?.content;
       if (piece) { full += piece; onToken(piece); }
+
+      if (evt.done) {
+        usage = {
+          promptTokens: Number.isFinite(evt.prompt_eval_count) ? evt.prompt_eval_count : null,
+          evalTokens: Number.isFinite(evt.eval_count) ? evt.eval_count : null,
+          // "stop" (finished), "length" (out of room), "load" — whatever this
+          // Ollama calls it. Passed through rather than interpreted here.
+          doneReason: typeof evt.done_reason === "string" ? evt.done_reason : null,
+        };
+      }
     }
   }
-  return { text: full, toolCalls };
+  return { text: full, toolCalls, usage };
 }
 
 function safeParse(s) {

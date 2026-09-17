@@ -1162,11 +1162,34 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     // before answering. Bounded so a model that loops on a failing tool can't
     // spin forever.
     for (let round = 0; ; round++) {
-      const { text, toolCalls } = await chatStream(
+      const { text, toolCalls, usage } = await chatStream(
         { model, messages, tools, signal: ac.signal },
         (piece) => { acc += piece; send("token", { t: piece }); },
         onThinking
       );
+
+      // How full the context was, per round, on the record. Written because
+      // three models once stopped mid-turn with nothing written and nothing
+      // anywhere said whether they had run out of room: REFUGIO sends Ollama no
+      // context option, so every model runs at Ollama's default, and a memory
+      // search that returns 5,000 characters spends a sizeable part of it. The
+      // eval keeps these in its scorecards; `done_reason: "length"` is the one
+      // unambiguous statement that a turn ended for lack of room.
+      // Only when it actually says something. An Ollama that reports no counts
+      // (and a stub that reports none) would otherwise produce a line of nulls
+      // on every round, which is noise in the log and an event that tells a
+      // reader nothing.
+      if (usage && (usage.promptTokens != null || usage.evalTokens != null || usage.doneReason)) {
+        const parts = [
+          `round ${round + 1}`,
+          usage.promptTokens == null ? null : `prompt ${usage.promptTokens} tokens`,
+          usage.evalTokens == null ? null : `generated ${usage.evalTokens}`,
+          usage.doneReason ? `done=${usage.doneReason}` : null,
+          `tools offered ${tools.length}`,
+        ].filter(Boolean);
+        log(`${parts.join(" · ")} (${model})`);
+        send("usage", { round: round + 1, ...usage, toolsOffered: tools.length });
+      }
 
       if (!toolCalls.length) break;
 

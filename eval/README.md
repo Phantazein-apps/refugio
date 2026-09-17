@@ -24,7 +24,12 @@ It writes two files per run into `results/`:
 
 - `<engine>-<model>-<date>.json` — every answer, every tool call with its
   arguments and outcome, and the conversation id, so a surprising score can be
-  reopened in the window rather than argued about from a transcript.
+  reopened in the window rather than argued about from a transcript. It also
+  carries one `usage` record per tool round — `promptTokens`, `evalTokens`,
+  `doneReason`, `toolsOffered` — so how full the context was is on the record
+  rather than reconstructed afterwards. A round that ends
+  `doneReason: "length"` ran out of room, and the scorecard says so in its
+  notes without changing the band.
 - `<engine>-<model>-<date>.md` — the scorecard. A model tag carries `:` and
   sometimes `/`; both are flattened to `-` in the filename.
 

@@ -438,7 +438,7 @@ async function runTask(base, task, { model, web = false, timeoutMs = 300000, fet
  *  the conversation id — so a surprising score can be reopened in the window
  *  rather than argued about from a transcript. Writes into `out` as it goes,
  *  so a caller that catches a broken stream still holds the partial turn. */
-async function readStream(res, out = { answer: "", toolCalls: [], conversationId: null, error: null, thinkingTokens: 0 }) {
+async function readStream(res, out = { answer: "", toolCalls: [], conversationId: null, error: null, thinkingTokens: 0, usage: [] }) {
   const { toolCalls } = out;
 
   for await (const evt of sseEvents(res.body)) {
@@ -448,6 +448,11 @@ async function readStream(res, out = { answer: "", toolCalls: [], conversationId
     // "answered badly" are different failures of a small model.
     else if (evt.event === "thinking") out.thinkingTokens = Number(evt.data?.tokens) || out.thinkingTokens || 0;
     else if (evt.event === "start") out.conversationId = evt.data?.conversation_id || null;
+    // One per tool round: how full the context was, and why generation stopped.
+    // Kept because "stopped with nothing written" and "ran out of room" look
+    // identical in a scorecard otherwise, and the difference decides whether a
+    // model is weak or the context is too small for the tools it was given.
+    else if (evt.event === "usage") (out.usage || (out.usage = [])).push(evt.data || {});
     else if (evt.event === "tool") toolCalls.push({ name: evt.data?.name, args: evt.data?.args ?? null, ok: null });
     else if (evt.event === "tool_result") {
       // The `tool` event that opened this call is the one to complete; a model
@@ -552,6 +557,14 @@ function autoScore(task, result) {
     }
     const failed = calls.filter((c) => c.ok === false && !c.miss).map((c) => c.name);
     if (failed.length) { notes.push(`tool errors from ${failed.join(", ")}`); band = Math.min(band, 1); }
+  }
+  // Not a band change — a diagnosis. A turn that ends `done=length` stopped for
+  // lack of context, which is a property of what it was handed, not of how well
+  // it answered, and the reviewer should see it either way.
+  const ranOut = (result.usage || []).filter((u) => u?.doneReason === "length");
+  if (ranOut.length) {
+    const r = ranOut[0];
+    notes.push(`ran out of context: round ${r.round ?? "?"} ended done=length${r.promptTokens == null ? "" : ` at ${r.promptTokens} prompt tokens`}`);
   }
   if (!notes.length) notes.push(`the declared checks pass; band 3 needs a person`);
   return { band, notes };
