@@ -346,8 +346,9 @@ answer. That is inference, not something the run checked.
 
 The runner has a related blind spot. On 2026-09-16 it recorded every "No palace
 found" reply as a successful tool call (`ok: true`), which is how empty memory
-still earned auto band 2. `scripts/memory-probe.cjs` checks for that message;
-`scripts/eval.cjs` does not.
+still earned auto band 2. Fixed 2026-09-17: `scripts/eval.cjs` now records that
+reply as a miss, caps the task at band 1 with a note naming the fix, and shares
+`isNoPalace()` with `scripts/memory-probe.cjs` so the two cannot disagree.
 
 **What closing this takes.** Measuring is done. What remains is a decision, not
 a measurement: whether to write these figures into `mem-fit.cjs` and

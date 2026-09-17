@@ -39,6 +39,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { isNoPalace } = require("./memory-probe.cjs");
 
 const ROOT = path.dirname(__dirname);
 const TASK_DIR = path.join(ROOT, "eval", "tasks");
@@ -456,6 +457,10 @@ async function readStream(res, out = { answer: "", toolCalls: [], conversationId
       rec.ok = !!evt.data?.ok;
       rec.resultChars = (evt.data?.text || "").length;
       rec.truncated = !!evt.data?.truncated;
+      // MemPalace reports a missing palace as a successful call. Recorded as
+      // what it is — a miss — so an uninitialised memory cannot pass a memory
+      // task, and the JSON says why for whoever reopens the run.
+      if (rec.ok && isNoPalace(evt.data?.text)) { rec.ok = false; rec.miss = "no palace"; }
       if (!open) toolCalls.push(rec);
     } else if (evt.event === "error") out.error = evt.data?.error || "the turn failed";
     else if (evt.event === "done") out.conversationId = evt.data?.conversation_id || out.conversationId;
@@ -537,7 +542,15 @@ function autoScore(task, result) {
         band = Math.min(band, 1);
       }
     }
-    const failed = (result.toolCalls || []).filter((c) => c.ok === false).map((c) => c.name);
+    const calls = result.toolCalls || [];
+    // A missing palace is the machine's fault, not the model's, and the note
+    // says so and names the fix, rather than filing it under "tool errors".
+    const missed = [...new Set(calls.filter((c) => c.miss === "no palace").map((c) => c.name))];
+    if (missed.length) {
+      notes.push(`memory is not initialised: ${missed.join(", ")} returned "No palace found" — load eval/fixtures/memory and check with scripts/memory-probe.cjs`);
+      band = Math.min(band, 1);
+    }
+    const failed = calls.filter((c) => c.ok === false && !c.miss).map((c) => c.name);
     if (failed.length) { notes.push(`tool errors from ${failed.join(", ")}`); band = Math.min(band, 1); }
   }
   if (!notes.length) notes.push(`the declared checks pass; band 3 needs a person`);

@@ -88,3 +88,12 @@ test("MemPalace's no-palace message is a miss, though it arrives as ordinary tex
   assert.equal(v.ok, false);
   assert.equal(v.why, "no palace");
 });
+
+test("a long result that quotes the no-palace message is a hit, not a miss", () => {
+  // The same bound scripts/eval.cjs uses, so the probe and the runner agree.
+  const quoted = "Every call returned the same No palace found message. " + "x".repeat(probe.NO_PALACE_MAX_CHARS);
+  assert.equal(probe.isNoPalace(quoted), false);
+  assert.equal(probe.verdict({ content: [{ type: "text", text: quoted }] }).ok, true);
+  assert.equal(probe.isNoPalace("No palace found — hint: Run: mempalace init <dir>"), true);
+  assert.equal(probe.isNoPalace(undefined), false);
+});
