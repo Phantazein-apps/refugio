@@ -19,6 +19,7 @@ import { EventEmitter } from "events";
 import {
   DEFAULT_TURN_TIMEOUT_MS, turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
   DEFAULT_HEARTBEAT_MS, HEARTBEAT, heartbeatMs, armHeartbeat, thoughtWithoutAnswerMessage,
+  outOfRoomMessage, cutShortNote,
 } from "../chat/turn-deadline.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -124,6 +125,29 @@ test("a cleared heartbeat writes nothing more, and 0 never arms one", async () =
   assert.equal(off.listenerCount("close"), 0);
 });
 
+test("running out of room names the number, and the connectors when they filled it", () => {
+  // The turn in §12 filled its context on tool results without thinking at all,
+  // so "the model thought too long" would have been the wrong sentence.
+  const withTools = outOfRoomMessage(3775, 8000);
+  assert.match(withTools, /ran out of room before it wrote an answer/);
+  assert.match(withTools, /about 3,775 tokens/);
+  assert.match(withTools, /About 8,000 characters of that came back from connectors/);
+
+  // No connectors in play: nothing is claimed about where the context went.
+  const bare = outOfRoomMessage(4096, 0);
+  assert.doesNotMatch(bare, /from connectors/);
+  assert.match(bare, /larger context/);
+
+  // An Ollama that reports no count still produces a usable sentence.
+  assert.doesNotMatch(outOfRoomMessage(null, 0), /tokens\./);
+});
+
+test("a cut-short answer is marked where the person reads it", () => {
+  const note = cutShortNote();
+  assert.match(note, /^\n\n_\(Cut short/);
+  assert.match(note, /What it wrote is saved/);
+});
+
 test("thinking without an answer is explained, with the count", () => {
   const msg = thoughtWithoutAnswerMessage(3411);
   assert.match(msg, /3,411 tokens/);
@@ -143,7 +167,7 @@ function fakeOllama() {
   const server = http.createServer((req, res) => {
     if (req.url === "/api/tags") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ models: [{ name: "fake:1b" }, { name: "thinker:4b" }] }));
+      return res.end(JSON.stringify({ models: [{ name: "fake:1b" }, { name: "thinker:4b" }, { name: "cramped:8b" }, { name: "stuffed:8b" }] }));
     }
     if (req.url === "/api/chat") {
       let raw = "";
@@ -153,6 +177,18 @@ function fakeOllama() {
         res.writeHead(200, { "Content-Type": "application/x-ndjson" });
         held.add(res);
         res.on("close", () => held.delete(res));
+        // Ollama's two ways of saying the context filled up: with some of an
+        // answer already written, and with none. Both end the response, unlike
+        // the held-open models above.
+        if (model === "cramped:8b" || model === "stuffed:8b") {
+          if (model === "cramped:8b") {
+            res.write(JSON.stringify({ message: { role: "assistant", content: "The migration ran on Thurs" } }) + "\n");
+          }
+          return res.end(JSON.stringify({
+            message: { role: "assistant", content: "" },
+            done: true, done_reason: "length", prompt_eval_count: 3775, eval_count: 321,
+          }) + "\n");
+        }
         if (model !== "thinker:4b") {
           res.write(JSON.stringify({ message: { role: "assistant", content: "Still thinking" } }) + "\n");
           return;
@@ -334,7 +370,60 @@ describe("the chat server, spawned", () => {
     const convo = await (await fetch(`${chat.base}/api/chat/conversations/${cid}`)).json();
     assert.deepEqual(convo.messages.map((m) => m.role), ["user"], JSON.stringify(convo));
   });
+
+  // Measured on 2026-09-18 (docs/gaps.md §12): three memory searches put a
+  // turn's prompt at 3,775 tokens against Ollama's 4,096 default, and it
+  // stopped at done=length. The chat server logged that and told nobody. These
+  // two cover both ways it reaches a person.
+  test("an answer cut off by a full context says so, and the notice is kept", async () => {
+    const body = await ask(chat.base, { message: "When did the migration run?", model: "cramped:8b" });
+    const events = parseEvents(body);
+    const answer = events.filter((e) => e.event === "token").map((e) => e.data.t).join("");
+
+    assert.match(answer, /^The migration ran on Thurs/, "what the model did write is kept");
+    assert.match(answer, /Cut short: the model ran out of room/, body);
+    assert.ok(events.some((e) => e.event === "done"), "a cut-short answer still completes");
+
+    // Stored with the notice, so reopening the conversation does not show a
+    // sentence that stops for no visible reason.
+    const cid = events[0].data.conversation_id;
+    const convo = await (await fetch(`${chat.base}/api/chat/conversations/${cid}`)).json();
+    const stored = convo.messages.find((m) => m.role === "assistant");
+    assert.match(stored.content, /Cut short: the model ran out of room/, JSON.stringify(convo));
+  });
+
+  test("a turn that filled its context without writing anything says why, with the number", async () => {
+    const body = await ask(chat.base, { message: "What did I decide?", model: "stuffed:8b" });
+    const events = parseEvents(body);
+    const error = events.find((e) => e.event === "error");
+
+    assert.ok(error, body);
+    assert.match(error.data.error, /ran out of room before it wrote an answer/);
+    assert.match(error.data.error, /3,775 tokens/, "the number it ran out at");
+    // Not the old guess. This model never sent a thinking token, and before
+    // this the turn reached the window as `done` over an empty answer.
+    assert.doesNotMatch(error.data.error, /spent this turn thinking/);
+  });
 });
+
+/** POST one turn and collect the whole SSE body. */
+function ask(base, payloadObj) {
+  const payload = JSON.stringify(payloadObj);
+  return new Promise((resolve, reject) => {
+    const req = http.request(`${base}/api/chat/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+    }, (res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (s) => { text += s; });
+      res.on("end", () => resolve(text));
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.end(payload);
+  });
+}
 
 function parseEvents(body) {
   return [...body.matchAll(/^event: (\w+)\ndata: (.*)$/gm)].map(([, event, data]) => ({ event, data: JSON.parse(data) }));

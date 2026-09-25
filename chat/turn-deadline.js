@@ -125,6 +125,36 @@ export function thoughtWithoutAnswerMessage(tokens) {
     "Small models often run out of room this way. A shorter or more specific question, or a larger model, usually gets an answer.";
 }
 
+/** When the turn ended because the context filled up, and nothing was written.
+ *
+ *  Until now this arrived as thoughtWithoutAnswerMessage, which GUESSED at the
+ *  cause — "small models often run out of room this way". Since the chat server
+ *  records `done_reason` per round, running out of room is a thing REFUGIO
+ *  knows rather than suspects, and the person is told the number it ran out at.
+ *  Nobody can act on "the model returned an empty response"; "your connectors
+ *  filled its context" is a thing to do something about. */
+export function outOfRoomMessage(promptTokens, toolChars = 0) {
+  const full = promptTokens
+    ? ` Its context was full at about ${promptTokens.toLocaleString("en-US")} tokens.`
+    : "";
+  // Counted, not guessed: the chat server charges every tool result against the
+  // turn's budget, so this is the number it spent.
+  const fromTools = toolChars > 0
+    ? ` About ${toolChars.toLocaleString("en-US")} characters of that came back from connectors.`
+    : "";
+  return `The model ran out of room before it wrote an answer.${full}${fromTools} ` +
+    "A shorter or more specific question, fewer connectors in play, or a model with a larger context usually gets an answer.";
+}
+
+/** The same thing when the model DID write something first. The answer is on
+ *  screen and simply stops, mid-sentence more often than not, and without this
+ *  the window gives no hint that anything is missing — the worst version,
+ *  because a truncated answer reads like a complete one. */
+export function cutShortNote() {
+  return "\n\n_(Cut short: the model ran out of room in its context. What it wrote is saved. " +
+    "A shorter question, or a model with more room, usually finishes.)_";
+}
+
 /** The sentence the window shows. Says what happened, that nothing written so
  *  far was lost, and what to try — not which variable to set, which belongs in
  *  the log for whoever runs the machine. */
