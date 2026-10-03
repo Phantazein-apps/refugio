@@ -21,9 +21,6 @@
 // matched by position — and are translated per call. Keeping the runner's
 // shape means the history store, the tool budget and the modes are untouched.
 
-import { createModels, createProvider } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import * as native from "./ollama.js";
 import * as claudeCode from "./claude-code.js";
 
@@ -63,7 +60,17 @@ function usePiForLocal() {
 let _models = null;
 const _ollamaModels = new Map();
 
-function registry() {
+/** pi-ai, loaded on first use rather than at import. Nothing on the default
+ *  path needs it — local models go to the native client, Claude to Claude
+ *  Code — and CI runs the tests with no `npm install`, where a top-level
+ *  import of it stopped chat/server.js from starting at all. */
+async function registry() {
+  if (_models) return _models;
+  const [{ createModels, createProvider }, { openAICompletionsApi }, { anthropicProvider }] = await Promise.all([
+    import("@earendil-works/pi-ai"),
+    import("@earendil-works/pi-ai/api/openai-completions.lazy"),
+    import("@earendil-works/pi-ai/providers/anthropic"),
+  ]);
   if (_models) return _models;
   _models = createModels();
   // Only the two providers REFUGIO offers. builtinModels() would register
@@ -108,10 +115,10 @@ function ollamaModel(name) {
   return m;
 }
 
-function resolve(name) {
+async function resolve(name) {
   const cloud = CLOUD.exec(String(name || ""));
   if (!cloud) return ollamaModel(name);
-  const m = registry().getModel(cloud[1], cloud[2]);
+  const m = (await registry()).getModel(cloud[1], cloud[2]);
   if (!m) throw new Error(`Unknown model ${name}`);
   return m;
 }
@@ -201,8 +208,8 @@ export async function chatStream({ model, messages, tools, signal }, onToken, on
     return native.chatStream({ model, messages, tools, signal }, onToken, onThinking);
   }
 
-  const m = resolve(model);
-  const s = registry().stream(m, toContext(messages, tools, m), { signal });
+  const m = await resolve(model);
+  const s = (await registry()).stream(m, toContext(messages, tools, m), { signal });
 
   let full = "";
   for await (const evt of s) {
@@ -241,8 +248,8 @@ export async function chatStream({ model, messages, tools, signal }, onToken, on
 export async function complete({ model, messages, signal }) {
   if (claudeCode.isClaudeCodeModel(model)) return claudeCode.complete({ model, messages, signal });
   if (!isCloudModel(model) && !usePiForLocal()) return native.complete({ model, messages, signal });
-  const m = resolve(model);
-  const msg = await registry().complete(m, toContext(messages, [], m), { signal });
+  const m = await resolve(model);
+  const msg = await (await registry()).complete(m, toContext(messages, [], m), { signal });
   if (msg.stopReason === "error" || msg.stopReason === "aborted") {
     throw new Error(msg.errorMessage || `${m.provider} request failed`);
   }
