@@ -5,6 +5,8 @@
 // Behind them, pi-ai (@earendil-works/pi-ai) does the talking:
 //
 //   - a model named "anthropic/<id>" goes to Anthropic, with ANTHROPIC_API_KEY
+//   - a model named "claude-code/<alias>" goes through the person's own signed-in
+//     Claude Code — the subscription route; see claude-code.js
 //   - any other name is a local Ollama model, reached through Ollama's
 //     OpenAI-compatible /v1 endpoint — or, unless REFUGIO_ENGINE_LIB=pi, through
 //     the hand-rolled native client exactly as before
@@ -23,13 +25,34 @@ import { createModels, createProvider } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import * as native from "./ollama.js";
+import * as claudeCode from "./claude-code.js";
 
 const CLOUD = /^(anthropic)\/(.+)$/;
 
-/** Whether a model name means leaving this machine. The UI and the setup
- *  wizard ask this before they offer one; the engine does not decide it. */
+/** Whether a model name means leaving this machine. The server asks this
+ *  before it runs a turn; the engine does not decide it. */
 export function isCloudModel(name) {
-  return CLOUD.test(String(name || ""));
+  return CLOUD.test(String(name || "")) || claudeCode.isClaudeCodeModel(name);
+}
+
+/**
+ * Why a turn may not use this model, or null if it may. Asked by the server
+ * before anything is stored or sent.
+ *
+ * Two rules, and they are not the same rule. A cloud model is off until the
+ * person switches it on (REFUGIO_CLAUDE_CODE=1 for now; a Settings switch with
+ * the web-search warning later), because "nothing leaves your machine" is the
+ * default this product is installed on. And a discussion mode never uses one,
+ * switch or no switch: a mode promises the conversation stays here, and the
+ * person in it chose the mode, not the model.
+ */
+export function cloudRefusal({ model, mode = null, env = process.env }) {
+  if (!isCloudModel(model)) return null;
+  if (mode) return "Discussion modes only use the model on this computer. Choose a local model to continue in this mode.";
+  if (claudeCode.isClaudeCodeModel(model) && env.REFUGIO_CLAUDE_CODE !== "1") {
+    return "Claude through Claude Code is switched off. It sends this conversation to Anthropic, so it has to be switched on first.";
+  }
+  return null;
 }
 
 function usePiForLocal() {
@@ -172,6 +195,9 @@ const DONE = { stop: "stop", toolUse: "stop", length: "length" };
 // ── The two calls ───────────────────────────────────────────
 
 export async function chatStream({ model, messages, tools, signal }, onToken, onThinking = () => {}) {
+  if (claudeCode.isClaudeCodeModel(model)) {
+    return claudeCode.chatStream({ model, messages, tools, signal }, onToken, onThinking);
+  }
   if (!isCloudModel(model) && !usePiForLocal()) {
     return native.chatStream({ model, messages, tools, signal }, onToken, onThinking);
   }
@@ -214,6 +240,7 @@ export async function chatStream({ model, messages, tools, signal }, onToken, on
 }
 
 export async function complete({ model, messages, signal }) {
+  if (claudeCode.isClaudeCodeModel(model)) return claudeCode.complete({ model, messages, signal });
   if (!isCloudModel(model) && !usePiForLocal()) return native.complete({ model, messages, signal });
   const m = resolve(model);
   const msg = await registry().complete(m, toContext(messages, [], m), { signal });

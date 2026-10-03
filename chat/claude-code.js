@@ -1,0 +1,378 @@
+// Claude, through the person's own Claude Code — the subscription route.
+//
+// Anthropic's terms do not let a third-party app offer Claude.ai login or hold
+// its tokens (docs/pi-ai-spike.md §4). They do allow a person to sign in to the
+// unmodified Claude Code binary with their own subscription. So this engine
+// never signs anyone in and never sees a token: it runs the `claude` the person
+// installed and signed in to themselves, and reads what it prints.
+//
+// Claude Code is used as a MODEL, not as an agent:
+//   - its built-in tools are off (`--tools ""`), so it cannot read files, run
+//     commands or browse; the only tools it has are the ones REFUGIO offered
+//     for this turn, through chat/claude-code-bridge.mjs
+//   - every tool call comes back out of chatStream() as a tool call, exactly as
+//     Ollama's do, and REFUGIO's turn runner runs it — runTool, the web arming
+//     check, the mode check, the tool budget. The result goes back to Claude
+//     Code on the next chatStream() call for the same turn
+//   - its system prompt is REFUGIO's (`--system-prompt` replaces Claude Code's),
+//     and the person's own Claude Code settings, hooks, skills and MCP servers
+//     are not loaded (`--setting-sources ""`, `--strict-mcp-config`)
+//   - nothing is saved as a Claude Code session (`--no-session-persistence`)
+//
+// One process per turn. The turn runner calls chatStream() once per round with
+// the same `messages` array, pushing the assistant's tool calls and then one
+// `tool` message per result; that array is the key that finds the live process.
+// The turn's AbortSignal fires when the response closes — normally or not — and
+// that is what ends the process.
+//
+// What is said goes over stdin, never on the command line: argv is readable by
+// every user on the machine through `ps`, and a conversation is not.
+
+import { spawn } from "child_process";
+import http from "http";
+import { randomBytes } from "crypto";
+import { existsSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir, homedir } from "os";
+import { join, dirname, delimiter } from "path";
+import { fileURLToPath } from "url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const BRIDGE = join(HERE, "claude-code-bridge.mjs");
+const PREFIX = "claude-code/";
+const MCP_PREFIX = "mcp__refugio__";
+
+/** The models offered. Aliases, so "sonnet" is whatever Claude Code calls the
+ *  current Sonnet — REFUGIO does not track Anthropic's model ids. */
+export const CLAUDE_CODE_MODELS = ["claude-code/sonnet", "claude-code/opus", "claude-code/haiku"];
+
+export function isClaudeCodeModel(name) {
+  return String(name || "").startsWith(PREFIX);
+}
+
+/** Where `claude` is. A login item does not get the person's shell PATH, so
+ *  the places the installer puts it are checked by name. Null if absent. */
+export function findClaude(env = process.env) {
+  if (env.REFUGIO_CLAUDE_BIN) return existsSync(env.REFUGIO_CLAUDE_BIN) ? env.REFUGIO_CLAUDE_BIN : null;
+  const dirs = [
+    ...(env.PATH || "").split(delimiter),
+    join(homedir(), ".local", "bin"),
+    join(homedir(), ".claude", "local"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+  ];
+  for (const d of dirs) {
+    if (!d) continue;
+    const p = join(d, process.platform === "win32" ? "claude.exe" : "claude");
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** How long to wait for Claude Code's first word before saying why. A Claude
+ *  Code whose login has expired retries a 401 in silence — about twenty
+ *  seconds on 2.1.20, then an error result — and a hung one never answers;
+ *  either way the turn should not sit at the thirty-minute ceiling. */
+function firstEventMs(env = process.env) {
+  const n = Number(env.REFUGIO_CLAUDE_FIRST_EVENT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 60000;
+}
+
+const NOT_SIGNED_IN =
+  "Claude Code did not answer. If it is not signed in, open Terminal, run `claude`, " +
+  "and sign in with your Claude account — REFUGIO never asks for it.";
+
+// ── Prompt ──────────────────────────────────────────────────
+
+/** Split the runner's messages into REFUGIO's system prompt and the one user
+ *  message Claude Code is sent. Earlier turns are text (the store keeps no
+ *  tool calls), so they travel as a transcript inside that message. */
+export function toPrompt(messages) {
+  const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+  const turns = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const last = turns.length - 1 - [...turns].reverse().findIndex((m) => m.role === "user");
+  const latest = turns[last]?.content ?? "";
+  const before = turns.slice(0, Math.max(0, last));
+  if (!before.length) return { system, prompt: latest };
+  const transcript = before
+    .map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.content}`)
+    .join("\n\n");
+  return {
+    system,
+    prompt: `<conversation_so_far>\n${transcript}\n</conversation_so_far>\n\n${latest}`,
+  };
+}
+
+// ── The bridge's other end ──────────────────────────────────
+
+/** A loopback endpoint the bridge calls: the turn's tool list, and tool calls
+ *  that wait until the turn runner has a result. Bearer token per turn, so
+ *  another local process cannot feed this turn tool results. */
+function openBridge(tools) {
+  const token = randomBytes(24).toString("hex");
+  const waiting = [];          // calls from Claude Code with no result yet
+  const results = [];          // results from the runner with no call yet
+  const server = http.createServer((req, res) => {
+    if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401); return res.end(); }
+    if (req.method === "GET" && req.url === "/tools") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({
+        tools: tools.map((t) => ({
+          name: t.function.name,
+          description: t.function.description ?? "",
+          inputSchema: t.function.parameters ?? { type: "object", properties: {} },
+        })),
+      }));
+    }
+    if (req.method === "POST" && req.url === "/call") {
+      let raw = "";
+      req.on("data", (b) => { raw += b; });
+      req.on("end", () => {
+        const reply = (r) => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(r));
+        };
+        if (results.length) return reply(results.shift());
+        waiting.push(reply);
+      });
+      return;
+    }
+    res.writeHead(404); res.end();
+  });
+  // Results are matched to calls by order: Claude Code runs a round's tools in
+  // the order it asked for them, and the runner answers in the same order.
+  const answer = (r) => (waiting.length ? waiting.shift()(r) : results.push(r));
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({
+    url: `http://127.0.0.1:${server.address().port}`,
+    token,
+    answer,
+    close: () => { for (const w of waiting.splice(0)) w({ text: "Error: the turn ended", isError: true }); server.close(); },
+  })));
+}
+
+// ── One turn ────────────────────────────────────────────────
+
+const sessions = new WeakMap();
+
+class Turn {
+  constructor({ bin, model, messages, tools, signal, env }) {
+    this.events = [];
+    this.wake = null;
+    this.exited = false;
+    this.stderr = "";
+    this.seen = 0;
+    this.env = env;
+    this.ready = this.#start({ bin, model, messages, tools, signal, env });
+  }
+
+  async #start({ bin, model, messages, tools, signal, env }) {
+    this.bridge = await openBridge(tools);
+    this.dir = mkdtempSync(join(tmpdir(), "refugio-claude-"));
+    const { system, prompt } = toPrompt(messages);
+
+    const mcpConfig = {
+      mcpServers: {
+        refugio: {
+          command: process.execPath,
+          args: [BRIDGE],
+          env: {
+            REFUGIO_BRIDGE_URL: this.bridge.url,
+            REFUGIO_BRIDGE_TOKEN: this.bridge.token,
+            ...(env.REFUGIO_BRIDGE_TRACE ? { REFUGIO_BRIDGE_TRACE: env.REFUGIO_BRIDGE_TRACE } : {}),
+          },
+        },
+      },
+    };
+    const args = [
+      "-p",
+      "--input-format", "stream-json",
+      "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+      "--model", model.slice(PREFIX.length),
+      "--tools", "",
+      "--system-prompt", system,
+      "--setting-sources", "",
+      "--strict-mcp-config",
+      "--no-session-persistence",
+      "--disable-slash-commands",
+      // REFUGIO's tools are allowed without a prompt and nothing else is: there
+      // is no one at a terminal to answer one.
+      "--permission-mode", "dontAsk",
+      "--allowedTools", "mcp__refugio",
+      ...(tools.length ? ["--mcp-config", JSON.stringify(mcpConfig)] : []),
+    ];
+
+    const childEnv = { ...env };
+    // Set when REFUGIO itself was started from inside Claude Code; the child
+    // would otherwise take itself for a nested session.
+    delete childEnv.CLAUDECODE;
+    delete childEnv.CLAUDE_CODE_ENTRYPOINT;
+    // A tool call is held open while REFUGIO runs it; Claude Code must not give
+    // up on it first.
+    childEnv.MCP_TOOL_TIMEOUT ||= "600000";
+
+    this.proc = spawn(bin, args, { cwd: this.dir, env: childEnv, stdio: ["pipe", "pipe", "pipe"] });
+    this.proc.stdin.end(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
+
+    let buf = "";
+    this.proc.stdout.on("data", (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line) continue;
+        try { this.#push(JSON.parse(line)); } catch { /* not ours to interpret */ }
+      }
+    });
+    this.proc.stderr.on("data", (d) => { this.stderr = (this.stderr + d).slice(-2000); });
+    this.proc.on("error", (e) => this.#push({ type: "_exit", error: e.message }));
+    this.proc.on("close", (code) => { this.exited = true; this.#push({ type: "_exit", code }); });
+
+    const stop = () => this.close();
+    if (signal?.aborted) stop(); else signal?.addEventListener("abort", stop, { once: true });
+  }
+
+  #push(evt) {
+    this.events.push(evt);
+    const w = this.wake; this.wake = null; w?.();
+  }
+
+  async #next(deadlineMs) {
+    while (!this.events.length) {
+      let timer;
+      const woke = new Promise((r) => { this.wake = r; });
+      const timeout = deadlineMs ? new Promise((r) => { timer = setTimeout(() => r("timeout"), deadlineMs); }) : null;
+      const why = await (timeout ? Promise.race([woke, timeout]) : woke);
+      clearTimeout(timer);
+      if (why === "timeout") return { type: "_timeout" };
+    }
+    return this.events.shift();
+  }
+
+  /** Read until the model finishes a message that asks for tools, or the run
+   *  ends. One call per round of the turn runner. */
+  async round(onToken, onThinking, signal) {
+    await this.ready;
+    let text = "";
+    const toolCalls = [];
+    let usage = { promptTokens: null, evalTokens: null, doneReason: null };
+    let heard = this.heardAnything;
+
+    while (true) {
+      const evt = await this.#next(heard ? 0 : firstEventMs(this.env));
+      if (signal?.aborted) throw abortError(signal);
+      if (evt.type === "_timeout") { this.close(); throw new Error(NOT_SIGNED_IN); }
+      if (evt.type !== "system") { heard = this.heardAnything = true; }
+
+      if (evt.type === "stream_event") {
+        const e = evt.event ?? {};
+        if (e.type === "message_start") {
+          const u = e.message?.usage ?? {};
+          usage.promptTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+        } else if (e.type === "content_block_delta") {
+          if (e.delta?.type === "text_delta" && e.delta.text) { text += e.delta.text; onToken(e.delta.text); }
+          else if (e.delta?.type === "thinking_delta" && e.delta.thinking) onThinking(e.delta.thinking);
+        } else if (e.type === "message_delta") {
+          if (Number.isFinite(e.usage?.output_tokens)) usage.evalTokens = e.usage.output_tokens;
+          const stop = e.delta?.stop_reason;
+          if (stop) usage.doneReason = stop === "max_tokens" ? "length" : "stop";
+          if (stop === "tool_use") this.expectTools = true;
+        } else if (e.type === "message_stop" && this.expectTools) {
+          this.expectTools = false;
+          // The tool_use blocks arrive as `assistant` events, which may come
+          // before or after this. Return with every call the message made, or
+          // wait for the first of them.
+          if (this.calls?.length) return { text, toolCalls: this.takeCalls(), usage };
+          this.awaitCalls = true;
+        }
+        continue;
+      }
+
+      if (evt.type === "assistant") {
+        for (const b of evt.message?.content ?? []) {
+          if (b.type === "tool_use" && String(b.name).startsWith(MCP_PREFIX)) {
+            (this.calls ??= []).push({ name: b.name.slice(MCP_PREFIX.length), args: b.input ?? {} });
+          }
+        }
+        if (this.awaitCalls && this.calls?.length) {
+          this.awaitCalls = false;
+          return { text, toolCalls: this.takeCalls(), usage };
+        }
+        continue;
+      }
+
+      if (evt.type === "result") {
+        // Signed out (or expired), Claude Code retries for about twenty seconds
+        // and then ends with this — as an error result with "success" as its
+        // subtype, after a synthetic assistant message saying the same.
+        if (evt.is_error && /run \/login|Invalid API key/i.test(evt.result || "")) throw new Error(NOT_SIGNED_IN);
+        if (evt.is_error) throw new Error(`Claude Code: ${evt.result || evt.subtype || "the request failed"}`);
+        return { text, toolCalls: [], usage };
+      }
+
+      if (evt.type === "_exit") {
+        if (evt.error) throw new Error(`Could not start Claude Code: ${evt.error}`);
+        throw new Error(`Claude Code stopped (exit ${evt.code})${this.stderr ? `: ${this.stderr.trim().split("\n").at(-1)}` : ""}`);
+      }
+    }
+  }
+
+  takeCalls() {
+    const out = this.calls ?? [];
+    this.calls = [];
+    return out;
+  }
+
+  /** Hand the runner's tool results to the calls Claude Code is waiting on. */
+  feed(messages) {
+    for (const m of messages.slice(this.seen)) {
+      if (m.role === "tool") {
+        const text = String(m.content ?? "");
+        this.bridge.answer({ text, isError: text.startsWith("Error") });
+      }
+    }
+    this.seen = messages.length;
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    try { if (!this.exited) this.proc?.kill("SIGTERM"); } catch {}
+    this.bridge?.close();
+    if (this.dir) rmSync(this.dir, { recursive: true, force: true });
+  }
+}
+
+/** Same contract as chat/ollama.js chatStream. */
+export async function chatStream({ model, messages, tools = [], signal }, onToken, onThinking = () => {}, env = process.env) {
+  let turn = sessions.get(messages);
+  if (!turn) {
+    const bin = findClaude(env);
+    if (!bin) throw new Error("Claude Code is not installed on this computer, so Claude models are unavailable.");
+    turn = new Turn({ bin, model, messages, tools, signal, env });
+    sessions.set(messages, turn);
+  } else {
+    turn.feed(messages);
+  }
+  try {
+    const out = await turn.round(onToken, onThinking, signal);
+    turn.seen = messages.length;
+    if (!out.toolCalls.length) { turn.close(); sessions.delete(messages); }
+    return out;
+  } catch (e) {
+    turn.close();
+    sessions.delete(messages);
+    throw e;
+  }
+}
+
+/** One-shot completion (conversation titles). No tools, no stream to the UI. */
+export async function complete({ model, messages, signal }, env = process.env) {
+  const { text } = await chatStream({ model, messages: [...messages], tools: [], signal }, () => {}, () => {}, env);
+  return text;
+}
+
+function abortError(signal) {
+  const e = new Error(signal?.reason?.message || "aborted");
+  e.name = "AbortError";
+  return e;
+}

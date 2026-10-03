@@ -39,7 +39,7 @@ import { EDITION, PRODUCT } from "./edition.js";
 import { listModels, isUp, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
 // The model layer. Local models still default to the native Ollama client;
 // see engine.js for what REFUGIO_ENGINE_LIB=pi changes.
-import { chatStream, complete } from "./engine.js";
+import { chatStream, complete, cloudRefusal } from "./engine.js";
 import * as catalog from "./model-catalog.js";
 import {
   turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
@@ -1069,6 +1069,17 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   // being read, a model thinking, a slow tool, the title — can go quiet long
   // enough for a client to hang up. See turn-deadline.js.
   const heartbeat = armHeartbeat(res, heartbeatMs());
+
+  // Before the row is written or the message stored: a turn refused here leaves
+  // nothing behind. The mode is the conversation's if it has one already —
+  // regenerate and edit send none — and otherwise the one being asked for.
+  const refusal = cloudRefusal({ model, mode: store.getConversation(conversationId)?.mode ?? mode });
+  if (refusal) {
+    send("error", { error: refusal });
+    heartbeat.clear();
+    res.end();
+    return;
+  }
 
   // First turn writes the mode onto the row; every later turn is handed back
   // what the row already says, so `mode` from here down is the conversation's,

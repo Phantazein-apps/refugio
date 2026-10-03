@@ -1,4 +1,4 @@
-# Spike — pi-ai as REFUGIO's model layer
+# Spike — pi-ai as REFUGIO's model layer, and Claude through Claude Code
 
 **Status:** spike, on a branch · **Date:** 2026-10-03 · **Question:** can
 [pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) replace the
@@ -92,7 +92,62 @@ Usage limits for Pro/Max "assume ordinary, individual usage", which a personal
 chat window is, but this is worth confirming with Anthropic before it ships to
 a fleet. It does not use pi-ai at all.
 
-## 5. Cost of going further
+## 5. The Claude Code engine (built)
+
+`chat/claude-code.js` runs the person's own signed-in `claude` as a model.
+Pick it with a model name of `claude-code/sonnet`, `claude-code/opus` or
+`claude-code/haiku` (per request, or as `REFUGIO_CHAT_MODEL`).
+
+**What Claude Code is allowed to do.** Nothing of its own. Its built-in tools are
+off (`--tools ""`); REFUGIO's system prompt replaces its own; the person's
+Claude Code settings, hooks, skills and MCP servers are not loaded
+(`--setting-sources ""`, `--strict-mcp-config`); it runs in an empty folder, so
+no `CLAUDE.md` is read; nothing is saved as a session. Its only tools are the
+ones REFUGIO offered for this turn, through `chat/claude-code-bridge.mjs`.
+
+**Who runs the tools.** REFUGIO does. The bridge does not execute anything: a
+tool call comes back out of `chatStream()` as a tool call, the turn runner runs
+it — `runTool`, the web arming check, the mode check, the tool budget, the
+Sources panel — and the result goes back to Claude Code on the next round.
+Claude Code is the model; REFUGIO stays the agent.
+
+**What leaves the machine, and how.** The conversation goes to Anthropic, under
+the person's own subscription. It goes to `claude` over stdin, never on the
+command line, because argv is readable by every user through `ps`. REFUGIO
+never sees, stores or asks for a Claude credential.
+
+**Consent.**
+- Off until `REFUGIO_CLAUDE_CODE=1`. A refused turn stores nothing.
+- Never in a discussion mode, switched on or not: a mode promises the
+  conversation stays on this computer.
+- Both rules are enforced in `streamTurn` before anything is written, and are
+  tested through the real server.
+
+**Signed out.** Claude Code 2.1.20, signed out or expired, retries the 401 for
+about twenty seconds and then ends with "Invalid API key · Please run /login"
+as an error result. The engine turns that — or sixty seconds of silence
+(`REFUGIO_CLAUDE_FIRST_EVENT_MS`) — into "open Terminal, run `claude`, and sign
+in". REFUGIO never offers the sign-in itself.
+
+**Verified.**
+- 16 tests (`test/claude-code.test.js`) against a fake `claude` that prints
+  Claude Code's stream-json and speaks real MCP to the bridge: flags, stdin-only
+  prompt, tool round trip in both event orders, the signed-out message, error
+  results, abort, an abandoned turn, and the server's consent rules.
+- Against the real `claude` 2.1.20 on this machine: the flags are accepted,
+  Claude Code starts the bridge and lists REFUGIO's tool through it within
+  ~120 ms, the signed-out case ends with the sign-in message, and no process is
+  left behind.
+- **Not yet verified: a signed-in turn.** This machine's Claude Code is signed
+  out. `node scripts/claude-code-probe.mjs` is the one-command check once it is
+  signed in: one short exchange and a fake reminders tool; no personal data.
+
+**Not built.** A Settings switch (with the web-search-style warning) in place
+of the environment variable; the models in the picker; anything for the MDM
+packages. Claude Code is a per-user install and sign-in, so a managed fleet
+would need its own answer.
+
+## 6. Cost of going further
 
 | Item | Cost |
 |---|---|
@@ -102,10 +157,11 @@ a fleet. It does not use pi-ai at all.
 | Product work | A key field in Settings (stored like the Notion token), a model picker that lists cloud models apart from local ones, and the same consent shape as web search: off by default, a warning that says what leaves the machine, and a mode never sends to the cloud. None of it is in this spike. |
 | LM Studio | Falls out almost free: it is an OpenAI-compatible server, so it is the Ollama `/v1` path with a different base URL. Closes `docs/gaps.md` §9. |
 
-## 6. Recommendation
+## 7. Recommendation
 
 Keep pi-ai **for API-key cloud models and LM Studio**, behind `engine.js`, with
 local Ollama staying on the native client until the eval has been rerun on the
 pi-ai path. If the main reason for cloud models is using a Claude
-subscription, build the Claude Code engine (§4) instead — it is the only
-permitted route, and it does not need pi-ai.
+subscription, the Claude Code engine (§5) is the only permitted route, and it
+does not need pi-ai. If the subscription is the reason, pi-ai can wait until an
+API-key or LM Studio user asks for it.
