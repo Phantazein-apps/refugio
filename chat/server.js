@@ -36,7 +36,10 @@ import {
   ownerEdition,
 } from "./modes.js";
 import { EDITION, PRODUCT } from "./edition.js";
-import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
+import { listModels, isUp, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
+// The model layer. Local models still default to the native Ollama client;
+// see engine.js for what REFUGIO_ENGINE_LIB=pi changes.
+import { chatStream, complete } from "./engine.js";
 import * as catalog from "./model-catalog.js";
 import {
   turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
