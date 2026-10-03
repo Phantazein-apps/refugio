@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// REFUGIO Installer — cross-platform, no Docker required
+// REFUGIO Installer — macOS only, no Docker required
 // Usage: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
-//    or: node install-node.cjs [--no-start] [--non-interactive] [--skip-owui] [directory]
+//    or: node install-node.cjs [--no-start] [--non-interactive] [directory]
 
-const { execSync, spawn } = require("child_process")
+const { execSync, execFileSync, spawn } = require("child_process")
 const fs = require("fs")
 const path = require("path")
 const os = require("os")
@@ -11,7 +11,6 @@ const readline = require("readline")
 
 // ── Helpers ──────────────────────────────────────────────────
 
-const isWin = os.platform() === "win32"
 const home = os.homedir()
 
 // ── Which product is being installed ─────────────────────────
@@ -37,9 +36,10 @@ const EDITION_BOOT = {
  *  `boot` until then. */
 let ED = { id: "standard", ...EDITION_BOOT.standard }
 
-// Resolved uv command. On Apple Silicon this may become an absolute path to a
-// native arm64 uv so we never build an x86_64 Python env (which lacks macOS
-// wheels for onnxruntime / cryptography). Set by installUV().
+// Resolved uv command — uv is here for MemPalace and nothing else. On Apple
+// Silicon this may become an absolute path to a native arm64 uv so we never
+// build an x86_64 Python env (which lacks macOS wheels for MemPalace's native
+// dependencies). Set by installUV().
 let UV = "uv"
 
 const C = process.stdout.isTTY ? {
@@ -53,7 +53,7 @@ function fail(msg) { console.log(`  ${C.red}✗${C.reset} ${msg}`) }
 
 function has(cmd) {
   try {
-    execSync(isWin ? `where ${cmd}` : `which ${cmd}`, { stdio: "ignore" })
+    execSync(`which ${cmd}`, { stdio: "ignore" })
     return true
   } catch { return false }
 }
@@ -79,7 +79,7 @@ function isX86Binary(bin) {
 }
 
 function whichCmd(cmd) {
-  try { return runQuiet(isWin ? `where ${cmd}` : `command -v ${cmd}`).split("\n")[0].trim() } catch { return "" }
+  try { return runQuiet(`command -v ${cmd}`).split("\n")[0].trim() } catch { return "" }
 }
 
 // The Python request for uv. On Apple Silicon we pin the ARCH explicitly so uv
@@ -145,15 +145,6 @@ async function confirm(question, defaultYes = false) {
 // notes — offered first) and BUSINESS (workplace systems — behind a single
 // opt-in gate). WhatsApp (Hermeneia) and email (Epistole) have their own setup
 // flows with a browser auth step, so they're not in these credential lists.
-
-const ACCOUNT_CONNECTOR = {
-  id: "account", name: "Your Account",
-  fields: [
-    { key: "OWUI_NAME", prompt: "Your display name" },
-    { key: "OWUI_EMAIL", prompt: "Your email address" },
-    { key: "OWUI_PASSWORD", prompt: "Set a password", secret: true, defaultVal: "changeme" }
-  ]
-}
 
 // Notion used to be prompted for here too. Same reasoning as the toggles
 // above: a secret token pasted into a terminal, with the help URL scrolling
@@ -237,7 +228,7 @@ async function promptGithubFields(env, existing) {
 }
 
 // ── macOS menu-bar app ───────────────────────────────────────
-// REFUGIO's stack (Ollama + model + Open WebUI) can hold GBs of RAM, and
+// REFUGIO's stack (Ollama + model + chat server) can hold GBs of RAM, and
 // without this the only way to stop it is a terminal — so the menu bar is how
 // a non-technical user reclaims their memory. The app already exists in
 // menubar/; it was just never installed for them.
@@ -246,16 +237,15 @@ async function promptGithubFields(env, existing) {
 // rather than failing the install or dragging the user through an Xcode
 // download mid-setup.
 function installMenuBarApp(targetDir) {
-  // The menu-bar app and the tray icons are REFUGIO's, and only REFUGIO's, for
-  // now. They are a Swift bundle and two scripts that hard-code the standard
-  // install's directory, port, log path and bundle identifier; building a
-  // second, differently-identified copy of them is real work with no way to
-  // test it from anywhere but a Mac, and shipping an untested one would give
-  // the Listener a menu-bar icon that starts and stops the other product.
-  // Everything the launchers actually do is available from the CLI this
-  // installer writes, which IS per-edition. See docs/editions.md.
+  // The menu-bar app is REFUGIO's, and only REFUGIO's, for now. It is a Swift
+  // bundle that hard-codes the standard install's directory, port, log path
+  // and bundle identifier; building a second, differently-identified copy is
+  // real work, and shipping an untested one would give the Listener a menu-bar
+  // icon that starts and stops the other product. Everything the menu bar
+  // actually does is available from the CLI this installer writes, which IS
+  // per-edition. See docs/editions.md.
   if (ED.id !== "standard") {
-    console.log(`  ${C.dim}Menu-bar and tray launchers are REFUGIO-only for now — use the`)
+    console.log(`  ${C.dim}The menu-bar app is REFUGIO-only for now — use the`)
     console.log(`    ${ED.cli} command (or "${startCommandName()}") to start and stop.${C.reset}`)
     return
   }
@@ -314,103 +304,11 @@ function installMenuBarApp(targetDir) {
   }
 }
 
-// ── Windows tray ─────────────────────────────────────────────
-// WinForms NotifyIcon ships with Windows, so the tray needs no dependency and
-// no build step. Writes a launcher .vbs (runs PowerShell with no console
-// window) plus a Startup shortcut, mirroring the macOS menu-bar app.
-function installWindowsTray(targetDir) {
-  // The menu-bar app and the tray icons are REFUGIO's, and only REFUGIO's, for
-  // now. They are a Swift bundle and two scripts that hard-code the standard
-  // install's directory, port, log path and bundle identifier; building a
-  // second, differently-identified copy of them is real work with no way to
-  // test it from anywhere but a Mac, and shipping an untested one would give
-  // the Listener a menu-bar icon that starts and stops the other product.
-  // Everything the launchers actually do is available from the CLI this
-  // installer writes, which IS per-edition. See docs/editions.md.
-  if (ED.id !== "standard") {
-    console.log(`  ${C.dim}Menu-bar and tray launchers are REFUGIO-only for now — use the`)
-    console.log(`    ${ED.cli} command (or "${startCommandName()}") to start and stop.${C.reset}`)
-    return
-  }
-  const ps1 = path.join(targetDir, "tray", "refugio-tray.ps1")
-  if (!fs.existsSync(ps1)) return
-
-  // .vbs wrapper: launching powershell.exe directly flashes a console window.
-  const vbs =
-    `Set s = CreateObject("Wscript.Shell")\r\n` +
-    `s.Run "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File ""${ps1}"" ` +
-    `-RefugioDir ""${targetDir}""", 0, False\r\n`
-  const vbsPath = path.join(targetDir, "REFUGIO Tray.vbs")
-  try { fs.writeFileSync(vbsPath, vbs) } catch { return }
-
-  // Start with Windows so the tray is there when the user needs it.
-  try {
-    const startup = path.join(home, "AppData", "Roaming", "Microsoft",
-      "Windows", "Start Menu", "Programs", "Startup")
-    if (fs.existsSync(startup)) {
-      fs.copyFileSync(vbsPath, path.join(startup, "REFUGIO Tray.vbs"))
-    }
-  } catch {}
-
-  try { execSync(`wscript "${vbsPath}"`, { stdio: "ignore" }) } catch {}
-  ok("Tray icon installed — look for REFUGIO near the clock")
-  console.log(`    ${C.dim}Use "Stop REFUGIO & Quit" there to free the memory it uses.${C.reset}`)
-}
-
-// ── Linux tray ───────────────────────────────────────────────
-// Linux has no universal tray API — GNOME needs the AppIndicator extension,
-// most other desktops work out of the box — so this drives `yad`, packaged
-// everywhere. Without yad the script prints install guidance and exits; the
-// `refugio` CLI is unaffected either way.
-function installLinuxTray(targetDir, appsDir) {
-  // The menu-bar app and the tray icons are REFUGIO's, and only REFUGIO's, for
-  // now. They are a Swift bundle and two scripts that hard-code the standard
-  // install's directory, port, log path and bundle identifier; building a
-  // second, differently-identified copy of them is real work with no way to
-  // test it from anywhere but a Mac, and shipping an untested one would give
-  // the Listener a menu-bar icon that starts and stops the other product.
-  // Everything the launchers actually do is available from the CLI this
-  // installer writes, which IS per-edition. See docs/editions.md.
-  if (ED.id !== "standard") {
-    console.log(`  ${C.dim}Menu-bar and tray launchers are REFUGIO-only for now — use the`)
-    console.log(`    ${ED.cli} command (or "${startCommandName()}") to start and stop.${C.reset}`)
-    return
-  }
-  const sh = path.join(targetDir, "tray", "refugio-tray.sh")
-  if (!fs.existsSync(sh)) return
-  try { fs.chmodSync(sh, 0o755) } catch {}
-
-  const entry =
-    `[Desktop Entry]\nType=Application\nName=REFUGIO Tray\n` +
-    `Comment=Start, stop and open REFUGIO from the system tray\n` +
-    `Exec="${sh}"\nIcon=${path.join(targetDir, "branding", "favicon.png")}\n` +
-    `Terminal=false\nCategories=Utility;\nX-GNOME-Autostart-enabled=true\n`
-  try { fs.writeFileSync(path.join(appsDir, "refugio-tray.desktop"), entry) } catch {}
-
-  const autostart = path.join(home, ".config", "autostart")
-  try {
-    fs.mkdirSync(autostart, { recursive: true })
-    fs.writeFileSync(path.join(autostart, "refugio-tray.desktop"), entry)
-  } catch {}
-
-  if (has("yad")) {
-    try { execSync(`setsid "${sh}" >/dev/null 2>&1 &`, { stdio: "ignore", shell: "/bin/bash" }) } catch {}
-    ok("Tray icon installed — look for REFUGIO in your system tray")
-    console.log(`    ${C.dim}Use "Stop REFUGIO & Quit" there to free the memory it uses.${C.reset}`)
-  } else {
-    console.log(`  ${C.dim}Tray icon set up, but it needs 'yad' to show:`)
-    console.log(`    Debian/Ubuntu: sudo apt install yad   ·   Fedora: sudo dnf install yad`)
-    console.log(`    (GNOME also needs the AppIndicator extension.)`)
-    console.log(`    REFUGIO works without it: 'refugio' to start, 'refugio stop' to free RAM.${C.reset}`)
-  }
-}
-
 // ── Personal connector: WhatsApp via Hermeneia ───────────────
 // Hermeneia (github.com/Phantazein-apps/hermeneia) is a local WhatsApp MCP
 // server and REFUGIO's flagship personal connector. Its bridge is pure Go
-// (no CGO), so it runs on macOS (Apple Silicon + Intel), Linux (x64/arm64),
-// and Windows — which is exactly what lets a headless Linux REFUGIO host talk
-// to WhatsApp. "Install" is a shallow clone (which carries the Node bundle,
+// (no CGO) and published prebuilt for both Apple Silicon and Intel Macs.
+// "Install" is a shallow clone (which carries the Node bundle,
 // dist/index.js) plus fetching the matching prebuilt bridge binary from the
 // latest release. Auth is a QR scan: running the server exposes a QR page and
 // its local status API reports when the phone has linked.
@@ -446,26 +344,21 @@ function checkoutHermeneiaVersion(dir) {
   }
 }
 
-// Map this machine to the bridge binary Hermeneia publishes, using the SAME
-// naming its dist/bridge.ts resolver expects (win32→windows, x64→amd64).
-// Returns null for a platform/arch combination Hermeneia doesn't build for.
+// Map this Mac to the bridge binary Hermeneia publishes, using the SAME
+// naming its dist/bridge.ts resolver expects (x64→amd64).
+// Returns null for an architecture Hermeneia doesn't build for.
 function hermeneiaBridgeTarget() {
-  const goos = os.platform() === "win32" ? "windows" : os.platform() // darwin | linux | windows
   const arch = os.arch() // 'x64' | 'arm64' | ...
   const goarch = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : null
   if (!goarch) return null
-  const supported = new Set(["darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64", "windows-amd64"])
-  if (!supported.has(`${goos}-${goarch}`)) return null
-  return { goos, goarch, ext: goos === "windows" ? ".exe" : "" }
+  return { goos: "darwin", goarch, ext: "" }
 }
 
-// Hermeneia's per-platform data directory (mirrors its src/index.ts getDataDir),
+// Hermeneia's data directory on macOS (mirrors its src/index.ts getDataDir),
 // used to detect whether a WhatsApp account has already been linked.
 function hermeneiaDataDir() {
   if (process.env.HERMENEIA_DATA_DIR) return process.env.HERMENEIA_DATA_DIR
-  if (os.platform() === "darwin") return path.join(home, "Library", "Application Support", "Hermeneia")
-  if (os.platform() === "win32") return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Hermeneia")
-  return path.join(home, ".hermeneia")
+  return path.join(home, "Library", "Application Support", "Hermeneia")
 }
 
 // Ensure the Go bridge binary exists in the checkout's dist/. The binary is no
@@ -475,7 +368,7 @@ function hermeneiaDataDir() {
 function ensureHermeneiaBridge(dir) {
   const target = hermeneiaBridgeTarget()
   if (!target) {
-    warn(`No prebuilt WhatsApp bridge for this platform (${os.platform()}/${os.arch()}).`)
+    warn(`No prebuilt WhatsApp bridge for this Mac's architecture (${os.arch()}).`)
     return false
   }
   const { goos, goarch, ext } = target
@@ -492,7 +385,7 @@ function ensureHermeneiaBridge(dir) {
   try {
     execSync(`curl -fsSL -o "${tmp}" "${url}"`, { stdio: "ignore", shell: true })
     execSync(`tar xzf "${tmp}" -C "${distDir}"`, { stdio: "ignore", shell: true })
-    if (!isWin) { try { fs.chmodSync(binPath, 0o755) } catch {} }
+    try { fs.chmodSync(binPath, 0o755) } catch {}
     try { fs.unlinkSync(tmp) } catch {}
   } catch (e) {
     try { fs.unlinkSync(tmp) } catch {}
@@ -595,10 +488,10 @@ async function hermeneiaQRAuth(dir) {
 
 async function setupHermeneia(env, existing, { link = true } = {}) {
   // Hermeneia is REFUGIO's flagship personal connector and runs anywhere a
-  // prebuilt bridge exists: macOS (Apple Silicon + Intel), Linux (x64/arm64),
-  // Windows (x64). Only bail on a platform with no bridge at all.
+  // prebuilt bridge exists — Apple Silicon and Intel Macs. Only bail on an
+  // architecture with no bridge at all.
   if (!hermeneiaBridgeTarget()) {
-    console.log(`    ${C.dim}WhatsApp (Hermeneia) has no prebuilt bridge for ${os.platform()}/${os.arch()} — not offered on this machine.${C.reset}\n`)
+    console.log(`    ${C.dim}WhatsApp (Hermeneia) has no prebuilt bridge for ${os.arch()} — not offered on this machine.${C.reset}\n`)
     return
   }
 
@@ -749,7 +642,6 @@ async function setupEpistole(env, existing, targetDir) {
 // ── LLM engine ───────────────────────────────────────────────
 
 const OLLAMA_URL = "http://localhost:11434"
-const LMSTUDIO_URL = "http://localhost:1234/v1"
 
 // Pick an Ollama model sized to the machine's RAM.
 //
@@ -758,9 +650,9 @@ const LMSTUDIO_URL = "http://localhost:1234/v1"
 // local chat apps we aren't trying to replace. The old ladder handed 8 GB
 // machines llama3.2:1b — which can't — under a comment claiming they all could.
 //
-// The 3B floor became affordable on 8 GB by dropping Open WebUI: OWUI held
-// 0.7-1.5 GB, the built-in chat UI holds ~50 MB. That reclaimed space is spent
-// here, on a model that can actually do the job.
+// The 3B floor is affordable on 8 GB because the chat window holds ~50 MB —
+// the browser interface REFUGIO used to ship held 0.7-1.5 GB. That reclaimed
+// space is spent here, on a model that can actually do the job.
 function pickModelForRam() {
   const gb = os.totalmem() / (1024 ** 3)
   if (gb <= 10) return "qwen2.5:3b"     // ~2.6 GB — the tool-calling floor
@@ -784,15 +676,14 @@ function pickModelForRam() {
  *   - enough RAM, none free now → closing apps genuinely fixes this; say how much
  *
  * Runs after clone (mem-fit.cjs is the single source of truth for the floor) but
- * before Open WebUI and the model download, which are the expensive parts.
+ * before the model download, which is the expensive part.
  * Returns true to continue.
  */
 function checkMachineSupported(targetDir, flags) {
   let memFit
   try { memFit = require(path.join(targetDir, "scripts", "mem-fit.cjs")) } catch { return true }
 
-  // The built-in chat UI is what we install now, so size against its ~50 MB
-  // rather than Open WebUI's 0.7-1.5 GB.
+  // The chat window is the whole interface, so size against its ~50 MB.
   const s = memFit.machineSupport({ uiGb: 0.05 })
   if (s.supported) return true
 
@@ -825,8 +716,9 @@ function checkMachineSupported(targetDir, flags) {
   return false
 }
 
-// On low-RAM machines REFUGIO doesn't auto-start on login (Open WebUI would sit
-// resident ~0.6 GB all day); the user launches it on demand instead.
+// On low-RAM machines REFUGIO doesn't auto-start on login (its supervisor and
+// connectors would sit resident in scarce RAM all day); the user launches it
+// on demand instead.
 const isLowRam = () => os.totalmem() / (1024 ** 3) <= 8
 
 // Probe an HTTP endpoint — resolves true on any response within the timeout
@@ -943,30 +835,11 @@ function standDown(other) {
   const agentLabel = row?.agentLabel || "com.phantazein.refugio"
   const logDir = path.join(home, row?.logDir || ".refugio-logs")
   const macApp = row?.macApp || "REFUGIO.app"
-  const cli = row?.cli || "refugio"
 
-  if (os.platform() === "darwin") {
-    const plist = path.join(home, "Library", "LaunchAgents", `${agentLabel}.plist`)
-    try { execSync(`launchctl bootout gui/$(id -u) "${plist}"`, { stdio: "ignore" }) } catch {}
-    try { if (fs.existsSync(plist)) fs.unlinkSync(plist) } catch {}
-    try { execSync(`pkill -f "${macApp}/Contents/MacOS/RefugioBar"`, { stdio: "ignore" }) } catch {}
-  } else if (os.platform() === "linux") {
-    const unit = `${cli}.service`
-    try { execSync(`systemctl --user disable --now ${unit}`, { stdio: "ignore" }) } catch {}
-    try { fs.unlinkSync(path.join(home, ".config", "systemd", "user", unit)) } catch {}
-    try { execSync("systemctl --user daemon-reload", { stdio: "ignore" }) } catch {}
-    for (const d of [path.join(home, ".config", "autostart"), path.join(home, ".local", "share", "applications")]) {
-      for (const f of [`${cli}.desktop`, `${cli}-tray.desktop`]) {
-        try { fs.unlinkSync(path.join(d, f)) } catch {}
-      }
-    }
-  } else if (isWin) {
-    const startup = path.join(home, "AppData", "Roaming", "Microsoft", "Windows",
-      "Start Menu", "Programs", "Startup")
-    for (const f of [`${other.product}.vbs`, "REFUGIO.vbs", `${other.product} Tray.vbs`, "REFUGIO Tray.vbs"]) {
-      try { fs.unlinkSync(path.join(startup, f)) } catch {}
-    }
-  }
+  const plist = path.join(home, "Library", "LaunchAgents", `${agentLabel}.plist`)
+  try { execSync(`launchctl bootout gui/$(id -u) "${plist}"`, { stdio: "ignore" }) } catch {}
+  try { if (fs.existsSync(plist)) fs.unlinkSync(plist) } catch {}
+  try { execSync(`pkill -f "${macApp}/Contents/MacOS/RefugioBar"`, { stdio: "ignore" }) } catch {}
 
   // Then the running supervisor, by the pid it wrote down.
   try {
@@ -1050,13 +923,15 @@ ${body}`)
 
 // ── Phase 2: Check Dependencies ──────────────────────────────
 
+// uv is how MemPalace (local semantic memory) is installed — `uv tool install
+// mempalace` — and that is the only thing REFUGIO uses it for.
 function installUV() {
   const appleSilicon = isAppleSilicon()
 
   // On Apple Silicon, REFUGIO needs an ARM64 uv. Common trap: an Intel Homebrew
   // under Rosetta supplies an x86_64 uv, which builds an x86_64 Python env that
-  // has NO macOS wheels for onnxruntime (Open WebUI) or cryptography (mcpo) — so
-  // the install fails. Detect that and install a native arm64 uv instead.
+  // lacks macOS wheels for MemPalace's native dependencies — so the install
+  // fails. Detect that and install a native arm64 uv instead.
   if (has("uv")) {
     const p = whichCmd("uv")
     const needArm = appleSilicon && isX86Binary(p) && !p.includes("/.local/bin/")
@@ -1071,12 +946,7 @@ function installUV() {
   }
 
   try {
-    if (isWin) {
-      run("powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\"", { shell: true })
-      // Refresh PATH
-      const newPath = execSync("cmd /c echo %PATH%", { encoding: "utf-8" }).trim()
-      process.env.PATH = newPath
-    } else if (appleSilicon) {
+    if (appleSilicon) {
       // Force the installer to run arm64 even when invoked from an x86_64 (Rosetta)
       // node, so it fetches the arm64 uv build.
       run("arch -arm64 /bin/sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'", { shell: true })
@@ -1084,6 +954,7 @@ function installUV() {
       if (fs.existsSync(armUv)) UV = armUv
       process.env.PATH = `${home}/.local/bin:${process.env.PATH}`
     } else {
+      // Intel Mac: the plain installer already fetches the right (x86_64) build.
       run("curl -LsSf https://astral.sh/uv/install.sh | sh", { shell: true })
       // uv installs to ~/.local/bin (or ~/.cargo/bin)
       process.env.PATH = `${home}/.local/bin:${home}/.cargo/bin:${process.env.PATH}`
@@ -1093,7 +964,7 @@ function installUV() {
     const ver = runQuiet(`${uvCmd} --version`)
     if (ver) {
       if (appleSilicon && UV !== "uv" && isX86Binary(UV)) {
-        warn("uv still reports x86_64 — Open WebUI / MCPO wheels may not resolve")
+        warn("uv still reports x86_64 — MemPalace's wheels may not resolve")
       }
       ok(`uv installed (${ver})`)
       return true
@@ -1126,7 +997,8 @@ function checkDeps() {
     process.exit(1)
   }
 
-  // uv (installs if needed — handles Python automatically)
+  // uv (installs if needed — handles Python automatically). Only MemPalace
+  // needs it; without it, everything else installs and memory is skipped.
   const hasUV = installUV()
 
   console.log("")
@@ -1138,95 +1010,28 @@ function checkDeps() {
 async function preflight(targetDir) {
   let issues = false
 
-  // Check for Docker containers running Open WebUI or REFUGIO (old install method)
-  if (has("docker")) {
-    try {
-      // Check both running and stopped containers
-      const running = runQuiet("docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null") || ""
-      const stopped = runQuiet("docker ps -a --filter status=exited --format '{{.Names}}' 2>/dev/null") || ""
-      const allContainers = [...running.split("\n"), ...stopped.split("\n")]
-        .filter(line => line && /open.?webui|refugio|8080/i.test(line))
-        .map(line => line.split(" ")[0])
-        .filter((name, i, arr) => name && arr.indexOf(name) === i)  // dedupe
-
-      if (allContainers.length > 0) {
-        warn("Found Docker containers from a previous install:")
-        allContainers.forEach(c => console.log(`    ${C.dim}${c}${C.reset}`))
-        console.log(`    ${C.dim}REFUGIO runs natively — Docker is no longer needed.${C.reset}`)
-        const stop = await confirm("Remove these Docker containers?", true)
-        if (stop) {
-          for (const name of allContainers) {
-            try {
-              runQuiet(`docker stop ${name} 2>/dev/null`)
-              runQuiet(`docker rm ${name} 2>/dev/null`)
-              ok(`Removed container: ${name}`)
-            } catch {}
-          }
-          // Clean up Docker images too
-          try {
-            runQuiet("docker image rm ghcr.io/open-webui/open-webui:main 2>/dev/null")
-            runQuiet("docker image rm ghcr.io/open-webui/open-webui:latest 2>/dev/null")
-            ok("Removed old Docker images")
-          } catch {}
-        } else {
-          warn("Docker containers left — port 8080 may conflict")
-          issues = true
-        }
-      }
-    } catch {}
-
-    // Clean up old Docker data directory
-    const oldDataDir = path.join(home, "open-webui-data")
-    if (fs.existsSync(oldDataDir)) {
-      warn("Found old Docker data directory: ~/open-webui-data/")
-      console.log(`    ${C.dim}This was used by a Docker-based install. The new install stores data differently.${C.reset}`)
-      const remove = await confirm("Remove ~/open-webui-data/?", true)
-      if (remove) {
-        try {
-          fs.rmSync(oldDataDir, { recursive: true, force: true })
-          ok("Removed ~/open-webui-data/")
-        } catch (e) {
-          warn(`Could not remove: ${e.message}`)
-        }
-      }
-    }
-  }
-
-  // Migrate from a previous IBEX install (REFUGIO's predecessor): stop/disable its
-  // auto-start service FIRST, so it isn't respawning its own Open WebUI on :8080
-  // (otherwise the refugio hostname shows the IBEX login screen). Must run before
-  // the port check below — killing :8080 is futile while IBEX's KeepAlive respawns.
+  // Migrate from a previous IBEX install (REFUGIO's predecessor): stop/disable
+  // its auto-start service so a leftover IBEX supervisor isn't respawning
+  // beside REFUGIO every time it is killed.
   cleanupLegacyIbex()
 
-  // Is the port we are about to use already taken?
-  //
-  // This checked 8080 unconditionally — Open WebUI's port, which the default
-  // install no longer uses. So it offered to kill a process over a port that
-  // did not matter, while never checking 8090, the one that does. A question
-  // about the wrong port is worse than no question: it teaches people to say
-  // yes to killing processes the installer has no business touching.
-  const wantsOwuiPort = process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1"
-  const uiPort = wantsOwuiPort ? 8080 : parseInt(process.env.REFUGIO_CHAT_PORT || String(ED.chatPort), 10)
+  // Is the port we are about to use already taken? Only the chat window's —
+  // the one port this install serves on. A question about any other port is
+  // worse than no question: it teaches people to say yes to killing processes
+  // the installer has no business touching.
+  const uiPort = parseInt(process.env.REFUGIO_CHAT_PORT || String(ED.chatPort), 10)
   try {
-    const portCheck = isWin
-      ? runQuiet(`netstat -ano | findstr :${uiPort} | findstr LISTENING`)
-      : runQuiet(`lsof -iTCP:${uiPort} -sTCP:LISTEN -t 2>/dev/null`)
+    const portCheck = runQuiet(`lsof -iTCP:${uiPort} -sTCP:LISTEN -t 2>/dev/null`)
     if (portCheck) {
       warn(`Port ${uiPort} is already in use`)
-      if (!isWin) {
-        try {
-          const procInfo = runQuiet(`ps -p ${portCheck.split("\n")[0]} -o comm= 2>/dev/null`)
-          console.log(`    ${C.dim}Process: ${procInfo} (PID ${portCheck.split("\n")[0]})${C.reset}`)
-        } catch {}
-      }
+      try {
+        const procInfo = runQuiet(`ps -p ${portCheck.split("\n")[0]} -o comm= 2>/dev/null`)
+        console.log(`    ${C.dim}Process: ${procInfo} (PID ${portCheck.split("\n")[0]})${C.reset}`)
+      } catch {}
       const killIt = await confirm(`Kill the process using port ${uiPort}?`, true)
       if (killIt) {
         try {
-          if (isWin) {
-            run(`for /f "tokens=5" %a in ('netstat -ano ^| findstr :${uiPort} ^| findstr LISTENING') do taskkill /PID %a /F`, { shell: true, stdio: "ignore" })
-          } else {
-            run(`lsof -iTCP:${uiPort} -sTCP:LISTEN -t | xargs kill`, { shell: true, stdio: "ignore" })
-          }
+          run(`lsof -iTCP:${uiPort} -sTCP:LISTEN -t | xargs kill`, { shell: true, stdio: "ignore" })
           ok(`Freed port ${uiPort}`)
         } catch {}
       } else {
@@ -1237,16 +1042,16 @@ async function preflight(targetDir) {
     // Port is free — good
   }
 
-  // Unload existing launchd/systemd service (will be re-created after install)
-  if (os.platform() === "darwin") {
-    const plistPath = path.join(home, "Library", "LaunchAgents", "com.phantazein.refugio.plist")
-    if (fs.existsSync(plistPath)) {
-      try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
-      try { execSync(`launchctl unload "${plistPath}"`, { stdio: "ignore" }) } catch {}
-    }
-  } else if (os.platform() === "linux") {
-    try { execSync("systemctl --user stop refugio.service", { stdio: "ignore" }) } catch {}
+  // Unload the existing launchd job (it is re-created after install)
+  const plistPath = path.join(home, "Library", "LaunchAgents", "com.phantazein.refugio.plist")
+  if (fs.existsSync(plistPath)) {
+    try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
+    try { execSync(`launchctl unload "${plistPath}"`, { stdio: "ignore" }) } catch {}
   }
+
+  // After the launchd job is gone, so the old supervisor cannot start Caddy
+  // again behind this step's back.
+  cleanupLegacyDomain(targetDir)
 
   if (issues) {
     const cont = await confirm("Continue with install anyway?", true)
@@ -1254,6 +1059,49 @@ async function preflight(targetDir) {
       console.log("\n  Install cancelled.\n")
       process.exit(0)
     }
+  }
+}
+
+// ── Migration: the retired https://refugio domain and MCPO ───
+// Earlier installs served the window at https://refugio through Caddy, with a
+// mkcert certificate in certs/ and a Caddyfile beside the code, and could put
+// the MCPO proxy on PATH for Open WebUI. The window is now only ever at
+// http://127.0.0.1:<chat port>, so a Caddy left running is a proxy to nothing
+// that still holds :443, and mcpo is a tool nothing starts.
+//
+// Every step is best-effort and silent about absence, so running this on a
+// machine that never had any of it — or already migrated — does nothing.
+// /etc/hosts is deliberately NOT edited: that needs an admin password, and a
+// stale `127.0.0.1 refugio` line points nowhere harmful. One line says so.
+function cleanupLegacyDomain(targetDir) {
+  const certsDir = path.join(targetDir, "certs")
+  const caddyFile = path.join(targetDir, "Caddyfile")
+  if (fs.existsSync(certsDir) || fs.existsSync(caddyFile)) {
+    // Only stop a Caddy that is running OUR Caddyfile. `caddy stop` talks to
+    // whichever Caddy owns the admin port, and someone who runs their own
+    // would not thank an installer for stopping it.
+    let ours = false
+    // execFileSync, not a shell: a `sh -c "pgrep -f <path>"` carries the path
+    // in its own command line and would find itself.
+    try { ours = !!execFileSync("pgrep", ["-f", caddyFile], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim() } catch {}
+    const caddyBin = ["/opt/homebrew/bin/caddy", "/usr/local/bin/caddy"]
+      .find(p => fs.existsSync(p)) || (has("caddy") ? "caddy" : null)
+    if (ours && caddyBin) {
+      try { execSync(`"${caddyBin}" stop`, { stdio: "ignore" }) } catch {}
+    }
+    try { fs.rmSync(certsDir, { recursive: true, force: true }) } catch {}
+    try { fs.rmSync(caddyFile, { force: true }) } catch {}
+    ok("Removed the old https://refugio setup (Caddy) — the window is now at " +
+      `http://127.0.0.1:${ED.chatPort}`)
+    let hostsLine = true
+    try { hostsLine = /^\s*127\.0\.0\.1\s+refugio\s*$/m.test(fs.readFileSync("/etc/hosts", "utf-8")) } catch {}
+    if (hostsLine) {
+      console.log(`    ${C.dim}You may remove the "127.0.0.1 refugio" line from /etc/hosts — nothing uses it now.${C.reset}`)
+    }
+  }
+
+  if (fs.existsSync(path.join(home, ".local", "bin", "mcpo"))) {
+    try { execSync(`"${UV}" tool uninstall mcpo`, { stdio: "ignore" }) } catch {}
   }
 }
 
@@ -1315,8 +1163,7 @@ function readEnvFile(envPath) {
 
 function writeEnvFile(envPath, env) {
   const sections = [
-    { header: "LLM Engine", keys: ["REFUGIO_ENGINE", "OLLAMA_BASE_URL", "OPENAI_API_BASE_URL", "OPENAI_API_KEY", "REFUGIO_MODEL"] },
-    { header: "Your Account", keys: ["OWUI_NAME", "OWUI_EMAIL", "OWUI_PASSWORD"] },
+    { header: "LLM Engine", keys: ["REFUGIO_ENGINE", "OLLAMA_BASE_URL", "REFUGIO_MODEL"] },
     { header: "WhatsApp (Hermeneia)", keys: ["HERMENEIA_DIR"] },
     { header: "Email (Epistole)", keys: ["EPISTOLE_URL"] },
     { header: "Apple Reminders / Things 3 / Notes", keys: ["REFUGIO_REMINDERS", "REFUGIO_THINGS", "REFUGIO_NOTES"] },
@@ -1344,13 +1191,6 @@ function writeEnvFile(envPath, env) {
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
-
-  if (isWin) {
-    try {
-      const username = os.userInfo().username
-      execSync(`icacls "${envPath}" /inheritance:r /grant:r "${username}:(R,W)"`, { stdio: "ignore" })
-    } catch {}
-  }
 }
 
 // ── Phase 5: Interactive Credential Setup ────────────────────
@@ -1381,7 +1221,7 @@ async function promptCredentials(envPath, targetDir) {
         return
       }
     } else {
-      const shouldConfigure = await confirm(`Configure ${conn.name}?`, conn.id === "account")
+      const shouldConfigure = await confirm(`Configure ${conn.name}?`, false)
       if (!shouldConfigure) {
         console.log("")
         return
@@ -1409,60 +1249,33 @@ async function promptCredentials(envPath, targetDir) {
 
   // Not a question any more. Almost everyone wants Ollama — it is the one this
   // installs and manages for you — and asking made the choice look consequential
-  // to people who had never heard of either. LM Studio is for someone who
-  // already runs it and knows they do:
+  // to people who had never heard of it. The one alternative is none at all:
   //
-  //   REFUGIO_ENGINE=lmstudio   use LM Studio's local server on :1234
   //   REFUGIO_ENGINE=none       set a backend up later, by hand
   //
   // An existing ~/.refugio.env wins over the default, so reinstalling never
   // silently moves someone off the engine they chose last time.
-  const engine = (process.env.REFUGIO_ENGINE || existing.REFUGIO_ENGINE || "ollama").toLowerCase()
-  const llmChoice = engine === "lmstudio" ? "2" : engine === "none" || engine === "skip" ? "3" : "1"
+  let engine = (process.env.REFUGIO_ENGINE || existing.REFUGIO_ENGINE || "ollama").toLowerCase()
 
-  // LM Studio is a GUI app we can't auto-install, so we connect to its local
-  // server (OpenAI-compatible on :1234). Probed only when it is the choice, or
-  // to mention it to someone who is evidently already running it.
-  const lmStudioUp = await probeHttp(`${LMSTUDIO_URL}/models`)
-  if (llmChoice === "1" && lmStudioUp) {
-    console.log(`    ${C.dim}LM Studio is running on :1234. REFUGIO uses Ollama by default —`)
-    console.log(`    re-run with REFUGIO_ENGINE=lmstudio to use LM Studio instead.${C.reset}`)
+  // LM Studio used to be the other choice, and a credentials file or a script
+  // from back then can still name it. Say so once and carry on with Ollama:
+  // stopping the install over a choice that no longer exists helps nobody, and
+  // quietly ignoring it would leave them wondering why LM Studio isn't used.
+  if (engine === "lmstudio") {
+    warn("LM Studio is no longer supported — continuing with Ollama.")
+    engine = "ollama"
   }
 
-  if (llmChoice === "2") {
-    env.OPENAI_API_BASE_URL = LMSTUDIO_URL
-    env.OPENAI_API_KEY = "lm-studio"
-    delete env.OLLAMA_BASE_URL
-    delete env.REFUGIO_MODEL
-    env.REFUGIO_ENGINE = "lmstudio"
-    if (!lmStudioUp) {
-      warn("LM Studio server not detected on http://localhost:1234")
-      warn("In LM Studio: load a model → Developer tab → Start Server (port 1234)")
-      warn("REFUGIO will use it automatically once it's running")
-    }
-    ok("Using LM Studio (http://localhost:1234)")
-  } else if (llmChoice === "3") {
+  if (engine === "none" || engine === "skip") {
     env.REFUGIO_ENGINE = ""
     ok(`Skipping LLM engine — configure later in ~/${ED.envFile}`)
   } else {
     env.OLLAMA_BASE_URL = OLLAMA_URL
     env.REFUGIO_ENGINE = "ollama"
     env.REFUGIO_MODEL = env.REFUGIO_MODEL || pickModelForRam()
-    // Clear any stale OpenAI-style backend
-    delete env.OPENAI_API_BASE_URL
-    delete env.OPENAI_API_KEY
     ok(`Using local Ollama — model: ${env.REFUGIO_MODEL} (sized to ${Math.round(os.totalmem() / (1024 ** 3))} GB RAM)`)
   }
   console.log("")
-
-  // Open WebUI's login, and nothing else — the chat window binds to loopback
-  // and has no accounts. Asking everyone to invent a password for a product
-  // they are not installing is a question with no consequence, which teaches
-  // people to answer the rest of the installer without reading it.
-  if (process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1") {
-    console.log(`  ${C.dim}Open WebUI needs a login — the chat window does not.${C.reset}`)
-    await promptConnector(ACCOUNT_CONNECTOR)
-  }
 
   // ── Personal connectors ───────────────────────────────────
   //
@@ -1549,70 +1362,10 @@ async function promptCredentials(envPath, targetDir) {
   return env
 }
 
-// ── Phase 6: Open WebUI Setup ────────────────────────────────
-
-async function setupOpenWebUI(targetDir) {
-  if (!has("uv")) {
-    // Open WebUI is the REFUGIO interface — skipping it leaves the user with a
-    // supervisor that starts, opens no browser, and has no chat window. Make
-    // that consequence explicit rather than a one-line "skipping" notice.
-    warn("Open WebUI SKIPPED — 'uv' is not installed.")
-    console.log(`    ${C.dim}Open WebUI is the REFUGIO window. Without it, REFUGIO starts but has no`)
-    console.log(`    chat interface and nothing opens in your browser.`)
-    console.log(`    Install uv, then re-run this installer:${C.reset}`)
-    console.log(`      ${C.bold}curl -LsSf https://astral.sh/uv/install.sh | sh${C.reset}   ${C.dim}(macOS / Linux)${C.reset}`)
-    console.log("")
-    return
-  }
-
-  console.log(`${C.bold}Installing Open WebUI...${C.reset}\n`)
-
-  // Genuine Intel Macs: onnxruntime (an Open WebUI dependency) no longer ships
-  // x86_64 macOS wheels, so the native install can't resolve. Warn up front.
-  if (os.platform() === "darwin" && !isAppleSilicon()) {
-    warn("Intel macOS detected — Open WebUI's onnxruntime dependency has no Intel-mac wheels.")
-    warn("If the install below fails, use an Apple Silicon Mac, Linux, or Windows.")
-  }
-
-  const appDir = path.join(targetDir, "app")
-  const envDir = path.join(appDir, "env")
-  if (!fs.existsSync(appDir)) fs.mkdirSync(appDir, { recursive: true })
-
-  try {
-    // uv downloads the right Python automatically — no system Python needed
-    run(`"${UV}" venv "${envDir}" --python ${pyArg()} --clear`, { cwd: appDir })
-    const activate = isWin
-      ? `call "${path.join(envDir, "Scripts", "activate.bat")}"`
-      : `source "${path.join(envDir, "bin", "activate")}"`
-    run(`${activate} && "${UV}" pip install "open-webui==0.8.12" itsdangerous`, {
-      cwd: appDir, shell: true
-    })
-    ok("Open WebUI installed")
-  } catch (err) {
-    warn(`Open WebUI install failed: ${err.message}`)
-    warn(`You can install it manually later: "${UV}" pip install open-webui`)
-  }
-
-  // Install MCPO (MCP-to-OpenAPI proxy) for reliable tool integration
-  try {
-    run(`"${UV}" tool install mcpo --python ${pyArg()} --force`, { shell: true })
-    ok("MCPO proxy installed")
-  } catch {}
-  console.log("")
-}
-
 // ── Phase 7: Start & Open Browser ────────────────────────────
 
 function openBrowser(url) {
-  try {
-    if (os.platform() === "darwin") {
-      execSync(`open "${url}"`, { stdio: "ignore" })
-    } else if (isWin) {
-      execSync(`start "" "${url}"`, { stdio: "ignore" })
-    } else {
-      execSync(`xdg-open "${url}"`, { stdio: "ignore" })
-    }
-  } catch {}
+  try { execSync(`open "${url}"`, { stdio: "ignore" }) } catch {}
 }
 
 async function waitForServer(url, maxWait = 60000) {
@@ -1633,115 +1386,7 @@ async function waitForServer(url, maxWait = 60000) {
   return false
 }
 
-function findOwuiStaticDir(targetDir) {
-  // Find Open WebUI's static directory inside the venv
-  const envLib = path.join(targetDir, "app", "env", "lib")
-  if (!fs.existsSync(envLib)) return null
-  try {
-    const pyDirs = fs.readdirSync(envLib).filter(d => d.startsWith("python"))
-    for (const pyDir of pyDirs) {
-      const staticDir = path.join(envLib, pyDir, "site-packages", "open_webui", "static")
-      if (fs.existsSync(staticDir)) return staticDir
-    }
-  } catch {}
-  return null
-}
-
-async function setupLocalDomain(targetDir, port, fallbackUrl) {
-  // Modern browsers resolve *.localhost to 127.0.0.1 automatically
-  // No hosts file, no admin password, no extra software needed
-  const localhostUrl = `http://refugio.localhost:${port}`
-
-  if (isWin) {
-    // Windows browsers don't support *.localhost reliably
-    return fallbackUrl
-  }
-
-  // Check if https://refugio was previously configured (mkcert + caddy)
-  const certsDir = path.join(targetDir, "certs")
-  const certFile = path.join(certsDir, "refugio.pem")
-  const keyFile = path.join(certsDir, "refugio-key.pem")
-  const caddyFile = path.join(targetDir, "Caddyfile")
-
-  const hasHttpsDomain = fs.existsSync(certFile) && has("caddy") &&
-    (() => { try { return runQuiet("cat /etc/hosts").includes("127.0.0.1 refugio") } catch { return false } })()
-
-  if (hasHttpsDomain) {
-    // Restore existing https://refugio setup
-    fs.writeFileSync(caddyFile, `https://refugio {\n    tls ${certFile} ${keyFile}\n    reverse_proxy localhost:${port}\n}\n`)
-    try {
-      try { run("caddy stop", { stdio: "ignore" }) } catch {}
-      run(`caddy start --config "${caddyFile}"`, { stdio: "ignore" })
-      ok("https://refugio restored")
-      return "https://refugio"
-    } catch {}
-  }
-
-  // https://refugio is set up automatically. It used to be a question, and a
-  // question is the wrong shape for this: everything it needs can be attempted
-  // and every failure has a working fallback, so the only thing asking bought
-  // was the chance to say no to something you wanted.
-  //
-  // REFUGIO_DOMAIN=0 opts out — for a headless box, or anyone who would rather
-  // not have a hosts entry.
-  ok(`Available at ${localhostUrl}`)
-  if (process.env.REFUGIO_DOMAIN === "0") return localhostUrl
-  console.log(`  ${C.dim}Setting up https://refugio — this needs your admin password once.${C.reset}`)
-
-  // Install mkcert and caddy
-  if (os.platform() === "darwin" && has("brew")) {
-    if (!has("mkcert")) { ok("Installing mkcert..."); try { run("brew install mkcert", { stdio: "ignore" }) } catch {} }
-    if (!has("caddy")) { ok("Installing caddy..."); try { run("brew install caddy", { stdio: "ignore" }) } catch {} }
-    try { run("brew list nss 2>/dev/null || brew install nss", { shell: true, stdio: "ignore" }) } catch {}
-  } else if (os.platform() === "linux") {
-    if (!has("mkcert")) { try { run("sudo apt-get install -y mkcert 2>/dev/null || sudo snap install mkcert", { shell: true, stdio: "ignore" }) } catch {} }
-    if (!has("caddy")) { try { run("sudo apt-get install -y caddy", { shell: true, stdio: "ignore" }) } catch {} }
-  }
-
-  if (!has("mkcert") || !has("caddy")) {
-    warn("Could not install mkcert/caddy — using " + localhostUrl)
-    return localhostUrl
-  }
-
-  // Generate certs
-  if (!fs.existsSync(certsDir)) fs.mkdirSync(certsDir, { recursive: true })
-  try {
-    run(`mkcert -install`, { stdio: "ignore" })
-    run(`mkcert -cert-file "${certFile}" -key-file "${keyFile}" refugio`, { stdio: "ignore" })
-  } catch {
-    warn("Failed to generate certificate")
-    return localhostUrl
-  }
-
-  // Add hosts entry
-  try {
-    const hosts = runQuiet("cat /etc/hosts")
-    if (!hosts.includes("127.0.0.1 refugio")) {
-      if (os.platform() === "darwin") {
-        run(`osascript -e 'do shell script "echo 127.0.0.1 refugio >> /etc/hosts" with administrator privileges'`, { shell: true })
-      } else {
-        run(`sudo sh -c 'echo "127.0.0.1 refugio" >> /etc/hosts'`, { shell: true })
-      }
-    }
-  } catch {
-    warn("Failed to update /etc/hosts")
-    return localhostUrl
-  }
-
-  // Write Caddyfile and start
-  fs.writeFileSync(caddyFile, `https://refugio {\n    tls ${certFile} ${keyFile}\n    reverse_proxy localhost:${port}\n}\n`)
-  try {
-    try { run("caddy stop", { stdio: "ignore" }) } catch {}
-    run(`caddy start --config "${caddyFile}"`, { stdio: "ignore" })
-    ok("https://refugio is now available")
-    return "https://refugio"
-  } catch {
-    warn("Caddy failed to start")
-    return localhostUrl
-  }
-}
-
-// ── Phase 6b: Local LLM Engine (Ollama) ─────────────────────
+// ── Phase 6: Local LLM Engine (Ollama) ──────────────────────
 
 const APP_OLLAMA = "/Applications/Ollama.app/Contents/Resources/ollama"
 
@@ -1760,30 +1405,18 @@ function installOllama() {
   }
 
   try {
-    if (os.platform() === "darwin") {
-      const hasArmBrew = fs.existsSync("/opt/homebrew/bin/brew")
-      if (has("brew") && (!appleSilicon || hasArmBrew)) {
-        // Native brew: arm64 brew on Apple Silicon, or Intel brew on an Intel Mac
-        run("brew install ollama")
-      } else {
-        // Official universal app (runs arm64 on Apple Silicon). Unzip only — the
-        // supervisor runs the binary directly, so we avoid the GUI app's
-        // first-launch onboarding, which would block the server from starting.
-        const zip = path.join(os.tmpdir(), "Ollama-darwin.zip")
-        run(`curl -fsSL https://ollama.com/download/Ollama-darwin.zip -o "${zip}"`, { shell: true })
-        run(`unzip -oq "${zip}" -d /Applications`, { shell: true })
-        try { execSync("xattr -dr com.apple.quarantine /Applications/Ollama.app", { stdio: "ignore" }) } catch {}
-      }
-    } else if (os.platform() === "linux") {
-      run("curl -fsSL https://ollama.com/install.sh | sh", { shell: true })
-    } else if (isWin) {
-      if (has("winget")) {
-        run("winget install --id Ollama.Ollama -e --accept-package-agreements --accept-source-agreements")
-      } else {
-        const exe = path.join(os.tmpdir(), "OllamaSetup.exe")
-        run(`curl -fsSL https://ollama.com/download/OllamaSetup.exe -o "${exe}"`, { shell: true })
-        run(`"${exe}" /VERYSILENT /NORESTART`, { shell: true })
-      }
+    const hasArmBrew = fs.existsSync("/opt/homebrew/bin/brew")
+    if (has("brew") && (!appleSilicon || hasArmBrew)) {
+      // Native brew: arm64 brew on Apple Silicon, or Intel brew on an Intel Mac
+      run("brew install ollama")
+    } else {
+      // Official universal app (runs arm64 on Apple Silicon). Unzip only — the
+      // supervisor runs the binary directly, so we avoid the GUI app's
+      // first-launch onboarding, which would block the server from starting.
+      const zip = path.join(os.tmpdir(), "Ollama-darwin.zip")
+      run(`curl -fsSL https://ollama.com/download/Ollama-darwin.zip -o "${zip}"`, { shell: true })
+      run(`unzip -oq "${zip}" -d /Applications`, { shell: true })
+      try { execSync("xattr -dr com.apple.quarantine /Applications/Ollama.app", { stdio: "ignore" }) } catch {}
     }
   } catch (err) {
     warn(`Ollama install hit a snag: ${err.message}`)
@@ -1834,8 +1467,8 @@ async function ensureOllamaServing() {
   const ollamaBin = fs.existsSync(APP_OLLAMA) ? APP_OLLAMA : (has("ollama") ? "ollama" : null)
   if (ollamaBin) {
     try {
-      const cmd = (!isWin && isAppleSilicon()) ? "arch" : ollamaBin
-      const args = (!isWin && isAppleSilicon()) ? ["-arm64", ollamaBin, "serve"] : ["serve"]
+      const cmd = isAppleSilicon() ? "arch" : ollamaBin
+      const args = isAppleSilicon() ? ["-arm64", ollamaBin, "serve"] : ["serve"]
       const child = spawn(cmd, args, { detached: true, stdio: "ignore" })
       child.unref()
     } catch {}
@@ -1871,7 +1504,7 @@ async function ensureOllamaServing() {
 }
 
 async function setupLLMEngine(env, targetDir) {
-  if (env.REFUGIO_ENGINE !== "ollama") return  // LM Studio / skipped — nothing to install
+  if (env.REFUGIO_ENGINE !== "ollama") return  // skipped — nothing to install
 
   console.log(`${C.bold}Setting up local LLM (Ollama)...${C.reset}\n`)
 
@@ -1918,7 +1551,7 @@ async function setupLLMEngine(env, targetDir) {
   console.log("")
 }
 
-// ── Phase 6c: MemPalace (local semantic memory) ─────────────
+// ── Phase 6b: MemPalace (local semantic memory) ─────────────
 
 async function setupMemPalace(env) {
   if (env.REFUGIO_MEMORY !== "mempalace") return
@@ -1941,17 +1574,12 @@ async function setupMemPalace(env) {
 async function startREFUGIO(targetDir, env, autoStarted) {
   console.log(`${C.bold}Starting ${ED.product}...${C.reset}\n`)
 
-  // Which surface owns the UI decides everything below. This block used to be
-  // hard-wired to Open WebUI on 8080 — so on a v2 install it waited FIVE
-  // MINUTES for a server nothing had started, printing "Waiting for Open WebUI"
-  // the whole time, and then never reached the domain setup at all. That is why
-  // https://refugio stopped appearing.
-  const usingOwui = process.argv.includes("--owui") || process.env.REFUGIO_OWUI === "1"
-  const CHAT_PORT = parseInt(env.REFUGIO_CHAT_PORT || String(ED.chatPort), 10)
-  const PORT = usingOwui ? 8080 : CHAT_PORT
+  // The chat server is the whole UI, and this is the one address it has.
+  const PORT = parseInt(env.REFUGIO_CHAT_PORT || String(ED.chatPort), 10)
+  const url = `http://127.0.0.1:${PORT}`
 
   if (autoStarted) {
-    // The supervisor (start-refugio.cjs) is already running via launchd/systemd
+    // The supervisor (start-refugio.cjs) is already running via launchd
     // (setupAutoStart runs before this function)
     ok(`${ED.product} supervisor started via auto-start service`)
   } else {
@@ -1970,100 +1598,32 @@ async function startREFUGIO(targetDir, env, autoStarted) {
     }
   }
 
-  // Wait for OWUI to be ready. The hint gets its own line — rewriting a line
+  // Wait for the chat server. The hint gets its own line — rewriting a line
   // longer than the terminal width with \r leaves wrapped residue behind.
   // \x1b[K clears from the cursor to end of line after each rewrite.
+  //
+  // A minute, not five: the chat server binds immediately, so a long wait only
+  // made a failure look identical to a slow start.
   const waitStart = Date.now()
-  const surface = usingOwui ? "Open WebUI" : ED.product
-  // The chat server binds immediately; only Open WebUI needs minutes. Waiting
-  // five minutes either way meant a failure looked identical to a slow start.
-  const readyPath = usingOwui ? "/api/config" : "/api/chat/status"
-  const readyTimeout = usingOwui ? 300000 : 60000
-  if (usingOwui) console.log(`  ${C.dim}First launch downloads a model — this can take a few minutes.${C.reset}`)
-  process.stdout.write(`  Waiting for ${surface} to be ready... `)
+  process.stdout.write(`  Waiting for ${ED.product} to be ready... `)
   const timer = setInterval(() => {
     const elapsed = Math.round((Date.now() - waitStart) / 1000)
-    process.stdout.write(`\r  Waiting for ${surface} to be ready... (${elapsed}s)\x1b[K`)
+    process.stdout.write(`\r  Waiting for ${ED.product} to be ready... (${elapsed}s)\x1b[K`)
   }, 1000)
-  const ready = await waitForServer(`http://127.0.0.1:${PORT}${readyPath}`, readyTimeout)
+  const ready = await waitForServer(`${url}/api/chat/status`, 60000)
   clearInterval(timer)
 
   if (ready) {
     const elapsed = Math.round((Date.now() - waitStart) / 1000)
-    process.stdout.write(`\r  Waiting for ${surface} to be ready... done (${elapsed}s)\x1b[K\n`)
-    ok(`${surface} → http://127.0.0.1:${PORT}`)
-
-    // Set up https://refugio local domain
-    let refugioUrl = `http://127.0.0.1:${PORT}`
-    refugioUrl = await setupLocalDomain(targetDir, PORT, refugioUrl)
-
-    // Everything from here is Open WebUI's: MCPO, an account, and a sign-in
-    // trampoline. The chat window has none of those — it is already serving,
-    // it speaks MCP itself, and it has no login — so on the default path the
-    // browser opens and that is the whole of it.
-    if (!usingOwui) {
-      ok(`Opening ${ED.product}...`)
-      openBrowser(refugioUrl)
-      return refugioUrl
-    }
-
-    // Wait for MCPO to be ready before opening browser
-    // (start-refugio.cjs starts MCPO with a 3s delay, configure runs after OWUI is ready)
-    const mcpoReady = await waitForServer("http://127.0.0.1:8010/openapi.json", 30000)
-    if (mcpoReady) {
-      ok("MCPO proxy ready")
-    } else {
-      warn("MCPO not ready yet — tools may need a moment")
-    }
-
-    // Wait for start-refugio.cjs to finish configure (creates account, registers tools)
-    // then sign in to get auth token for auto-login
-    let token = null
-    const signinStart = Date.now()
-    while (!token && Date.now() - signinStart < 60000) {
-      try {
-        const http = require("http")
-        const signin = await new Promise((resolve, reject) => {
-          const data = JSON.stringify({ email: env.OWUI_EMAIL, password: env.OWUI_PASSWORD || "changeme" })
-          const req = http.request({
-            hostname: "127.0.0.1", port: PORT, path: "/api/v1/auths/signin",
-            method: "POST", headers: { "Content-Type": "application/json", "Content-Length": data.length }
-          }, res => {
-            let body = ""
-            res.on("data", c => body += c)
-            res.on("end", () => { try { resolve(JSON.parse(body)) } catch { resolve({}) } })
-          })
-          req.on("error", reject)
-          req.write(data)
-          req.end()
-        })
-        token = signin.token || null
-      } catch {}
-      if (!token) await new Promise(r => setTimeout(r, 3000))
-    }
-
-    // Auto-authenticate via trampoline page
-    if (token) {
-      const staticDir = findOwuiStaticDir(targetDir)
-      if (staticDir) {
-        const authHtml = `<!DOCTYPE html><html><body><script>
-localStorage.setItem('token', '${token}');
-window.location.href = '/';
-</script><p>Signing in...</p></body></html>`
-        fs.writeFileSync(path.join(staticDir, "auth.html"), authHtml)
-        ok("Opening browser (auto-authenticated)...")
-        openBrowser(`${refugioUrl}/static/auth.html`)
-      } else {
-        ok("Opening browser...")
-        openBrowser(refugioUrl)
-      }
-    } else {
-      ok("Opening browser...")
-      openBrowser(refugioUrl)
-    }
+    process.stdout.write(`\r  Waiting for ${ED.product} to be ready... done (${elapsed}s)\x1b[K\n`)
+    ok(`${ED.product} → ${url}`)
+    // It is already serving, speaks MCP itself and has no login, so opening
+    // the window is the whole of it.
+    ok(`Opening ${ED.product}...`)
+    openBrowser(url)
   } else {
     process.stdout.write(" timed out\n")
-    warn("Open WebUI is still starting — open http://127.0.0.1:" + PORT + " manually")
+    warn(`${ED.product} is still starting — open ${url} once it is up`)
   }
 
   console.log("")
@@ -2072,47 +1632,31 @@ window.location.href = '/';
 // ── Phase 8: Auto-Start on Login ─────────────────────────────
 
 // Migrate from the predecessor "IBEX" install (REFUGIO is a fork of
-// Percona-Lab/IBEX). A leftover IBEX auto-start service keeps running its OWN
-// Open WebUI on :8080, so the refugio hostname shows the IBEX login screen. Stop
-// + disable + remove that service (and kill stragglers). We do NOT delete the
-// user's IBEX files/data — only the conflicting service.
+// Percona-Lab/IBEX). A leftover IBEX launchd job keeps its own supervisor and
+// interface running — and respawning — beside REFUGIO. Stop + remove that job
+// (and kill stragglers). We do NOT delete the user's IBEX files/data — only
+// the conflicting service.
 function cleanupLegacyIbex() {
   let found = false
   try {
-    if (os.platform() === "darwin") {
-      const laDir = path.join(home, "Library", "LaunchAgents")
-      let plists = []
-      try { plists = fs.readdirSync(laDir).filter(f => /ibex/i.test(f) && f.endsWith(".plist")) } catch {}
-      for (const f of plists) {
-        const p = path.join(laDir, f)
-        const label = f.replace(/\.plist$/, "")
-        try { execSync(`launchctl bootout gui/$(id -u)/${label}`, { stdio: "ignore" }) } catch {}
-        try { execSync(`launchctl bootout gui/$(id -u) "${p}"`, { stdio: "ignore" }) } catch {}
-        try { execSync(`launchctl unload "${p}"`, { stdio: "ignore" }) } catch {}
-        try { fs.unlinkSync(p) } catch {}
-        found = true
-      }
-    } else if (os.platform() === "linux") {
-      for (const unit of ["ibex.service", "com.percona.ibex.service"]) {
-        try { execSync(`systemctl --user stop ${unit}`, { stdio: "ignore" }) } catch {}
-        try { execSync(`systemctl --user disable ${unit}`, { stdio: "ignore" }) } catch {}
-        const up = path.join(home, ".config", "systemd", "user", unit)
-        try { if (fs.existsSync(up)) { fs.unlinkSync(up); found = true } } catch {}
-      }
-      try { execSync("systemctl --user daemon-reload", { stdio: "ignore" }) } catch {}
-    } else if (isWin) {
-      const startup = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-      for (const f of ["IBEX.vbs", "ibex.vbs"]) {
-        const p = path.join(startup, f)
-        try { if (fs.existsSync(p)) { fs.unlinkSync(p); found = true } } catch {}
-      }
+    const laDir = path.join(home, "Library", "LaunchAgents")
+    let plists = []
+    try { plists = fs.readdirSync(laDir).filter(f => /ibex/i.test(f) && f.endsWith(".plist")) } catch {}
+    for (const f of plists) {
+      const p = path.join(laDir, f)
+      const label = f.replace(/\.plist$/, "")
+      try { execSync(`launchctl bootout gui/$(id -u)/${label}`, { stdio: "ignore" }) } catch {}
+      try { execSync(`launchctl bootout gui/$(id -u) "${p}"`, { stdio: "ignore" }) } catch {}
+      try { execSync(`launchctl unload "${p}"`, { stdio: "ignore" }) } catch {}
+      try { fs.unlinkSync(p) } catch {}
+      found = true
     }
-    // Kill a still-running IBEX supervisor/OWUI (macOS/Linux KeepAlive is gone now;
-    // on Windows the .vbs was fire-once, so the port-8080 check below handles it).
-    if (!isWin) { try { execSync("pkill -f start-ibex", { stdio: "ignore" }) } catch {} }
+    // Kill a still-running IBEX supervisor — its KeepAlive is gone now, so it
+    // stays dead.
+    try { execSync("pkill -f start-ibex", { stdio: "ignore" }) } catch {}
   } catch {}
   if (found) {
-    warn("Found a previous IBEX install — disabled its auto-start so it won't conflict with REFUGIO on :8080")
+    warn("Found a previous IBEX install — disabled its auto-start so it won't run beside REFUGIO")
     warn("Your old IBEX files were left untouched (remove ~/IBEX manually if you no longer need it)")
   }
 }
@@ -2130,17 +1674,16 @@ function setupAutoStart(targetDir) {
     return false
   }
 
-  if (os.platform() === "darwin") {
-    // macOS: launchd plist
-    const plistDir = path.join(home, "Library", "LaunchAgents")
-    const plistPath = path.join(plistDir, `${ED.agentLabel}.plist`)
+  // macOS: launchd plist
+  const plistDir = path.join(home, "Library", "LaunchAgents")
+  const plistPath = path.join(plistDir, `${ED.agentLabel}.plist`)
 
-    if (!fs.existsSync(plistDir)) fs.mkdirSync(plistDir, { recursive: true })
+  if (!fs.existsSync(plistDir)) fs.mkdirSync(plistDir, { recursive: true })
 
-    const logDir = path.join(home, ED.logDir)
-    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true })
+  const logDir = path.join(home, ED.logDir)
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true })
 
-    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -2165,58 +1708,17 @@ function setupAutoStart(targetDir) {
 </dict>
 </plist>`
 
-    fs.writeFileSync(plistPath, plist)
+  fs.writeFileSync(plistPath, plist)
 
-    // Unload if already loaded, then load
-    try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
+  // Unload if already loaded, then load
+  try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
+  try {
+    execSync(`launchctl bootstrap gui/$(id -u) "${plistPath}"`, { stdio: "ignore" })
+    ok(`${ED.product} will auto-start on login (launchd)`)
+  } catch {
     try {
-      execSync(`launchctl bootstrap gui/$(id -u) "${plistPath}"`, { stdio: "ignore" })
+      execSync(`launchctl load "${plistPath}"`, { stdio: "ignore" })
       ok(`${ED.product} will auto-start on login (launchd)`)
-    } catch {
-      try {
-        execSync(`launchctl load "${plistPath}"`, { stdio: "ignore" })
-        ok(`${ED.product} will auto-start on login (launchd)`)
-      } catch {
-        warn(`Could not register auto-start — run manually: node ${startScript}`)
-      }
-    }
-  } else if (os.platform() === "linux") {
-    // Linux: systemd user service
-    const serviceDir = path.join(home, ".config", "systemd", "user")
-    const servicePath = path.join(serviceDir, `${ED.cli}.service`)
-
-    if (!fs.existsSync(serviceDir)) fs.mkdirSync(serviceDir, { recursive: true })
-
-    const service = `[Unit]
-Description=${ED.product}
-After=network.target
-
-[Service]
-ExecStart="${nodePath}" "${startScript}" --no-browser
-WorkingDirectory=${targetDir}
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-`
-
-    fs.writeFileSync(servicePath, service)
-    try {
-      execSync("systemctl --user daemon-reload", { stdio: "ignore" })
-      execSync(`systemctl --user enable ${ED.cli}.service`, { stdio: "ignore" })
-      ok(`${ED.product} will auto-start on login (systemd)`)
-    } catch {
-      warn(`Could not register auto-start — run manually: node ${startScript}`)
-    }
-  } else if (isWin) {
-    // Windows: VBScript in Startup folder (runs without console window)
-    try {
-      const startupDir = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-      const vbsPath = path.join(startupDir, `${ED.product}.vbs`)
-      const vbs = `Set WshShell = CreateObject("WScript.Shell")\nWshShell.Run """${nodePath}"" ""${startScript}"" --no-browser", 0, False`
-      fs.writeFileSync(vbsPath, vbs)
-      ok(`${ED.product} will auto-start on login (Startup folder)`)
     } catch {
       warn(`Could not register auto-start — run manually: node ${startScript}`)
     }
@@ -2226,43 +1728,32 @@ WantedBy=default.target
 }
 
 // On-demand setup for low-RAM machines: create convenient launchers (a `refugio`
-// CLI + a clickable shortcut) and ensure NO login auto-start remains, so Open
-// WebUI isn't resident all day. The user starts REFUGIO when they want it and
+// CLI + a clickable shortcut) and ensure NO login auto-start remains, so the
+// stack isn't resident all day. The user starts REFUGIO when they want it and
 // frees the RAM by quitting (Ctrl+C / `refugio stop`).
 function setupOnDemand(targetDir, nodePath, startScript) {
   try { fs.mkdirSync(path.join(home, ED.logDir), { recursive: true }) } catch {}
 
   // Remove any existing login auto-start so it truly won't launch at boot.
-  if (os.platform() === "darwin") {
-    const plistPath = path.join(home, "Library", "LaunchAgents", `${ED.agentLabel}.plist`)
-    try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
-    try { if (fs.existsSync(plistPath)) fs.unlinkSync(plistPath) } catch {}
-  } else if (os.platform() === "linux") {
-    try { execSync(`systemctl --user disable ${ED.cli}.service`, { stdio: "ignore" }) } catch {}
-    try { fs.unlinkSync(path.join(home, ".config", "systemd", "user", `${ED.cli}.service`)) } catch {}
-    try { execSync("systemctl --user daemon-reload", { stdio: "ignore" }) } catch {}
-  } else if (isWin) {
-    try {
-      const vbsPath = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", `${ED.product}.vbs`)
-      if (fs.existsSync(vbsPath)) fs.unlinkSync(vbsPath)
-    } catch {}
-  }
+  const plistPath = path.join(home, "Library", "LaunchAgents", `${ED.agentLabel}.plist`)
+  try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
+  try { if (fs.existsSync(plistPath)) fs.unlinkSync(plistPath) } catch {}
 
-  if (!isWin) {
-    // `refugio` CLI on PATH (~/.local/bin is on PATH via uv):
-    //   start | bg | stop | restart | status | menubar
-    //
-    // `bg`, `restart` and `menubar` exist because the menu-bar icon is not
-    // guaranteed — it can fail to get a slot on a full menu bar. When that
-    // happens the only way to stop and restart was a foreground process
-    // holding a terminal open, which is not where a fallback belongs.
-    const binDir = path.join(home, ".local", "bin")
-    try { fs.mkdirSync(binDir, { recursive: true }) } catch {}
-    // Every name in here is the edition's: the command, the log directory, the
-    // port it probes and the product it reports. A REFUGIO Listener install
-    // writing a `refugio` on PATH would take over the other product's command
-    // and then start the wrong supervisor from it.
-    const menubarCase = ED.id === "standard" ? `
+  // `refugio` CLI in ~/.local/bin (uv's installer puts that on PATH; the hint
+  // at the end covers a machine where it isn't):
+  //   start | bg | stop | restart | status | menubar
+  //
+  // `bg`, `restart` and `menubar` exist because the menu-bar icon is not
+  // guaranteed — it can fail to get a slot on a full menu bar. When that
+  // happens the only way to stop and restart was a foreground process
+  // holding a terminal open, which is not where a fallback belongs.
+  const binDir = path.join(home, ".local", "bin")
+  try { fs.mkdirSync(binDir, { recursive: true }) } catch {}
+  // Every name in here is the edition's: the command, the log directory, the
+  // port it probes and the product it reports. A REFUGIO Listener install
+  // writing a `refugio` on PATH would take over the other product's command
+  // and then start the wrong supervisor from it.
+  const menubarCase = ED.id === "standard" ? `
   menubar)
     # Relaunch the menu-bar app and show what it decided. It writes one line per
     # launch saying whether it got a slot in the menu bar.
@@ -2276,7 +1767,7 @@ function setupOnDemand(targetDir, nodePath, startScript) {
     else
       echo "Menu-bar app is not installed. Build it with: cd $DIR/menubar && ./install.sh"
     fi ;;` : ""
-    const cli = `#!/bin/sh
+  const cli = `#!/bin/sh
 # ${ED.product} on-demand launcher
 NODE="${nodePath}"
 DIR="${targetDir}"
@@ -2304,7 +1795,6 @@ case "$1" in
     echo "${ED.product} restarting in the background — '${ED.cli} status' to check." ;;
   status)
     if curl -s --max-time 2 http://127.0.0.1:${ED.chatPort}/api/chat/status >/dev/null 2>&1; then echo "running -> http://127.0.0.1:${ED.chatPort}"
-    elif curl -s --max-time 2 http://127.0.0.1:8080/api/config >/dev/null 2>&1; then echo "running -> http://127.0.0.1:8080 (Open WebUI)"
     else echo "stopped"; fi ;;${menubarCase}
   *)
     echo "Starting ${ED.product}... (Ctrl+C or '${ED.cli} stop' to stop and free RAM)"
@@ -2312,47 +1802,21 @@ case "$1" in
     exec "$NODE" "$DIR/start-refugio.cjs" ;;
 esac
 `
-    const cliPath = path.join(binDir, ED.cli)
-    try { fs.writeFileSync(cliPath, cli); fs.chmodSync(cliPath, 0o755) } catch {}
+  const cliPath = path.join(binDir, ED.cli)
+  try { fs.writeFileSync(cliPath, cli); fs.chmodSync(cliPath, 0o755) } catch {}
 
-    if (os.platform() === "darwin") {
-      const cmd = `#!/bin/sh\nexec "${nodePath}" "${targetDir}/start-refugio.cjs"\n`
-      const cmdPath = path.join(targetDir, startCommandName())
-      try { fs.writeFileSync(cmdPath, cmd); fs.chmodSync(cmdPath, 0o755) } catch {}
-      installMenuBarApp(targetDir)
-    } else {
-      const appsDir = path.join(home, ".local", "share", "applications")
-      try { fs.mkdirSync(appsDir, { recursive: true }) } catch {}
-      const desktop = `[Desktop Entry]\nType=Application\nName=${ED.product}\nComment=Start your local AI\nExec="${nodePath}" "${targetDir}/start-refugio.cjs"\nTerminal=true\nCategories=Utility;\n`
-      try { fs.writeFileSync(path.join(appsDir, `${ED.cli}.desktop`), desktop) } catch {}
-      installLinuxTray(targetDir, appsDir)
-    }
-  } else {
-    // Windows: clickable start + stop .bat (no `refugio` shell CLI on Windows).
-    const bat = `@echo off\r\ncall "${nodePath}" "${targetDir}\\start-refugio.cjs"\r\n`
-    try { fs.writeFileSync(path.join(targetDir, "Start-REFUGIO.bat"), bat) } catch {}
-    const stop = [
-      "@echo off",
-      "setlocal enabledelayedexpansion",
-      `set "PIDF=%USERPROFILE%\\${ED.logDir}\\supervisor.pid"`,
-      `if not exist "%PIDF%" ( echo ${ED.product} is not running & exit /b )`,
-      'set /p PID=<"%PIDF%"',
-      `taskkill /PID !PID! /T /F >nul 2>&1 && echo ${ED.product} stopped (RAM freed) || echo ${ED.product} is not running`,
-    ].join("\r\n") + "\r\n"
-    try { fs.writeFileSync(path.join(targetDir, "Stop-REFUGIO.bat"), stop) } catch {}
-    installWindowsTray(targetDir)
-  }
+  // The double-clickable launcher. Machine-specific (it names this node and
+  // this directory), which is why it is written here and ignored by git.
+  const cmd = `#!/bin/sh\nexec "${nodePath}" "${targetDir}/start-refugio.cjs"\n`
+  const cmdPath = path.join(targetDir, startCommandName())
+  try { fs.writeFileSync(cmdPath, cmd); fs.chmodSync(cmdPath, 0o755) } catch {}
+  installMenuBarApp(targetDir)
 
   ok(`Low-RAM mode: ${ED.product} will NOT auto-start on login (keeps your RAM free)`)
-  if (!isWin) {
-    ok(`Start anytime:  ${ED.cli}   ·   stop + free RAM:  ${ED.cli} stop`)
-    const onPath = (process.env.PATH || "").split(":").includes(path.join(home, ".local", "bin"))
-    if (!onPath) ok(`(if '${ED.cli}' isn't found: run ${path.join(home, ".local", "bin", ED.cli)}, or add ~/.local/bin to PATH)`)
-    if (os.platform() === "darwin") ok(`Or double-click:  ${path.join(targetDir, startCommandName())}`)
-  } else {
-    ok(`Start: double-click ${path.join(targetDir, "Start-REFUGIO.bat")}`)
-    ok(`Stop + free RAM: double-click ${path.join(targetDir, "Stop-REFUGIO.bat")}`)
-  }
+  ok(`Start anytime:  ${ED.cli}   ·   stop + free RAM:  ${ED.cli} stop`)
+  const onPath = (process.env.PATH || "").split(":").includes(path.join(home, ".local", "bin"))
+  if (!onPath) ok(`(if '${ED.cli}' isn't found: run ${path.join(home, ".local", "bin", ED.cli)}, or add ~/.local/bin to PATH)`)
+  ok(`Or double-click:  ${path.join(targetDir, startCommandName())}`)
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -2381,16 +1845,12 @@ async function main() {
     --replace          Stand down the other edition if it is installed
     --no-start         Don't launch after install
     --non-interactive  Skip credential prompts (create template only)
-    --owui             Also install Open WebUI (legacy interface, being retired)
-    --skip-owui        No-op, kept for compatibility — Open WebUI is now opt-in
     --help             Show this help
 
   Environment:
     REFUGIO_EDITION=listener  Same as --listener
-    REFUGIO_ENGINE=lmstudio   Use LM Studio's local server (:1234) instead of Ollama
     REFUGIO_ENGINE=none       Skip the LLM engine; configure it later by hand
     REFUGIO_MODEL=<tag>       Override the auto-selected Ollama model
-    REFUGIO_OWUI=1            Same as --owui
 
   Editions:
     REFUGIO and REFUGIO Listener are separate products built from this one
@@ -2408,6 +1868,19 @@ async function main() {
     node install-node.cjs --non-interactive  Headless install (CI-friendly)
 `)
     return
+  }
+
+  // macOS only. Said before anything is downloaded or changed: every step
+  // below — launchd, the menu-bar app, the Ollama app bundle — is a Mac's.
+  if (os.platform() !== "darwin") {
+    fail("REFUGIO runs on macOS only — this installer cannot set it up on this system.")
+    process.exit(1)
+  }
+
+  // Open WebUI is gone, not merely off. Someone scripting against the old
+  // flag gets one line saying so rather than a silent no-op.
+  if (flags.has("--owui") || process.env.REFUGIO_OWUI === "1") {
+    warn("Open WebUI is no longer part of REFUGIO — ignoring --owui / REFUGIO_OWUI.")
   }
 
   // Which product, before anything else: it decides the directory, the
@@ -2432,7 +1905,7 @@ async function main() {
   // repository into the user's home directory is not a refusal.
   checkEditionConflict(editionId, flags)
 
-  const { hasUV } = checkDeps()
+  checkDeps()
 
   await preflight(targetDir)
 
@@ -2462,20 +1935,8 @@ async function main() {
     env = await promptCredentials(envPath, targetDir)
   }
 
-  // Open WebUI is OPT-IN. It used to install unless --skip-owui was passed,
-  // which meant the default install still pulled uv, built a Python virtual
-  // environment and downloaded PyTorch — for an interface it no longer starts.
-  // The README already described the current behaviour ("No Python"); this is
-  // the code catching up with it.
-  //
-  // --skip-owui is kept as a no-op so anyone scripting against it still works.
-  const wantsOwui = flags.has("--owui") || process.env.REFUGIO_OWUI === "1"
-  if (wantsOwui) {
-    await setupOpenWebUI(targetDir)
-  }
-
   // Install and warm up the local LLM engine (Ollama) — pulls the model
-  // BEFORE the supervisor starts Open WebUI so it's ready on first launch.
+  // BEFORE the supervisor starts so it's ready on first launch.
   // Skip in headless mode: pulling a multi-GB model / installing MemPalace is
   // heavy work that only makes sense when we're about to launch the service.
   if (!flags.has("--non-interactive")) {
@@ -2491,7 +1952,7 @@ async function main() {
     autoStarted = setupAutoStart(targetDir)
   }
 
-  // Wait for OWUI to be ready and open browser
+  // Wait for the chat server to be ready and open the window
   if (!flags.has("--no-start") && !flags.has("--non-interactive")) {
     await startREFUGIO(targetDir, env, autoStarted)
   }
@@ -2502,6 +1963,7 @@ async function main() {
   console.log("")
   console.log(`  Installation:  ${targetDir}`)
   console.log(`  Credentials:   ${envPath}`)
+  console.log(`  Window:        http://127.0.0.1:${ED.chatPort}`)
   console.log("")
   if (!flags.has("--non-interactive")) {
     // The rest of setup happens in the window. Said here because the browser
@@ -2517,14 +1979,8 @@ async function main() {
     console.log(`  To start ${ED.product}:`)
     console.log(`    node ${path.join(targetDir, "start-refugio.cjs")}`)
   } else if (isLowRam()) {
-    if (isWin) {
-      console.log(`  Start ${ED.product}:     double-click ${path.join(targetDir, "Start-REFUGIO.bat")}`)
-      console.log(`  Stop + free RAM:   double-click ${path.join(targetDir, "Stop-REFUGIO.bat")}`)
-    } else {
-      const extra = os.platform() === "darwin" ? `   (or double-click "${startCommandName()}")` : ""
-      console.log(`  Start ${ED.product}:     ${ED.cli}${extra}`)
-      console.log(`  Stop + free RAM:   ${ED.cli} stop`)
-    }
+    console.log(`  Start ${ED.product}:     ${ED.cli}   (or double-click "${startCommandName()}")`)
+    console.log(`  Stop + free RAM:   ${ED.cli} stop`)
     console.log("")
     console.log(`  Low-RAM mode: ${ED.product} does NOT auto-start on login, so it only`)
     console.log(`  uses memory while you're actually using it.`)

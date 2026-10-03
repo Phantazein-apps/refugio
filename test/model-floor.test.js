@@ -57,7 +57,7 @@ test("a busy machine keeps a tool-capable model instead of downgrading", () => {
   // The reported case: 8 GB Mac, ~1.1 GB free, all three models installed.
   const pick = memFit.pickInstalledModel({
     availableGb: 1.1,
-    owuiOverheadGb: 0.05,
+    uiOverheadGb: 0.05,
     installedTags: ["qwen2.5:3b", "qwen2.5:0.5b", "llama3.2:1b"],
   });
   assert.equal(pick.tag, "qwen2.5:3b");

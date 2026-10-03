@@ -1,5 +1,5 @@
 #!/bin/bash
-# REFUGIO Zero-Prereq Installer
+# REFUGIO Zero-Prereq Installer (macOS)
 # Usage: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
 #
 # Installs Node.js if missing, then runs the Node-based installer.
@@ -37,6 +37,15 @@ echo " 🏔️  ${PRODUCT} Installer"
 echo -e "============================================================${NC}"
 echo ""
 
+# ── macOS only ────────────────────────────────────────────────
+# Checked before anything is installed: Node, git and everything after them
+# are fetched the Mac way, and REFUGIO itself runs under launchd with a
+# menu-bar app. Stopping here costs nothing; stopping later leaves a half
+# install behind.
+if [ "$(uname -s)" != "Darwin" ]; then
+  fail "${PRODUCT} runs on macOS only — this installer cannot set it up on $(uname -s)."
+fi
+
 # ── Install Node.js if missing ────────────────────────────────
 
 install_node() {
@@ -52,37 +61,17 @@ install_node() {
     warn "Node.js not found — installing..."
   fi
 
-  case "$(uname -s)" in
-    Darwin)
-      if command -v brew &>/dev/null; then
-        brew install node
-      else
-        # Official .pkg — no brew needed
-        warn "Downloading Node.js from nodejs.org..."
-        local pkg_file
-        pkg_file=$(mktemp /tmp/node-install.XXXXXX.pkg)
-        curl -fsSL "https://nodejs.org/dist/v22.16.0/node-v22.16.0.pkg" -o "$pkg_file"
-        sudo installer -pkg "$pkg_file" -target /
-        rm -f "$pkg_file"
-      fi
-      ;;
-    Linux)
-      if command -v apt-get &>/dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-        sudo apt-get install -y nodejs
-      elif command -v dnf &>/dev/null; then
-        sudo dnf install -y nodejs
-      elif command -v yum &>/dev/null; then
-        curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-        sudo yum install -y nodejs
-      else
-        fail "Could not detect package manager — install Node.js 18+ manually from https://nodejs.org"
-      fi
-      ;;
-    *)
-      fail "Unsupported OS — install Node.js 18+ manually from https://nodejs.org"
-      ;;
-  esac
+  if command -v brew &>/dev/null; then
+    brew install node
+  else
+    # Official .pkg — no brew needed
+    warn "Downloading Node.js from nodejs.org..."
+    local pkg_file
+    pkg_file=$(mktemp /tmp/node-install.XXXXXX.pkg)
+    curl -fsSL "https://nodejs.org/dist/v22.16.0/node-v22.16.0.pkg" -o "$pkg_file"
+    sudo installer -pkg "$pkg_file" -target /
+    rm -f "$pkg_file"
+  fi
 
   if command -v node &>/dev/null; then
     ok "Node.js installed ($(node --version))"
@@ -100,16 +89,7 @@ install_git() {
   fi
 
   warn "Git not found — installing..."
-  case "$(uname -s)" in
-    Darwin) xcode-select --install 2>/dev/null || brew install git ;;
-    Linux)
-      if command -v apt-get &>/dev/null; then
-        sudo apt-get install -y git
-      elif command -v dnf &>/dev/null; then
-        sudo dnf install -y git
-      fi
-      ;;
-  esac
+  xcode-select --install 2>/dev/null || brew install git
 
   if command -v git &>/dev/null; then
     ok "Git installed"
@@ -133,12 +113,11 @@ echo ""
 # so a pinned install is pinned end to end.
 #   v2 alpha (default): curl … | bash
 #   bleeding edge:      REFUGIO_VERSION=main curl … | bash
-#   last Open WebUI:    REFUGIO_VERSION=v1.0.3 curl … | bash
 #
-# The default is an ALPHA. That is a deliberate choice: v1.0.3 is the last Open
-# WebUI build and is being retired, so pointing new installs at it would be
-# sending people to a dead end. The README says plainly that the default is an
-# early prototype, and v1.0.3 stays one environment variable away.
+# The default is an ALPHA. That is a deliberate choice: the only older release
+# is built on an interface REFUGIO has retired, so pointing new installs at it
+# would be sending people to a dead end. The README says plainly that the
+# default is an early prototype.
 #
 # The branch is still named v2.0.0-beta.2 and is NOT being renamed. Every
 # existing install tracks that branch by name; renaming it would break their

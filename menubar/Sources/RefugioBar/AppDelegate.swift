@@ -19,13 +19,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var running = false
     private var startedAt: Date?          // for a transient "starting…" state
+    /// Set when a click on the icon had to start REFUGIO first: the window the
+    /// click asked for is shown the moment the chat server answers, rather than
+    /// leaving the user to click a second time once it has.
+    private var showWhenUp = false
 
     // Paths / URLs
     private let home = FileManager.default.homeDirectoryForCurrentUser
     private var refugioDir: URL { home.appendingPathComponent("refugio") }
     private var startScript: URL { refugioDir.appendingPathComponent("start-refugio.cjs") }
     private var pidFile: URL { home.appendingPathComponent(".refugio-logs/supervisor.pid") }
-    private let healthURL = URL(string: "http://127.0.0.1:8080/api/config")!
+    /// The chat server — REFUGIO's only interface, so its port being open is
+    /// what "running" means.
+    private let chatPort: UInt16 = 8090
+    private var chatURL: URL { URL(string: "http://127.0.0.1:\(chatPort)")! }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Here, not before app.run(). Both working reference apps set this
@@ -163,8 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Whether the chat window exists AND is on screen. Reads the optional
     /// directly rather than going through `chatWindow`, which would build one
-    /// — running appURL() and its socket probe on every three-second poll, for
-    /// a window nobody has asked for yet.
+    /// — a whole WKWebView on every three-second poll, for a window nobody has
+    /// asked for yet.
     private var windowIsUp: Bool {
         chatWindowInstance?.isVisible ?? false
     }
@@ -323,7 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var chatWindowInstance: ChatWindow?
     private var chatWindow: ChatWindow {
         if let existing = chatWindowInstance { return existing }
-        let created = ChatWindow(url: appURL())
+        let created = ChatWindow(url: chatURL)
         chatWindowInstance = created
         return created
     }
@@ -333,51 +340,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Native window — no browser, no address bar. Holding Option opens
             // in the default browser instead, for anyone who prefers it.
             if NSEvent.modifierFlags.contains(.option) {
-                NSWorkspace.shared.open(appURL())
+                NSWorkspace.shared.open(chatURL)
             } else {
                 // navigate: true so this comes back from the settings page. It
                 // only reloads when the URL actually differs, so an already-open
                 // chat is left exactly as it was.
-                chatWindow.show(url: appURL(), navigate: true)
+                chatWindow.show(url: chatURL, navigate: true)
             }
         } else {
-            // Start with the browser auto-opening when the stack is ready.
-            startStack(openBrowser: true)
+            // Start, and show the window once the chat server answers — see
+            // updateUI(). The supervisor is told not to open a browser tab of
+            // its own, which would be a second window for the same click.
+            showWhenUp = true
+            startStack()
         }
     }
 
     /// Open the chat window on the settings page.
     ///
-    /// Only the built-in chat UI has one — Open WebUI, the legacy surface, does
-    /// not. Rather than open a URL that 404s there, say so and offer the one
-    /// action that makes it available.
+    /// The page lives in the chat server, so with REFUGIO stopped there is
+    /// nothing to open — say so rather than show a window that cannot load.
     @objc private func openSettings() {
-        guard running, portOpen(8090) else {
-            // Spelled out rather than folded into a ternary with string
-            // concatenation in one branch. That form type-checks slowly and is
-            // exactly the kind of expression that fails to build on a machine
-            // this code cannot be compiled on before shipping.
-            let title: String
-            let detail: String
-            if running {
-                title = "Settings needs REFUGIO's own chat window."
-                detail = "This copy is serving the legacy Open WebUI interface, which has no settings page. Re-run the installer to switch to REFUGIO's own window."
-            } else {
-                title = "REFUGIO isn't running."
-                detail = "Start REFUGIO from this menu, then open Settings."
-            }
+        guard running else {
             let a = NSAlert()
-            a.messageText = title
-            a.informativeText = detail
+            a.messageText = "REFUGIO isn't running."
+            a.informativeText = "Start REFUGIO from this menu, then open Settings."
             a.addButton(withTitle: "OK")
             a.runModal()
             return
         }
-        chatWindow.show(url: URL(string: "http://127.0.0.1:8090/settings")!, navigate: true)
+        chatWindow.show(url: chatURL.appendingPathComponent("settings"), navigate: true)
     }
 
     @objc private func toggleRun() {
-        running ? stopStack() : startStack(openBrowser: false)
+        running ? stopStack() : startStack()
     }
 
     @objc private func toggleLogin() {
@@ -408,7 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Stop the whole stack, then quit — the "give me my RAM back" path.
     /// Gives the supervisor a moment to SIGTERM its children before exiting,
-    /// so we don't orphan Ollama or Open WebUI.
+    /// so we don't orphan Ollama or the chat server.
     @objc private func stopAndQuit() {
         stopStack()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
@@ -422,18 +418,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    private func appURL() -> URL {
-        // The built-in chat UI is the default surface; fall back to Open WebUI
-        // (custom domain if a cert was set up, else localhost) when it isn't up.
-        if portOpen(8090) { return URL(string: "http://127.0.0.1:8090")! }
-        let cert = refugioDir.appendingPathComponent("certs/refugio.pem")
-        if FileManager.default.fileExists(atPath: cert.path) {
-            return URL(string: "https://refugio")!
-        }
-        return URL(string: "http://refugio.localhost:8080")!
-    }
-
-    /// Cheap liveness probe used to choose between the chat UI and Open WebUI.
+    /// Cheap liveness probe: a TCP connect to the chat server's port.
+    ///
+    /// Not an HTTP request to /api/chat/status. That endpoint asks Ollama for
+    /// its models and measures free memory on every call — right for the chat
+    /// window's fifteen-second poll, wasteful on this one's three-second poll,
+    /// whose only question is whether anything is listening.
     private func portOpen(_ port: UInt16) -> Bool {
         let sock = socket(AF_INET, SOCK_STREAM, 0)
         if sock < 0 { return false }
@@ -452,7 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return ok
     }
 
-    private func startStack(openBrowser: Bool) {
+    private func startStack() {
         guard FileManager.default.fileExists(atPath: startScript.path) else {
             headerItem?.title = "REFUGIO not installed (~/refugio)"
             return
@@ -467,7 +457,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             args = ["node", startScript.path]
         }
-        if !openBrowser { args.append("--no-browser") }
+        // Always. This app has its own window, and shows it itself.
+        args.append("--no-browser")
         task.arguments = args
         task.currentDirectoryURL = refugioDir
 
@@ -499,7 +490,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopStack() {
         // SIGTERM the supervisor by its pidfile; it shuts down its own children
-        // (Open WebUI, Ollama, MCP servers). Fall back to pkill.
+        // (the chat server, Ollama). Fall back to pkill.
         if let pidStr = try? String(contentsOf: pidFile, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
            let pid = Int32(pidStr), pid > 1 {
@@ -511,6 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? pk.run()
 
         startedAt = nil
+        showWhenUp = false
         running = false
         headerItem?.title = "REFUGIO — stopping…"
         toggleItem?.title = "Start REFUGIO"
@@ -518,15 +510,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // ── Status polling ──────────────────────────────────────
-    /// Resident memory (MB) of the REFUGIO stack: the supervisor and its
-    /// children, plus Ollama and Open WebUI, which are separate process trees.
-    /// One `ps` call, summed. Returns 0 if anything goes wrong — the header
+    /// Resident memory (MB) of the REFUGIO stack: the supervisor and the chat
+    /// server it starts, plus Ollama, which may be a separate process tree (the
+    /// Ollama app). One `ps` call, summed. Returns 0 if anything goes wrong — the header
     /// then just omits the figure rather than showing a wrong one.
     private func stackMemoryMB() -> Int {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c",
-            "ps -Ao rss,comm,args | grep -E 'start-refugio|open-webui|ollama|mcpo' " +
+            "ps -Ao rss,comm,args | grep -E 'start-refugio|chat/server.js|ollama' " +
             "| grep -v grep | awk '{s+=$1} END {print int(s/1024)}'"]
         let pipe = Pipe()
         p.standardOutput = pipe
@@ -539,18 +531,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatus() {
-        // The built-in chat UI is the primary surface now, so "running" must be
-        // true when only it is up — Open WebUI may not be installed at all.
-        if portOpen(8090) {
-            DispatchQueue.main.async { self.updateUI(up: true) }
-            return
-        }
-        var req = URLRequest(url: healthURL)
-        req.timeoutInterval = 1.5
-        URLSession.shared.dataTask(with: req) { [weak self] _, resp, _ in
-            let up = (resp as? HTTPURLResponse) != nil
-            DispatchQueue.main.async { self?.updateUI(up: up) }
-        }.resume()
+        let up = portOpen(chatPort)
+        DispatchQueue.main.async { self.updateUI(up: up) }
     }
 
     private func updateUI(up: Bool) {
@@ -559,18 +541,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         running = up
         if up {
             startedAt = nil
-            // Surface RAM in the header — the stack (Ollama + model + Open
-            // WebUI) can hold GBs, and "is this what's eating my machine?" is
-            // the question that sends people to this menu.
+            // Surface RAM in the header — the stack (Ollama + model) can hold
+            // GBs, and "is this what's eating my machine?" is the question
+            // that sends people to this menu.
             let mb = stackMemoryMB()
             headerItem?.title = mb > 0
                 ? String(format: "REFUGIO — running · %.1f GB RAM", Double(mb) / 1024.0)
                 : "REFUGIO — running"
             toggleItem?.title = "Stop REFUGIO (frees memory)"
+            if showWhenUp {
+                showWhenUp = false
+                chatWindow.show(url: chatURL, navigate: true)
+            }
         } else if starting {
             headerItem?.title = "REFUGIO — starting…"
             toggleItem?.title = "Stop REFUGIO (frees memory)"
         } else {
+            // Gave up waiting. A window appearing minutes after the click that
+            // asked for it would be a surprise, not an answer.
+            showWhenUp = false
             headerItem?.title = "REFUGIO — stopped"
             toggleItem?.title = "Start REFUGIO"
         }

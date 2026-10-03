@@ -53,9 +53,7 @@ console.log('');
 
 // Open browser (best effort)
 import('child_process').then(({ exec }) => {
-  const cmd = process.platform === 'darwin' ? 'open' :
-              process.platform === 'win32' ? 'start' : 'xdg-open';
-  exec(`${cmd} "${authUrl}"`);
+  exec(`open "${authUrl}"`);
 });
 
 // Start temporary server to capture the callback

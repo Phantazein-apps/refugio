@@ -116,7 +116,7 @@ jobs:
       - name: Syntax
         run: |
           for f in install-refugio uninstall-refugio menubar/install.sh \
-                   menubar/doctor.sh tray/refugio-tray.sh \
+                   menubar/doctor.sh \
                    packaging/macos/build-pkg.sh packaging/macos/refugio-cli \
                    packaging/macos/refugio-user-setup \
                    packaging/macos/scripts/preinstall packaging/macos/scripts/postinstall; do
@@ -134,7 +134,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -S warning install-refugio uninstall-refugio \
-            menubar/install.sh menubar/doctor.sh tray/refugio-tray.sh \
+            menubar/install.sh menubar/doctor.sh \
             packaging/macos/build-pkg.sh packaging/macos/refugio-cli \
             packaging/macos/refugio-user-setup \
             packaging/macos/scripts/preinstall packaging/macos/scripts/postinstall || true

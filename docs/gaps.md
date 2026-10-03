@@ -12,40 +12,29 @@ README's rough-edges list, a spec's milestone table and two dead branches.
 
 ---
 
-## 1. The packaged installs never start the tray or the menu-bar app
+## 1. The packaged install never starts the menu-bar app
 
-**The largest gap, and the one that undoes PR #9 entirely.**
+**The largest gap.**
 
-PR #9 existed because Linux and Windows had no GUI way to stop REFUGIO, which
-matters when the stack holds gigabytes of RAM. That shipped — for people who
-install from the terminal. `install-node.cjs:283–341` writes the Windows
-`.vbs` wrapper plus a Startup shortcut, and the Linux `.desktop` and autostart
-entries.
+A terminal install builds `REFUGIO.app` and launches it (`install-node.cjs`
+runs `menubar/install.sh`), so the person has an icon that starts and stops a
+stack holding gigabytes of RAM. The `.pkg` builds and installs the same
+`/Applications/REFUGIO.app` and then never opens it:
+`refugio-user-setup` execs the supervisor and stops there. There is no login
+item either — `SMAppService` self-registration in `LoginItem.swift` only
+happens after a human launches the app from `/Applications` by hand.
 
-The `.pkg` and `.msi` do neither:
+The consequence is specific: a Mac that receives REFUGIO by MDM runs it with no
+icon anywhere, and the only way to stop it is a terminal the deployment was
+designed to avoid. `refugio-user-setup` is the right place for the fix — it
+already runs once per user with the user's own privileges, which is exactly
+what opening the app or registering a login item requires.
 
-| Platform | What the package does | What it does not |
-|---|---|---|
-| Windows | `packaging/windows/user-setup.cjs` writes `Startup\REFUGIO.cmd`, which starts **the supervisor** | Never writes the tray's `.vbs` or its Startup entry. `tray/refugio-tray.ps1` is in the payload and nothing ever runs it. |
-| macOS | `build-pkg.sh` builds, signs and installs `/Applications/REFUGIO.app` | `refugio-user-setup` execs the supervisor and never opens the app. There is no login item; `SMAppService` self-registration in `LoginItem.swift` only happens after a human launches it from `/Applications` by hand. |
-| Linux | — | There is no Linux package at all. No `.deb`, `.rpm` or AppImage, so `tray/refugio-tray.sh` has no managed path. |
+## 2. Withdrawn
 
-The consequence is specific: a machine that receives REFUGIO by MDM runs it
-with no icon anywhere, and the only way to stop it is a terminal the deployment
-was designed to avoid. The per-user setup scripts are the right place for the
-fix — they already run once per user with the user's own privileges, which is
-exactly what writing a Startup entry or a login item requires.
-
-## 2. The Windows tray has still never been run on Windows
-
-Written, brace-and-quote balanced, syntax-checked. Nothing more. There is no
-PowerShell in the build container and no Windows runner exercises it. Already
-in the README's rough edges; repeated here because item 1 would ship it to a
-fleet.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tray\refugio-tray.ps1
-```
+This entry was the Windows tray, which had never been run on Windows. Windows
+and Linux support have since been removed, and the tray with them. The number
+is kept because other files cite these entries by number.
 
 ## 3. Tool provenance is rendered and then thrown away
 
@@ -106,68 +95,54 @@ to install a model that cannot call tools at all, caps the surface
 model-capability limit, not a bug to fix — it is recorded so it is not
 rediscovered as one.
 
-## 8. The installers build, and nothing they produce is signed
+## 8. The installer builds, and nothing it produces is signed
 
 **Corrected 2026-08-27.** This entry used to read *"neither installer has ever
 been built"*. That is no longer true. `.github/workflows/package.yml` builds
-both on every push, installs them silently on real macOS and Windows runners
-and asserts what landed — including, on Windows, that a deploy-time policy
-property set with `msiexec /qn ALLOWEDMODES="..."` reaches the Policies hive.
+the `.pkg` on every push, installs it silently on a real macOS runner and
+asserts what landed — the payload, the login agent, the CLI on `PATH`, both
+Node runtimes, and a supervisor that survives being started.
 
-What remains is signing. The certificates do not exist yet, so the job publishes
-its artifacts as `refugio-pkg-UNSIGNED` and `refugio-msi-UNSIGNED` — which on
-macOS means *"cannot be opened because Apple cannot check it for malicious
-software"* on every Mac since Catalina. See `packaging/README.md` for the
-certificate types and costs.
+What remains is signing. There is no Apple Developer ID yet, so the job
+publishes its artifact as `refugio-pkg-UNSIGNED` — which means *"cannot be
+opened because Apple cannot check it for malicious software"* on every Mac
+since Catalina, and an MDM that will not install it at all. See
+`packaging/README.md` for the certificate types and costs.
 
-## 9. LM Studio is offered as an engine and the v2 chat window cannot use it
+## 9. LM Studio is not supported
 
-`REFUGIO_ENGINE=lmstudio` is accepted by the installer, written to
-`~/.refugio.env` and documented in the README's engine section. In v2 it does
-not reach the chat window.
+v1 offered `REFUGIO_ENGINE=lmstudio`, and it worked there because Open WebUI
+consumed LM Studio's OpenAI-compatible `/v1` directly. v2 replaced that UI and
+never carried the engine across: `chat/server.js` takes every local model call
+from `chat/ollama.js`, which speaks Ollama's **native** API — NDJSON
+`/api/chat`, `/api/tags`, `/api/show`, `/api/pull` — and nothing under `chat/`
+read the `OPENAI_API_BASE_URL` the installer wrote for LM Studio. Choosing it
+gave an empty model list and *"No model available. Is Ollama running?"*. With
+Open WebUI removed there was no path left on which it worked, so the installer
+no longer offers it. Ollama is the only local engine.
 
-`chat/server.js:36` imports every model call from `chat/ollama.js`, which
-speaks Ollama's **native** API — NDJSON `/api/chat`, `/api/tags`, `/api/show`,
-`/api/pull` — at `OLLAMA_BASE_URL`. LM Studio serves an OpenAI-compatible
-`/v1`, and nothing under `chat/` reads the `OPENAI_API_BASE_URL` the installer
-writes for it. The supervisor compounds it rather than catching it: `wantsOllama`
-is false under this engine (`start-refugio.cjs:510`), so no Ollama is started,
-while the chat server starts regardless (`start-refugio.cjs:824`). What the
-person gets is an empty model list and *"No model available. Is Ollama
-running?"* — naming the engine they deliberately did not pick.
+The way back is an OpenAI-compatible client behind the engine seam.
+[`docs/pi-ai-spike.md`](pi-ai-spike.md) §6 records that pi-ai makes this nearly
+free — LM Studio is the Ollama `/v1` path with a different base URL — and the
+same path would make vLLM, llama.cpp's `server`, `mlx_lm.server` and TGI
+reachable by base URL. Two things do not carry over and have to be decided
+rather than discovered:
 
-This worked on the Open WebUI path, which consumed `OPENAI_API_BASE_URL`
-directly. It was never carried across when v2 replaced that UI, so it is a
-regression that reads as a feature — which is why it is here and not in the
-README's rough edges alone.
+- **The tool-calling gate.** `/api/show` capabilities is how REFUGIO knows a
+  model can drive connectors at all, and no OpenAI-compatible server reports
+  it. `models.json` calls that gate "the gate the whole product hangs on".
+- **Downloads.** `/api/pull` has no equivalent, so the Settings download has to
+  be hidden for such an engine rather than left to fail.
 
-Cost to close: a `chat/openai.js` with the same six exports, and an engine
-switch at the single import. Three are near-mechanical (`complete`, `isUp`,
-`listModels` over `/v1/models`, which loses size and `modified_at` and degrades
-to "unrated" — a path `chat/server.js:204` already tolerates). `chatStream` has
-to accumulate tool-call fragments across indexed deltas where Ollama hands over
-a whole object. `showModel` has no equivalent and must return `null`, which
-callers already read as UNKNOWN rather than "no". `pullModel` has no equivalent
-at all, so the Settings download has to be hidden for this engine rather than
-left to fail.
-
-The same file would make vLLM, llama.cpp's `server`, `mlx_lm.server` and TGI
-reachable by base URL, with no second model lifecycle to maintain. What it
-cannot carry over is the tool-calling gate: `/api/show` capabilities is how
-REFUGIO knows a model can drive connectors at all, and no OpenAI-compatible
-server reports it. That is a decision to take deliberately rather than a detail
-to discover — `models.json` calls that gate "the gate the whole product hangs
-on".
-
-## 10. REFUGIO Listener has no menu-bar app, tray icon, or packaged install
+## 10. REFUGIO Listener has no menu-bar app or packaged install
 
 The split into two products ([`docs/editions.md`](editions.md)) made everything
 a person's data touches per-edition — directory, database, credentials, port,
-login item, CLI, launcher scripts. Three surfaces were deliberately left as
-REFUGIO's alone, and a Listener install gets none of them:
+login item, CLI, launcher scripts. Two surfaces were deliberately left as
+REFUGIO's alone, and a Listener install gets neither:
 
-- **The macOS menu-bar app** (`menubar/`). A Swift bundle whose sources
-  hard-code `~/refugio`, `~/.refugio-logs`, ports 8090/8080 and the
+- **The menu-bar app** (`menubar/`). A Swift bundle whose sources
+  hard-code `~/refugio`, `~/.refugio-logs`, port 8090 and the
   `com.phantazein.refugio` identifier, built by `menubar/install.sh` into
   `/Applications/REFUGIO.app`. Parameterising it is perhaps forty lines of
   Swift plus an `Info.plist` key — and it cannot be compiled or exercised
@@ -175,17 +150,13 @@ REFUGIO's alone, and a Listener install gets none of them:
   that starts and stops the *other* product. That risk is why the installer
   prints one line saying the launchers are REFUGIO-only rather than installing
   a copy under the wrong identity.
-- **The Windows and Linux trays** (`tray/`). The same shape of problem without
-  the build step: two scripts written for one install's paths.
-- **The `.pkg` and `.msi`** (`packaging/`). Bundle identifiers, an MDM
-  configuration profile and an ADMX template, all written for one product. A
-  second set is a distribution decision — signing, identifiers, profiles —
-  rather than a code change.
+- **The `.pkg`** (`packaging/`). Bundle identifiers and MDM configuration
+  profiles, all written for one product. A second set is a distribution
+  decision — signing, identifiers, profiles — rather than a code change.
 
 What the Listener does get: the per-edition `refugio-listener` command
-(`start`, `bg`, `stop`, `restart`, `status`), `Start REFUGIO Listener.command`
-on macOS, the `.bat` launchers on Windows, a `.desktop` entry on Linux, and its
-own login item. Everything the launchers do is reachable; the icon is not
+(`start`, `bg`, `stop`, `restart`, `status`), `Start REFUGIO Listener.command`,
+and its own login item. Everything the launchers do is reachable; the icon is not
 there.
 
 ## 11. Not a gap: TCC consent

@@ -1,14 +1,14 @@
-# Build the .pkg and .msi.
+# Build the .pkg.
 #
 # Runs on every push so the packaging scripts cannot rot unnoticed — the whole
 # reason CI exists in this repo is that a Swift change shipped three times
 # without ever being compiled. Packaging has the same failure mode and a worse
 # blast radius: a broken .pkg is discovered by an IT department mid-rollout.
 #
-# Signing is CONDITIONAL, on purpose. Without secrets the jobs still run and
-# produce unsigned artifacts clearly labelled as such, so a fork, a PR from
+# Signing is CONDITIONAL, on purpose. Without secrets the job still runs and
+# produces an unsigned artifact clearly labelled as such, so a fork, a PR from
 # outside, and a repo whose owner has not bought certificates yet all still get
-# the build checked. With secrets present the same scripts sign and notarize.
+# the build checked. With secrets present the same script signs and notarizes.
 #
 # What the secrets are, and what they cost, is in packaging/README.md.
 
@@ -149,135 +149,3 @@ jobs:
       - name: Remove the signing keychain
         if: always()
         run: security delete-keychain build.keychain || true
-
-  windows:
-    name: .msi
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install WiX
-        run: dotnet tool install --global wix
-
-      - name: Build
-        shell: pwsh
-        run: ./packaging/windows/build-msi.ps1
-
-      # Install silently, exactly as Intune would, then check the same class of
-      # things the macOS job does. `/qn` matters: an MSI that only works
-      # interactively is not deployable, and the difference does not show up
-      # until it is being pushed to a fleet.
-      - name: Install silently and check what landed
-        shell: pwsh
-        run: |
-          $msi = (Get-ChildItem dist\*.msi | Select-Object -First 1).FullName
-          $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) {
-            # The tail alone is boilerplate rollback/cleanup noise — the actual
-            # failing action is wherever a standard action logs "return value 3",
-            # which a 60-line tail on a package with several components does not
-            # reliably reach.
-            $log = Get-Content install.log
-            $hits = $log | Select-String -Pattern 'return value 3' -SimpleMatch
-            foreach ($h in $hits) {
-              $i = $h.LineNumber - 1
-              Write-Host "--- around line $($h.LineNumber) ---"
-              $log[([Math]::Max(0, $i - 20))..([Math]::Min($log.Count - 1, $i + 2))]
-            }
-            Write-Host "--- tail ---"
-            Get-Content install.log -Tail 60
-            throw "msiexec exited $($p.ExitCode)"
-          }
-          $root = "$env:ProgramFiles\REFUGIO"
-
-          # A 32-bit package would be WOW64-redirected to Program Files (x86)
-          # and still report a successful install, so name that case rather
-          # than reporting each redirected file as individually "missing".
-          if ((-not (Test-Path $root)) -and (Test-Path "${env:ProgramFiles(x86)}\REFUGIO")) {
-            throw "installed to Program Files (x86) — the package is 32-bit; wix build needs -arch x64"
-          }
-          foreach ($f in @("runtime\node.exe", "runtime\refugio-node.exe", "start-refugio.cjs",
-                           "chat\server.js", "packaging\windows\user-setup.cjs")) {
-            if (-not (Test-Path "$root\$f")) { throw "missing from the payload: $f" }
-          }
-          if (-not (Test-Path "HKLM:\SOFTWARE\Microsoft\Active Setup\Installed Components\{B4F1D6C2-3E88-4A17-9D20-6C5E8B1A7F03}")) {
-            throw "Active Setup was not registered — no user would ever be provisioned"
-          }
-          # Load, not parse. A payload whose dependencies failed to install
-          # passes a syntax check and then dies on first launch.
-          #
-          # From $root, not the workspace: -e resolves against the current
-          # directory, and the checkout this job runs in has no node_modules
-          # of its own — so without this the check reports on the wrong tree.
-          Push-Location $root
-          try {
-            & "$root\runtime\node.exe" -e "require.resolve('@modelcontextprotocol/sdk/package.json'); console.log('dependencies resolve')"
-            if ($LASTEXITCODE -ne 0) { throw "the payload's dependencies do not resolve" }
-          } finally { Pop-Location }
-          # The per-user step has to survive being run twice: Active Setup can
-          # re-run it, and a second run that throws is a crash dialog on
-          # someone's first logon.
-          #
-          # Each run's exit code is checked. Without that this printed
-          # "idempotent" while both runs were crashing on every logon — the
-          # step only failed at all because pwsh propagates the last exit
-          # code, which pointed at the wrong line.
-          foreach ($run in 1, 2) {
-            & "$root\runtime\node.exe" "$root\packaging\windows\user-setup.cjs"
-            if ($LASTEXITCODE -ne 0) { throw "user-setup run $run exited $LASTEXITCODE" }
-          }
-          Write-Host "user-setup is idempotent"
-
-          # What the machine reports it has. ProductVersion cannot carry a
-          # prerelease label, so the receipt carries the full semver instead —
-          # assert that, or the plumbing that keeps them apart can rot back
-          # into reporting "2.0.0" for an alpha build.
-          $semver = (Get-Content package.json | ConvertFrom-Json).version
-          $receipt = (Get-ItemProperty "HKLM:\SOFTWARE\Phantazein\REFUGIO" -Name Version).Version
-          if ($receipt -ne $semver) { throw "install receipt says '$receipt', package.json says '$semver'" }
-          Write-Host "install receipt reports $receipt"
-
-          # The supervisor has to survive being started. Backgrounded and then
-          # killed: what is being tested is that it does not exit immediately,
-          # which is what a broken payload does. The .pkg job has always done
-          # this and this job did not — which is how a payload that installs
-          # cleanly and then dies on first launch would ship unnoticed.
-          #
-          # Launched through refugio-node.exe because that is what the Start
-          # Menu shortcut runs; nothing else exercises that copy.
-          $sup = Start-Process -FilePath "$root\runtime\refugio-node.exe" `
-                               -ArgumentList "`"$root\start-refugio.cjs`"" `
-                               -WorkingDirectory $root -PassThru `
-                               -RedirectStandardOutput sup.out -RedirectStandardError sup.err
-          Start-Sleep -Seconds 12
-          if ($sup.HasExited) {
-            Write-Host "--- stdout ---"; Get-Content sup.out -ErrorAction SilentlyContinue | Write-Host
-            Write-Host "--- stderr ---"; Get-Content sup.err -ErrorAction SilentlyContinue | Write-Host
-            throw "the supervisor died on startup (exit $($sup.ExitCode))"
-          }
-          Stop-Process -Id $sup.Id -Force -ErrorAction SilentlyContinue
-          Write-Host "supervisor stayed up"
-
-      - name: Check the deploy-time policy properties
-        shell: pwsh
-        run: |
-          $msi = (Get-ChildItem dist\*.msi | Select-Object -First 1).FullName
-          Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait
-          Start-Process msiexec -ArgumentList "/i `"$msi`" /qn WEBSEARCH=off UPDATECHECKS=off ALLOWEDMODES=`"nvc,career`"" -Wait
-          $k = "HKLM:\SOFTWARE\Policies\Phantazein\REFUGIO"
-          if ((Get-ItemProperty $k -Name webSearch).webSearch -ne "off") { throw "WEBSEARCH=off did not write the policy" }
-          if ((Get-ItemProperty $k -Name updateChecks).updateChecks -ne "off") { throw "UPDATECHECKS=off did not write the policy" }
-          # A list property as well as the two enums, because they take
-          # different paths through the WXS: the enums are conditioned on a
-          # literal value and this one on the property being set at all.
-          $modes = (Get-ItemProperty $k -Name allowedModes).allowedModes
-          if ($modes -ne "nvc,career") { throw "ALLOWEDMODES wrote '$modes'" }
-          Write-Host "deploy-time policy works"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: refugio-msi-UNSIGNED
-          path: dist/*.msi

@@ -46,7 +46,7 @@
  *   chatPort       The chat window's port. Different so a leftover process
  *                  from the other edition is a refusal to start rather than a
  *                  window that looks like this one and is not.
- *   agentLabel     launchd label / systemd unit / Windows startup entry.
+ *   agentLabel     The launchd label.
  *   macApp         The bundle installed into /Applications.
  *   cli            The `refugio` / `refugio-listener` shim on PATH.
  *   bootstrap      The installer entry point that selects this edition.

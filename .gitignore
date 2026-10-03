@@ -16,13 +16,26 @@ credentials.json
 # Notion (generated index and user config with page IDs)
 notion_index.json
 notion_roots.json
+
+# Connector config the chat server reads, and its database — per machine
+mcpo-config.json
+data/
+
+# The double-clickable launcher. The installer writes it with this machine's
+# node and directory baked in, so a committed copy is wrong everywhere else.
+Start REFUGIO.command
+Start REFUGIO Listener.command
+
+# Left on disk by retired versions (Open WebUI, and Caddy for https://refugio).
+# Nothing creates these any more, and the installer removes certs/ and the
+# Caddyfile when it next runs — but an install updated by `git pull` alone
+# still has them, and certs/ holds a private key and .webui_secret_key a
+# secret. Ignored so neither can be committed by accident.
 certs/
 Caddyfile
-mcpo-config.json
 .webui_secret_key
 branding/env.py
 app/
-data/
 
 # Which product this install is (written by the installer)
 .refugio-edition

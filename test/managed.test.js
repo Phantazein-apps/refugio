@@ -33,25 +33,23 @@ function withPolicyFile(obj, fn) {
 // ── Reading ─────────────────────────────────────────────────
 
 test("an unmanaged machine costs nothing and reports nothing", () => {
-  const p = readPolicy({ platform: "linux", env: { REFUGIO_MANAGED_POLICY: "/nowhere/at/all.json" } });
+  const p = readPolicy({ env: { REFUGIO_MANAGED_POLICY: "/nowhere/at/all.json" } });
   assert.deepEqual(p, {});
   assert.equal(describePolicy(p), null);
 });
 
-test("a policy file is read on any platform when pointed at explicitly", () => {
+test("a policy file is read when pointed at explicitly", () => {
   withPolicyFile({ webSearch: "off" }, (path) => {
-    assert.deepEqual(readPolicy({ platform: "linux", env: { REFUGIO_MANAGED_POLICY: path } }), { webSearch: "off" });
-    // The override wins on macOS and Windows too — that is how an admin tries
-    // a policy before pushing it, and how these tests run at all.
-    assert.deepEqual(readPolicy({ platform: "darwin", env: { REFUGIO_MANAGED_POLICY: path } }), { webSearch: "off" });
-    assert.deepEqual(readPolicy({ platform: "win32", env: { REFUGIO_MANAGED_POLICY: path } }), { webSearch: "off" });
+    // The override wins over the managed plist — that is how an admin tries a
+    // policy before pushing it, and how these tests run at all.
+    assert.deepEqual(readPolicy({ env: { REFUGIO_MANAGED_POLICY: path } }), { webSearch: "off" });
   });
 });
 
 test("a corrupt policy does not stop REFUGIO starting", () => {
   const said = [];
   withPolicyFile("{ this is not json", (path) => {
-    const p = readPolicy({ platform: "linux", env: { REFUGIO_MANAGED_POLICY: path }, log: (m) => said.push(m) });
+    const p = readPolicy({ env: { REFUGIO_MANAGED_POLICY: path }, log: (m) => said.push(m) });
     assert.deepEqual(p, {});
   });
   // Silence here would be the worst outcome: the admin believes the policy
@@ -89,7 +87,7 @@ test("a boolean is read the way an admin meant it", () => {
 test("a connector list survives as a list, however it was written", () => {
   assert.deepEqual(normalise({ allowedConnectors: ["notes", "reminders"] }).allowedConnectors,
     ["notes", "reminders"]);
-  // REG_SZ has no list type, so a Windows admin writes a string.
+  // An admin may well write a <string> where the profile wants an <array>.
   assert.deepEqual(normalise({ allowedConnectors: "notes, reminders" }).allowedConnectors,
     ["notes", "reminders"]);
 });
@@ -229,7 +227,7 @@ test("no mode allow-list means every mode may be switched on", () => {
 test("the mode policy is a list, and a misspelled one is dropped by name", () => {
   const said = [];
   assert.deepEqual(normalise({ allowedModes: ["nvc", "career"] }).allowedModes, ["nvc", "career"]);
-  // What a Windows administrator types into the Group Policy text box.
+  // What an administrator types into a single <string> rather than an <array>.
   assert.deepEqual(normalise({ allowedModes: "nvc, career" }).allowedModes, ["nvc", "career"]);
   assert.deepEqual(normalise({ allowedModes: 42 }, (m) => said.push(m)), {});
   assert.match(said.join(" "), /allowedModes/);
@@ -244,17 +242,18 @@ test("the mode policy is a list, and a misspelled one is dropped by name", () =>
 
 // ── The templates admins actually edit ──────────────────────
 //
-// Three files have to agree on the key names: this reader, the .mobileconfig a
-// Mac admin starts from, and the .admx a Windows admin loads into Group
-// Policy. Drift between them has no symptom. An administrator sets a policy,
-// Group Policy accepts it, the registry holds it, and REFUGIO ignores it — and
-// the only way anyone finds out is by testing whether web search still works
-// on a machine that was supposed to have it disabled, which nobody does.
+// Two files have to agree on the key names: this reader and the .mobileconfig
+// a Mac admin starts from. Drift between them has no symptom. An administrator
+// sets a policy, the MDM pushes it, the managed plist holds it, and REFUGIO
+// ignores it — and the only way anyone finds out is by testing whether web
+// search still works on a machine that was supposed to have it disabled,
+// which nobody does.
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf-8");
+const PROFILE = "../packaging/macos/profiles/com.phantazein.refugio.settings.mobileconfig";
 
 test("every key in the macOS profile is one REFUGIO reads", () => {
-  const xml = read("../packaging/macos/profiles/com.phantazein.refugio.settings.mobileconfig");
+  const xml = read(PROFILE);
   const body = xml.split("<key>mcx_preference_settings</key>")[1];
   assert.ok(body, "the sample profile must actually set some preferences");
   const keys = [...body.matchAll(/<key>([^<]+)<\/key>/g)].map((m) => m[1]);
@@ -264,35 +263,32 @@ test("every key in the macOS profile is one REFUGIO reads", () => {
   }
 });
 
-test("every key in the Group Policy template is one REFUGIO reads", () => {
-  const admx = read("../packaging/windows/REFUGIO.admx");
-  const keys = [...admx.matchAll(/valueName="([^"]+)"/g)].map((m) => m[1]);
-  assert.ok(keys.length >= 4, `expected a policy per key, saw ${keys.length}`);
-  for (const k of keys) {
-    assert.ok(POLICY_KEYS[k], `the ADMX sets "${k}", which chat/managed.js does not read`);
-  }
-});
-
-test("every key REFUGIO reads is discoverable in both templates", () => {
+test("every key REFUGIO reads is discoverable in the sample profile", () => {
   // The other direction, and the one that matters more: a key nobody can find
-  // in Group Policy or in the sample profile is a key nobody will ever set.
-  const admx = read("../packaging/windows/REFUGIO.admx");
-  const profile = read("../packaging/macos/profiles/com.phantazein.refugio.settings.mobileconfig");
+  // in the sample profile is a key nobody will ever set.
+  const profile = read(PROFILE);
   for (const key of Object.keys(POLICY_KEYS)) {
-    assert.ok(admx.includes(`valueName="${key}"`), `${key} is missing from REFUGIO.admx`);
     assert.ok(profile.includes(`<key>${key}</key>`), `${key} is missing from the sample .mobileconfig`);
   }
 });
 
-test("the Group Policy template only ever narrows", () => {
-  // Assert on the shipped file, not on intent. A future edit that adds
-  // <enabledValue><string>on</string></enabledValue> would hand an
-  // administrator the ability to turn web search on for someone who never
-  // armed it, which is the one thing this design promises cannot happen.
-  const admx = read("../packaging/windows/REFUGIO.admx");
-  const enabled = [...admx.matchAll(/<enabledValue><string>([^<]*)<\/string><\/enabledValue>/g)].map((m) => m[1]);
-  for (const v of enabled) {
-    assert.equal(v, "off", `a policy enables "${v}" — policy may only ever take a capability away`);
+test("the sample profile only ever narrows", () => {
+  // Assert on the shipped file, not on intent. A future edit that sets
+  // <key>webSearch</key><string>on</string> would teach every administrator
+  // who copies the sample that turning web search on for someone who never
+  // armed it is possible — the one thing this design promises cannot happen.
+  // normalise() would drop "on" anyway; the sample must not suggest it.
+  const body = read(PROFILE).split("<key>mcx_preference_settings</key>")[1];
+  const pairs = [...body.matchAll(/<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g)];
+  assert.ok(pairs.length >= 3, `expected the profile to set several on/off keys, saw ${pairs.length}`);
+  for (const [, key, value] of pairs) {
+    assert.ok(["user", "off"].includes(value),
+      `the profile sets ${key} to "${value}" — policy may only ever take a capability away`);
+  }
+  // And the reader itself has no value that grants anything.
+  for (const [key, spec] of Object.entries(POLICY_KEYS)) {
+    if (spec.type !== "enum") continue;
+    assert.deepEqual([...spec.values].sort(), ["off", "user"], `${key} accepts something other than user / off`);
   }
 });
 

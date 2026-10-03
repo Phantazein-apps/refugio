@@ -137,20 +137,49 @@ if [ "$DRY" = 0 ]; then
   # other product's supervisor from inside this one's uninstall.
   pkill -f "$HOME/$INSTALL_DIR/start-refugio" 2>/dev/null
   pkill -f "$MAC_APP/Contents/MacOS/RefugioBar" 2>/dev/null
-  pkill -f "$CLI-tray" 2>/dev/null
   launchctl unload "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist" 2>/dev/null
-  systemctl --user stop "$CLI.service" 2>/dev/null
   sleep 2
 fi
 say "  done"
+
+# ── 1b. The retired https://refugio domain ─────────────────────────────
+# Earlier installs served the window at https://refugio through Caddy, with a
+# certificate in certs/ and a Caddyfile inside the install directory. The
+# directory goes below anyway; what matters here is that a Caddy still running
+# that Caddyfile is stopped first, rather than left holding :443 for a proxy to
+# nothing. Only OUR Caddy: `caddy stop` stops whichever Caddy owns the admin
+# port, and someone who runs their own would not thank an uninstaller for it.
+# /etc/hosts is left alone — editing it needs an admin password, and a stale
+# line there points nowhere harmful.
+CADDYFILE="$HOME/$INSTALL_DIR/Caddyfile"
+if [ -e "$CADDYFILE" ] || [ -d "$HOME/$INSTALL_DIR/certs" ]; then
+  step "Old https://refugio setup"
+  if [ "$DRY" = 1 ]; then
+    say "  would stop  Caddy, if it is running this install's Caddyfile"
+  elif pgrep -f "$CADDYFILE" >/dev/null 2>&1; then
+    for c in /opt/homebrew/bin/caddy /usr/local/bin/caddy caddy; do
+      if command -v "$c" >/dev/null 2>&1; then "$c" stop >/dev/null 2>&1 && say "  stopped  Caddy"; break; fi
+    done
+  fi
+  rm_path "$CADDYFILE"
+  rm_path "$HOME/$INSTALL_DIR/certs"
+  if grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+refugio[[:space:]]*$' /etc/hosts 2>/dev/null; then
+    say "  ${DIM}You may remove the \"127.0.0.1 refugio\" line from /etc/hosts — nothing uses it now.${RESET}"
+  fi
+fi
+
+# MCPO was an Open WebUI-only proxy, installed as a uv tool. Best effort and
+# quiet: most machines never had it.
+if [ -e "$HOME/.local/bin/mcpo" ]; then
+  UV_BIN="$(command -v uv || echo "$HOME/.local/bin/uv")"
+  if [ "$DRY" = 1 ]; then say "  would run  uv tool uninstall mcpo"
+  else "$UV_BIN" tool uninstall mcpo >/dev/null 2>&1 && say "  removed  mcpo (uv tool)"; fi
+fi
 
 # ── 2. Things a reinstall recreates — removed without asking ───────────
 step "Removing $PRODUCT itself"
 rm_path "/Applications/$MAC_APP"
 rm_path "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
-rm_path "$HOME/.config/systemd/user/$CLI.service"
-rm_path "$HOME/.config/autostart/$CLI-tray.desktop"
-rm_path "$HOME/.local/share/applications/$CLI.desktop"
 rm_path "$HOME/.local/bin/$CLI"
 rm_path "$HOME/$LOG_DIR"
 
@@ -260,12 +289,10 @@ else
     # Stop the server before removing the files under it.
     if [ "$DRY" = 0 ]; then
       pkill -f "ollama serve" 2>/dev/null
-      sudo systemctl stop ollama 2>/dev/null
-      sudo systemctl disable ollama 2>/dev/null
       sleep 1
     fi
 
-    # macOS — brew, or the app bundle the installer unzips into /Applications.
+    # Brew, or the app bundle the installer unzips into /Applications.
     if command -v brew >/dev/null 2>&1 && brew list ollama >/dev/null 2>&1; then
       if [ "$DRY" = 1 ]; then say "  would run  brew uninstall ollama"
       else brew uninstall ollama >/dev/null 2>&1 && say "  removed  ollama (Homebrew)"; fi
@@ -273,19 +300,14 @@ else
     fi
     rm_path "/Applications/Ollama.app"
 
-    # Linux — the official install script's binary, service and data directory.
-    # These need root, so they are announced rather than run silently; the
-    # password prompt is the second confirmation.
-    for p in /usr/local/bin/ollama /etc/systemd/system/ollama.service /usr/share/ollama; do
-      [ -e "$p" ] || continue
-      if [ "$DRY" = 1 ]; then say "  would remove  $p ${DIM}(needs sudo)${RESET}"
-      else say "  ${DIM}removing $p (sudo)${RESET}"; sudo rm -rf "$p" && say "  removed  $p"; fi
+    # The command-line link Ollama.app offers to put in /usr/local/bin. Brew's
+    # own uninstall has already taken it if brew put it there; if it is still
+    # here it is root-owned, so it is announced rather than removed silently
+    # and the password prompt is the second confirmation.
+    if [ -e /usr/local/bin/ollama ] || [ -L /usr/local/bin/ollama ]; then
+      if [ "$DRY" = 1 ]; then say "  would remove  /usr/local/bin/ollama ${DIM}(needs sudo)${RESET}"
+      else say "  ${DIM}removing /usr/local/bin/ollama (sudo)${RESET}"; sudo rm -f /usr/local/bin/ollama && say "  removed  /usr/local/bin/ollama"; fi
       gone=$((gone + 1))
-    done
-    if [ "$DRY" = 0 ] && [ -f /etc/systemd/system/ollama.service ]; then :; fi
-    if [ "$DRY" = 0 ] && id ollama >/dev/null 2>&1; then
-      sudo userdel ollama 2>/dev/null && say "  removed  the ollama service user"
-      sudo groupdel ollama 2>/dev/null
     fi
 
     # ~/.ollama holds the downloaded models and the keypair Ollama identifies

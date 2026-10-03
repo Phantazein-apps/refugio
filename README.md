@@ -4,7 +4,7 @@
 
 <p>
   <img src="https://img.shields.io/badge/v2-BETA-ff0018?style=flat-square&labelColor=000000" alt="v2 beta">
-  <img src="https://img.shields.io/badge/macOS%20·%20Linux%20·%20Windows-f4f2ee?style=flat-square&labelColor=000000" alt="Cross-platform">
+  <img src="https://img.shields.io/badge/macOS-f4f2ee?style=flat-square&labelColor=000000" alt="macOS">
   <img src="https://img.shields.io/badge/local%20LLM-Ollama-ff0018?style=flat-square&labelColor=000000" alt="Local LLM">
   <img src="https://img.shields.io/badge/connectors-MCP-ff0018?style=flat-square&labelColor=000000" alt="MCP connectors">
   <img src="https://img.shields.io/badge/license-MIT-a8a5a0?style=flat-square&labelColor=000000" alt="MIT license">
@@ -24,31 +24,34 @@
 <td><a href="#local-llm-engine">🧠 LLM engine</a></td>
 <td><a href="#connectors">🔌 Connectors</a></td>
 <td><a href="#day-to-day-usage">⚡ Daily use</a></td>
-<td><a href="#custom-domain">🌐 Domain</a></td>
 </tr>
 </table>
 
 One command installs a **local LLM** (Ollama) and REFUGIO's own chat window, giving you a private, self-hosted AI assistant with no cloud, no API keys, and no data leaving your computer. Optional [Model Context Protocol](https://modelcontextprotocol.io/) connectors plug it into your **personal** tools — WhatsApp ([Hermeneia](https://github.com/Phantazein-apps/hermeneia)), email ([Epistole](https://github.com/Phantazein-apps/epistole)), Apple Reminders, Things 3, Notion, and persistent memory — and, if you want, **business** tools like Slack, Jira, ServiceNow, and Salesforce.
 
-Works on **macOS, Linux, and Windows**. No prerequisites — the installer handles everything (Node.js, Git, the LLM engine, and the model).
+**macOS only** — Apple Silicon or Intel. No prerequisites — the installer handles everything (Node.js, Git, the LLM engine, and the model).
+
+> **Why only macOS.** REFUGIO used to install on Linux and Windows too. Both were
+> removed so that one platform could be made reliable instead of three kept half
+> working: the Windows tray had never been run on Windows, and nothing on Linux
+> had a packaged install. The Mac is where the native window, the menu-bar app
+> and the Apple connectors live, and it is the one that is exercised daily.
 
 > ## ⚠️ v2 is in beta, and beta means something specific here
 >
 > **The desktop install is exercised daily** — the chat window, settings, the setup
-> wizard, web search, discussion modes and the native macOS window. Both installers
-> build, install silently and are checked by CI on every push, on real macOS and
-> Windows runners.
+> wizard, web search, discussion modes and the native macOS window. The `.pkg`
+> builds, installs silently and is checked by CI on every push, on a real macOS
+> runner.
 >
-> **The MDM path is not.** A machine that receives REFUGIO from Jamf or Intune runs it
-> with no icon anywhere, because neither package starts the tray or the menu-bar app,
-> and the **Windows tray script has still never been run on Windows**. Managed policy
-> is the part of that story that *is* tested. See the rough edges below and
-> [`docs/gaps.md`](docs/gaps.md), which is the full register rather than a summary.
+> **The MDM path is not.** A Mac that receives REFUGIO from Jamf runs it with no
+> icon anywhere, because the package never opens the menu-bar app. And **nothing is
+> signed**: there is no Apple Developer ID yet, so Gatekeeper refuses the `.pkg`
+> and Intune will not install it. Managed policy is the part of that story that
+> *is* tested. See the rough edges below and [`docs/gaps.md`](docs/gaps.md), which
+> is the full register rather than a summary.
 >
 > Things still break and change. [Tell us what breaks](https://github.com/Phantazein-apps/refugio/issues).
->
-> The older Open WebUI build (v1.0.3) is still installable and is documented below, but
-> it is **being retired** — new work goes into v2 only.
 
 ## Install
 
@@ -78,7 +81,7 @@ installer refuses to put the second one on a machine that has the first
 The rest of this README is REFUGIO's. [`docs/editions.md`](docs/editions.md) is
 the split itself: why it exists, what it costs, and what is still REFUGIO-only.
 
-### macOS / Linux
+### The command
 
 ```bash
 # REFUGIO
@@ -88,27 +91,16 @@ curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/instal
 curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-listener | bash
 ```
 
-> **Deploying to a fleet?** There are `.pkg` and `.msi` builds designed for MDM
-> — per-machine install, per-user runtime, silent, and configurable by
-> configuration profile or Group Policy. See **[packaging/](packaging/)**, which
-> also covers what signing costs and the one thing an installer genuinely
+> **Deploying to a fleet?** There is a `.pkg` designed for MDM — per-machine
+> install, per-user runtime, silent, and configurable by configuration profile.
+> It is unsigned until there is a Developer ID. See **[packaging/](packaging/)**,
+> which also covers what signing costs and the one thing an installer genuinely
 > cannot do (grant itself access to Notes and Messages).
 
-### Windows (PowerShell)
+This installs the **v2 beta** — REFUGIO's own chat window, which talks to your connectors over MCP directly:
 
-```powershell
-# REFUGIO
-irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio.ps1 | iex
-
-# REFUGIO Listener
-irm https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-listener.ps1 | iex
-```
-
-This installs the **v2 beta** — REFUGIO's own chat window. It replaces Open WebUI and talks to your connectors over MCP directly, instead of proxying them through MCPO:
-
-- **No Python.** Open WebUI needs `uv`, a virtual environment, and loads PyTorch (~1–1.5 GB) just to boot. The built-in UI is Node and holds ~50 MB. That reclaimed memory is what lets an 8 GB machine run a model big enough to call tools.
-- **A real window.** On macOS the menu-bar app opens REFUGIO in its own window — no browser, no address bar. Linux and Windows get tray icons.
-- **Fewer moving parts.** MCPO exists only because Open WebUI can't speak MCP. The chat UI can, so it isn't started.
+- **Light.** The chat window is Node and holds about 50 MB. That is what lets an 8 GB machine run a model big enough to call tools.
+- **A real window.** The menu-bar app opens REFUGIO in its own window — no browser, no address bar.
 - **Sources.** Every answer built from your data can show exactly which tool calls produced it — which chats were read, which reminders listed.
 - **Web search, off by default.** The one thing that leaves your machine. It has to be switched on, and then armed for each individual message, with a warning saying what is sent.
 - **Discussion modes, also off by default.** One built-in frame for one conversation — reading your own WhatsApp history. It *removes* capability rather than adding it: no web search, three read-only tools, no generated titles. The six coaching frames — NVC, communication styles, career, life, a supportive listener, a Spanish tutor — are **REFUGIO Listener**, installed separately. See below.
@@ -117,41 +109,25 @@ This installs the **v2 beta** — REFUGIO's own chat window. It replaces Open We
 
 Honest list, because "beta" is a claim and these are its exceptions:
 
-- The **Windows tray script has never been run on Windows**. It is written and its syntax checks, nothing more.
 - The **native macOS window** is new and lightly exercised.
 - If the **menu-bar icon doesn't appear**: check System Settings ▸ Control Center, where macOS 26 keeps a per-app list of which menu bar icons may show. `~/.refugio-logs/menubar.log` records the item's frame at launch. Note that on macOS 26 a healthy status item's window reports **no screen**, because Control Center hosts it in its own process — so that is not a sign of anything being wrong. `menubar/probe/build.sh` builds a 40-line menu-bar app that does nothing but show the word PROBE; if that appears and REFUGIO doesn't, the difference is in REFUGIO.
 - **Small models are weak at choosing tools.** REFUGIO refuses to install one that can't call tools at all, but a 3B model still picks wrong sometimes.
-- **Ollama is the only engine v2 can use.** `REFUGIO_ENGINE=lmstudio` is still accepted and still configures the legacy Open WebUI path, but the v2 chat window speaks Ollama's native API and nothing in it reads the OpenAI-compatible URL the installer writes for LM Studio. On that engine the model list is empty. This worked before v2 replaced the UI, so it is a regression rather than a feature that never landed — [`docs/gaps.md`](docs/gaps.md) §9 has the detail and the cost to close it.
+- **Ollama is the only local engine.** LM Studio worked in v1, through Open WebUI, and never had a path in v2; it is no longer offered. [`docs/gaps.md`](docs/gaps.md) §9 has what bringing it back would take.
 - Sources are kept **for the session only** — reopening a conversation shows the answers, not the raw tool output behind them.
 
-A fuller register — including what the `.pkg` and `.msi` do *not* set up, and what the chat UI spec planned and never built — is in [`docs/gaps.md`](docs/gaps.md).
-
-### Open WebUI (legacy, being retired)
-
-Open WebUI was REFUGIO's interface through v1. It still works and is still installable, but it is on its way out — it needs `uv`, a Python virtual environment and PyTorch (~1–1.5 GB of RAM) just to start, and it can't speak MCP, which is the only reason MCPO exists in this project at all.
-
-```bash
-# The last Open WebUI release
-REFUGIO_VERSION=v1.0.3 curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash
-
-# Or add it to a v2 install — it is not installed unless you ask
-curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash -s -- --owui
-```
-
-Only that path installs `uv`, the Python virtual environment and PyTorch, and only that path asks you for an account — the chat window binds to loopback and has no logins.
-
-`REFUGIO_CHAT=0` hands the connectors back to Open WebUI, since only one of the two can own them.
+A fuller register — including what the `.pkg` does *not* set up, and what the chat UI spec planned and never built — is in [`docs/gaps.md`](docs/gaps.md).
 
 ### What happens
 
-1. Installs **Node.js** and **Git** if missing (plus **[uv](https://docs.astral.sh/uv/)** only if you asked for Open WebUI)
+1. Installs **Node.js**, **Git** and **[uv](https://docs.astral.sh/uv/)** if missing — uv is used for one thing, installing the MemPalace memory backend
 2. Clones REFUGIO to `~/refugio` (or REFUGIO Listener to `~/refugio-listener`)
-3. Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM (or connects to **[LM Studio](https://lmstudio.ai/)** if you set `REFUGIO_ENGINE=lmstudio`)
+3. Auto-installs **[Ollama](https://ollama.com/)** and pulls a model sized to your machine's RAM
 4. Downloads what connectors need to exist at all — the **WhatsApp bridge**, **email**, a **memory backend**, and **business** tools (Slack, Jira, ServiceNow, Salesforce) if you opt in. Which connectors are actually switched on is asked in the window, not here
-5. Sets up **https://refugio** as a local domain (mkcert + Caddy — asks for your admin password once)
-6. Starts everything and opens REFUGIO — a native window on macOS, your browser elsewhere — on **first run, at the setup screen**
+5. Starts everything and opens REFUGIO in its own window — on **first run, at the setup screen**
 
 > **Reinstalling?** Run the same command again. Your settings in `~/.refugio.env` are preserved.
+
+> **Coming from an install that had `https://refugio`?** That local domain is gone; REFUGIO is at **http://127.0.0.1:8090**. The installer stops the leftover Caddy and removes its certificates and Caddyfile. It does not edit `/etc/hosts` — it tells you that the `127.0.0.1 refugio` line there can be removed, which needs `sudo` and is yours to do.
 
 ### Uninstalling
 
@@ -166,13 +142,13 @@ the Listener — its own directory, conversations, credentials, logs and login
 item — and nothing of REFUGIO's. Each copy knows which product it belongs to
 from the marker the installer wrote beside it.
 
-Deleting `~/refugio` by hand is not the same thing: your **chat history lives inside it** (`~/refugio/data`), and your **WhatsApp link lives in `~/hermeneia`** — losing that means scanning the QR code again. The uninstaller asks about both, and about your Ollama models, before touching them. Everything else — the app, the login item, the tray, the `refugio` command — goes without asking, because a reinstall recreates it.
+Deleting `~/refugio` by hand is not the same thing: your **chat history lives inside it** (`~/refugio/data`), and your **WhatsApp link lives in `~/hermeneia`** — losing that means scanning the QR code again. The uninstaller asks about both, and about your Ollama models, before touching them. Everything else — the app, the login item, the `refugio` command — goes without asking, because a reinstall recreates it. A leftover Caddy from the old `https://refugio` domain is stopped and its certificates and Caddyfile removed; the `127.0.0.1 refugio` line in `/etc/hosts` is left for you, and the uninstaller says so.
 
 ### After install
 
 On machines with comfortable RAM, REFUGIO **auto-starts on login**. On **low-RAM (≤ 8 GB)** machines it runs **on demand** instead — so it never holds memory when you're not using it (start with `refugio`, stop with `refugio stop`).
 
-1. Open REFUGIO — the **menu-bar app** on macOS (or its Dock icon), the **tray icon** on Linux and Windows, or **http://127.0.0.1:8090** in any browser
+1. Open REFUGIO — the **menu-bar app** (or its Dock icon), or **http://127.0.0.1:8090** in any browser
 2. Start chatting — your local model is ready
 3. Open **Settings** to see your connectors, fix a broken one, choose how much each may read, switch or download models, and turn web search on
 
@@ -270,9 +246,10 @@ If you pick a model that can't call tools, the chat holds the message rather tha
 
 REFUGIO runs the model **on your machine** — nothing is sent to any external service.
 
-- **Ollama** (default, and the only engine the v2 chat window can use) is installed automatically and a model is pulled for you. The installer doesn't ask — this is what almost everyone wants, and it's the one REFUGIO can install and manage for you.
-- **LM Studio** — `REFUGIO_ENGINE=lmstudio` points the **legacy Open WebUI path** at its local server (OpenAI-compatible on `http://localhost:1234`) instead of installing Ollama. Start the server first: LM Studio → Developer → Start Server. **It does not work with the v2 chat window**, which talks to Ollama's native API and never reads the OpenAI-compatible URL written for it — you get an empty model list. Tracked in [`docs/gaps.md`](docs/gaps.md) §9, along with the `chat/openai.js` that would close it and bring vLLM, llama.cpp and MLX along with it.
-- **Neither** — `REFUGIO_ENGINE=none` skips the engine entirely, for setting one up by hand later.
+- **Ollama** is installed automatically and a model is pulled for you. The installer doesn't ask — this is what almost everyone wants, and it's the one REFUGIO can install and manage for you.
+- **None** — `REFUGIO_ENGINE=none` skips the engine entirely, for setting one up by hand later.
+
+**LM Studio is not supported.** The chat window speaks Ollama's native API, and LM Studio only ever worked through Open WebUI, which is gone. [`docs/gaps.md`](docs/gaps.md) §9 records what bringing it back would take — the same OpenAI-compatible path would reach vLLM, llama.cpp and MLX too.
 
 Your choice is remembered in `~/.refugio.env`, so reinstalling never moves you off the engine you picked.
 
@@ -302,7 +279,7 @@ Pull more models any time with `ollama pull <model>`, then pick them in the mode
 
 ## Connectors
 
-All connectors are **optional** — configure only the ones you want, or none at all. They come in two groups: **personal** (offered first in the installer) and **business** (behind a single opt-in prompt). The chat window talks to them over **MCP directly**. (On the legacy Open WebUI path they go through [MCPO](https://github.com/open-webui/mcpo), an MCP-to-OpenAPI proxy, because Open WebUI cannot speak MCP.)
+All connectors are **optional** — configure only the ones you want, or none at all. They come in two groups: **personal** (offered first in the installer) and **business** (behind a single opt-in prompt). The chat window talks to every one of them over **MCP directly**, as a local stdio process it starts itself.
 
 ### Personal connectors
 
@@ -313,12 +290,12 @@ All connectors are **optional** — configure only the ones you want, or none at
 | **Apple Reminders** ([just-claude-reminders](https://github.com/Phantazein-apps/just-claude-reminders)) | bundled with REFUGIO, stdio (MCP) | `reminders_get_reminders`, `reminders_create_reminder`, `reminders_complete_reminder` — 7 tools |
 | **Things 3** ([just-claude-things](https://github.com/Phantazein-apps/just-claude-things)) | bundled with REFUGIO, stdio (MCP) | `things3_get_todos`, `things3_create_todo`, `things3_complete_todo` — 10 tools |
 | **Apple Notes** | in-repo (`servers/notes.js`), stdio (MCP) | `notes_search`, `notes_search_text`, `notes_recent`, `notes_read`, `notes_folders`, `notes_create` — 6 tools |
-| **Notion** | local server, port 3002 | `search`, `get_page`, `get_block_children`, `query_database` |
-| **Memory** | local server, port 3004 | see below |
+| **Notion** | in-repo (`servers/notion.js`), stdio (MCP) | `search`, `get_page`, `get_block_children`, `query_database` |
+| **Memory** | stdio (MCP) — MemPalace, or in-repo `servers/memory.js` | see below |
 
 #### WhatsApp (Hermeneia)
 
-WhatsApp is REFUGIO's flagship connector — for many people it's the main reason to run REFUGIO at all. It works on **macOS (Apple Silicon or Intel), Linux (x64/arm64), and Windows** — so it runs on the same headless Linux box as the rest of your REFUGIO stack. The installer clones [Hermeneia](https://github.com/Phantazein-apps/hermeneia) to `~/hermeneia`, fetches the prebuilt bridge binary for your platform from Hermeneia's latest release, and walks you through the **built-in auth step**: a QR page opens (on a headless/remote host it prints the URL — `http://127.0.0.1:3456/setup` — so you can open it over an SSH tunnel), and on your phone you go to **WhatsApp → Settings → Linked Devices → Link a Device** and scan it. The link survives restarts, and your messages stay in a local database on your machine. If you skip the scan during install, the QR page opens again the first time REFUGIO starts.
+WhatsApp is REFUGIO's flagship connector — for many people it's the main reason to run REFUGIO at all. It works on Apple Silicon and Intel Macs. The installer clones [Hermeneia](https://github.com/Phantazein-apps/hermeneia) to `~/hermeneia`, fetches the prebuilt bridge binary for your platform from Hermeneia's latest release, and walks you through the **built-in auth step**: a QR page opens (on a remote Mac with no screen it prints the URL — `http://127.0.0.1:3456/setup` — so you can open it over an SSH tunnel), and on your phone you go to **WhatsApp → Settings → Linked Devices → Link a Device** and scan it. The link survives restarts, and your messages stay in a local database on your machine. If you skip the scan during install, the QR page opens again the first time REFUGIO starts.
 
 Already linked before and it stopped working? WhatsApp can revoke a linked device server-side (or you removed the **"Claude"** device on your phone) without anything on disk changing — so re-run the installer and choose **re-link** when it offers, or ask your assistant to "check my WhatsApp status" for a fresh QR.
 
@@ -355,12 +332,12 @@ Full-text search stops at a cap (400 notes by default, `REFUGIO_NOTES_SCAN_CAP`)
 
 For workplace use cases — the installer only prompts for these if you opt in.
 
-| Server | Port | Tools |
-|--------|------|-------|
-| **Slack** | 3001 | `search_messages`, `get_channel_history`, `list_channels`, `get_thread` |
-| **Jira** | 3003 | `search_issues`, `get_issue`, `get_projects` |
-| **ServiceNow** | 3005 | `query_table`, `get_record`, `list_tables` |
-| **Salesforce** | 3007 | `soql_query`, `get_record`, `search`, `describe_object`, `list_objects` |
+| Connector | How it runs | Tools |
+|-----------|-------------|-------|
+| **Slack** | in-repo (`servers/slack.js`), stdio (MCP) | `search_messages`, `get_channel_history`, `list_channels`, `get_thread` |
+| **Jira** | in-repo (`servers/jira.js`), stdio (MCP) | `search_issues`, `get_issue`, `get_projects` |
+| **ServiceNow** | in-repo (`servers/servicenow.js`), stdio (MCP) | `query_table`, `get_record`, `list_tables` |
+| **Salesforce** | in-repo (`servers/salesforce.js`), stdio (MCP) | `soql_query`, `get_record`, `search`, `describe_object`, `list_objects` |
 
 ### Memory
 
@@ -377,18 +354,18 @@ Memory scales to your RAM:
 node ~/refugio/start-refugio.cjs   # or: cd ~/refugio && npm start
 ```
 
-**Low RAM (≤ 8 GB):** REFUGIO runs **on demand** so it doesn't hold ~0.6 GB all day. (The model itself is always loaded lazily on the first chat and unloaded shortly after — startup never loads a model — so idle cost is just the chat server at ~50 MB — or Open WebUI's ~1 GB if you are still on that path.)
+**Low RAM (≤ 8 GB):** REFUGIO runs **on demand** so it doesn't hold ~0.6 GB all day. (The model itself is always loaded lazily on the first chat and unloaded shortly after — startup never loads a model — so idle cost is just the chat server at ~50 MB.)
 
 ```bash
-refugio          # start it (opens the browser)
+refugio          # start it and open it
 refugio stop     # stop everything and free the RAM
 refugio status   # is it running?
-# or double-click "Start REFUGIO.command" (macOS) / "Start-REFUGIO.bat" (Windows)
+# or double-click "Start REFUGIO.command"
 ```
 
 To reconfigure or update, run the installer again.
 
-### Menu-bar app (macOS)
+### Menu-bar app
 
 A tiny native menu-bar app gives non-technical users a one-click **Start / Stop / Open** control, a **Launch at Login** toggle, and **Quit** — no terminal needed. It just drives the existing `~/refugio` supervisor (quitting the app does *not* stop REFUGIO; use **Stop**).
 
@@ -399,22 +376,8 @@ cd ~/refugio/menubar && ./install.sh      # builds REFUGIO.app → /Applications
 Requires the Swift toolchain (`xcode-select --install`). Look for REFUGIO's mark — three walls open at the bottom — in the menu bar.
 
 **Auto-start details (> 8 GB):**
-- **macOS**: launchd (`~/Library/LaunchAgents/com.phantazein.refugio.plist`)
-- **Linux**: systemd user service (`~/.config/systemd/user/refugio.service`)
-- **Windows**: Startup folder (`REFUGIO.vbs`)
+- **launchd**: `~/Library/LaunchAgents/com.phantazein.refugio.plist`
 - **Logs**: `~/.refugio-logs/refugio.log` and `~/.refugio-logs/refugio.err`
-
-## Custom Domain
-
-The installer sets up **https://refugio** for you — no question asked, because every part of it can be attempted and every failure falls back to something that works.
-
-- Uses [mkcert](https://github.com/FiloSottile/mkcert) for locally-trusted TLS + [Caddy](https://caddyserver.com/) as a reverse proxy
-- Asks for your admin password once, for the certificate and the `/etc/hosts` entry
-- Restored automatically on reinstall
-- If any of it fails, REFUGIO stays reachable at **http://127.0.0.1:8090** — the domain is a shortcut, never a dependency
-- `REFUGIO_DOMAIN=0` skips it, for a headless box or anyone who'd rather not have a hosts entry
-
-Open WebUI, if you installed it, keeps **:8080**.
 
 ## How It Works
 
@@ -425,24 +388,23 @@ curl | bash
   → install-refugio (bash)    Installs Node.js + Git
   → install-node.cjs (node)   Clones the repo, sets up the LLM engine,
                               credentials, and starts everything
-  → configure-owui.cjs        Legacy: configures Open WebUI when that path is chosen
 ```
 
 ### Architecture
 
 ```
-Native window / browser → REFUGIO chat (:8090) ─┬─→ Ollama / LM Studio (local model)
-                                                 └─→ MCP servers (stdio + :3001–3007) → APIs
-
-Legacy: Browser → https://refugio (Caddy) → Open WebUI (:8080) → MCPO (:8010) → the same MCP servers
-                                                                           ├─→ Hermeneia (stdio) → WhatsApp
-                                                                           ├─→ Reminders / Things 3 (stdio → JXA)
-                                                                           └─→ mcp-remote (stdio) → Epistole (your Worker)
+Native window → REFUGIO chat (127.0.0.1:8090) ─┬─→ Ollama (local model)
+                                                └─→ MCP servers (stdio, started by the chat server)
+                                                      ├─→ Hermeneia → WhatsApp
+                                                      ├─→ Reminders / Things 3 / Notes → JXA
+                                                      ├─→ Notion, Slack, Jira, ServiceNow, Salesforce → their APIs
+                                                      ├─→ memory → MemPalace, or a GitHub repo
+                                                      └─→ mcp-remote → Epistole (your Worker)
 ```
 
 - **Everything runs locally.** The model, the UI, and the connector servers all run on your machine.
-- **The chat UI** is plain Node with no dependencies beyond what REFUGIO already installs. **Open WebUI**, on the legacy path, runs natively (no Docker) in a `uv`-managed Python virtual environment.
-- **MCP servers** run as detached Node.js processes, supervised by `start-refugio.cjs` (auto-restarted on crash). WhatsApp and email are stdio servers, spawned by whichever surface owns the connectors — the chat UI, or MCPO on the legacy path.
+- **The chat UI** is plain Node with no dependencies beyond what REFUGIO already installs. `start-refugio.cjs` supervises it and restarts it on a crash.
+- **MCP servers** are stdio child processes of the chat server, one per connector you switched on.
 - **Credentials** are stored in `~/.refugio.env` (chmod 600).
 - **System prompt** is auto-generated from the connectors you enabled.
 
@@ -476,15 +438,6 @@ REFUGIO_MODEL=llama3.1:8b
 # leave the model no room to answer (docs/gaps.md §12). What you see in the
 # sources panel is not affected. 0 removes the budget.
 # REFUGIO_TOOL_RESULT_BUDGET=8000
-# For LM Studio instead — legacy Open WebUI path only. The v2 chat
-# window cannot use this engine yet; see docs/gaps.md §9.
-# REFUGIO_ENGINE=lmstudio
-# OPENAI_API_BASE_URL=http://localhost:1234/v1
-# OPENAI_API_KEY=lm-studio
-
-# -- Your Account --
-OWUI_NAME=
-OWUI_EMAIL=
 
 # -- WhatsApp (Hermeneia) — path to a checkout with a built dist/ --
 HERMENEIA_DIR=/Users/you/hermeneia
@@ -528,10 +481,13 @@ SALESFORCE_PASSWORD=...
 SALESFORCE_SECURITY_TOKEN=...
 ```
 
-### 3. Start servers individually
+### 3. Run a server on its own
+
+You don't need to for REFUGIO — the chat window starts each connector you switched on. This is for using one from another MCP client, or testing it in isolation:
 
 ```bash
 cd ~/refugio
+node servers/slack.js                   # stdio, which is how REFUGIO runs it
 node servers/slack.js --http            # port 3001
 node servers/notion.js --http           # port 3002
 node servers/jira.js --http             # port 3003
@@ -543,7 +499,7 @@ node servers/salesforce.js --http       # port 3007
 Override the port: `MCP_SSE_PORT=4000 node servers/slack.js --http`
 Verify a server: `curl http://localhost:3001/health`
 
-WhatsApp (Hermeneia), email (Epistole), Apple Reminders, and Things 3 have no local ports of their own — the supervisor writes them into `mcpo-config.json` as stdio entries and whichever surface owns the connectors spawns them (`node $HERMENEIA_DIR/dist/index.js`, `mcp-remote $EPISTOLE_URL/mcp`, and the bundled `node_modules/{reminders-mcp,just-claude-things}/dist/index.js`).
+Inside REFUGIO every connector is a stdio entry in `mcpo-config.json` — a name kept from when an MCPO proxy read it — which the supervisor writes on each launch and the chat window spawns from: `node servers/<name>.js` for the in-repo servers, `node $HERMENEIA_DIR/dist/index.js`, `mcp-remote $EPISTOLE_URL/mcp`, and the bundled `node_modules/{reminders-mcp,just-claude-things}/dist/index.js`.
 
 ## Server Modes
 
@@ -551,19 +507,20 @@ All servers support three transports:
 
 | Mode | Flag | Use Case |
 |------|------|----------|
-| Streamable HTTP | `--http` | Most MCP clients (and Open WebUI, on the legacy path) |
-| SSE | `--sse-only` | Legacy MCP clients |
-| stdio | *(none)* | Claude Desktop and other stdio-based MCP clients |
+| Streamable HTTP | `--http` | MCP clients that connect over HTTP |
+| SSE | `--sse-only` | Older MCP clients |
+| stdio | *(none)* | The REFUGIO chat window, Claude Desktop and other stdio-based MCP clients |
 
 ## Project Structure
 
 ```
 ├── install-refugio            # Bash bootstrap (installs Node + Git, runs installer)
-├── install-refugio.ps1        # PowerShell bootstrap for Windows
-├── install-node.cjs           # Main installer (cross-platform): LLM engine, chat UI, connectors
-├── start-refugio.cjs          # Process supervisor (LLM, chat UI, MCP servers, Caddy)
+├── install-node.cjs           # Main installer: LLM engine, chat UI, connectors
+├── start-refugio.cjs          # Process supervisor (Ollama, the chat server)
+├── chat/                      # The chat window: server, MCP client, static UI
+├── menubar/                   # The menu-bar app (Swift) and its installer
+├── packaging/                 # The .pkg for MDM
 ├── scripts/
-│   ├── configure-owui.cjs     # Legacy: auto-configures Open WebUI (account, prompt, tools)
 │   └── google-auth.js         # One-time Google OAuth2 setup (optional memory sync)
 ├── server.js                  # All-in-one MCP server (all tools on one port)
 ├── servers/
@@ -575,7 +532,7 @@ All servers support three transports:
 │   ├── servicenow.js          # ServiceNow MCP server
 │   └── salesforce.js          # Salesforce MCP server
 ├── connectors/                # API connectors used by the servers
-├── branding/                  # REFUGIO logo and icon assets
+├── branding/                  # Source image for REFUGIO.app's icon
 └── package.json
 ```
 

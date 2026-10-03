@@ -56,7 +56,7 @@ conversations on disk, so going back is running its installer again.
 Four rules hold across all of it:
 
 - **The table is the only place an edition differs.** A dozen `if (listener)`
-  branches spread across an installer, a supervisor and a server is how a tray
+  branches spread across an installer, a supervisor and a server is how an icon
   ends up named for one product and a login item for the other. Everything that
   differs is one row in `editions.cjs`, and every consumer reads it from there.
 - **An install says what it is; the environment only overrides.** Resolution is
@@ -102,17 +102,14 @@ Four rules hold across all of it:
 
 ## What this split did NOT do
 
-- **The macOS menu-bar app and the Windows/Linux tray icons are REFUGIO's
-  only.** They hard-code the standard install's directory, port, log path and
-  bundle identifier, and the Mac one is a Swift bundle that can only be built
-  and exercised on a Mac. A second, differently-identified copy is real work
+- **The menu-bar app is REFUGIO's only.** It hard-codes the standard
+  install's directory, port, log path and bundle identifier. A second, differently-identified copy is real work
   with a real risk: an untested Listener menu-bar app would start and stop the
   *other* product. The installer says so in one line and installs the
   per-edition CLI and `Start REFUGIO Listener.command` instead, which do
   everything the launchers do. This is the largest remaining gap.
-- **The `.pkg` and `.msi` builds are REFUGIO's only.** `packaging/` carries
-  bundle identifiers, MDM configuration profiles and an ADMX template, all
-  written for one product. A second set is a distribution decision — signing,
+- **The `.pkg` is REFUGIO's only.** `packaging/` carries bundle identifiers
+  and MDM configuration profiles, all written for one product. A second set is a distribution decision — signing,
   identifiers, profiles — rather than a code change, and nothing in this split
   blocks it.
 - **`install-node.cjs` keeps a second copy of three fields.** It is downloaded
