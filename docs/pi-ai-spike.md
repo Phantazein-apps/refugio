@@ -99,7 +99,9 @@ Pick it with a model name of `claude-code/sonnet`, `claude-code/opus` or
 `claude-code/haiku` (per request, or as `REFUGIO_CHAT_MODEL`).
 
 **What Claude Code is allowed to do.** Nothing of its own. Its built-in tools are
-off (`--tools ""`); REFUGIO's system prompt replaces its own; the person's
+blocked by name (`--disallowedTools`), the init event is checked every turn for
+anything the list missed, and anything offered anyway is denied (`--permission-mode
+dontAsk`, with only `mcp__refugio` allowed); REFUGIO's system prompt replaces its own; the person's
 Claude Code settings, hooks, skills and MCP servers are not loaded
 (`--setting-sources ""`, `--strict-mcp-config`); it runs in an empty folder, so
 no `CLAUDE.md` is read; nothing is saved as a session. Its only tools are the
@@ -129,18 +131,28 @@ as an error result. The engine turns that — or sixty seconds of silence
 (`REFUGIO_CLAUDE_FIRST_EVENT_MS`) — into "open Terminal, run `claude`, and sign
 in". REFUGIO never offers the sign-in itself.
 
-**Verified.**
-- 16 tests (`test/claude-code.test.js`) against a fake `claude` that prints
-  Claude Code's stream-json and speaks real MCP to the bridge: flags, stdin-only
-  prompt, tool round trip in both event orders, the signed-out message, error
-  results, abort, an abandoned turn, and the server's consent rules.
-- Against the real `claude` 2.1.20 on this machine: the flags are accepted,
-  Claude Code starts the bridge and lists REFUGIO's tool through it within
-  ~120 ms, the signed-out case ends with the sign-in message, and no process is
-  left behind.
-- **Not yet verified: a signed-in turn.** This machine's Claude Code is signed
-  out. `node scripts/claude-code-probe.mjs` is the one-command check once it is
-  signed in: one short exchange and a fake reminders tool; no personal data.
+**Verified, signed in, on Claude Code 2.1.104.** A full turn as REFUGIO runs
+it, no overrides: Sonnet called `reminders__list`, the call came out to the
+turn runner, the result went back, and the answer used it — 692 prompt
+tokens, about 6–12 s, no process left behind. The init event listed exactly one
+tool, `mcp__refugio__reminders__list`. 17 tests against a fake `claude` that
+speaks real MCP to the bridge cover the rest (flags, stdin-only prompt, both
+event orders, sign-in message, errors, abort, an abandoned turn, the server's
+consent rules).
+
+**What getting there found** — each now handled and tested:
+
+| Finding | Fix |
+|---|---|
+| Any `--tools` flag (even `""`, even naming the MCP tool) also hides MCP tools from the model. It answered "I don't have access to any tools". | Built-ins blocked by name with `--disallowedTools`, not `--tools`. |
+| A hand-written block list missed eight 2.1.104 tools, among them `CronCreate`, `RemoteTrigger`, `ScheduleWakeup` (5,934 prompt tokens). | List extended; the init event is checked every turn and any unblocked tool is logged and blocked from the next turn; `dontAsk` denies it on the first. |
+| Claude Code connects MCP servers in the background and does not wait before its first request: bridge "pending", model sees no tools. Being asked for the tool list was not enough either. | The message is written only after the bridge is asked for its tools, plus a 500 ms settle (`REFUGIO_CLAUDE_MCP_SETTLE_MS`). 300 ms and 1,500 ms both gave "connected" every time. A bridge not connected at init is logged. |
+| 2.1.20 starts the bridge and lists its tools, but never offers them to the model. `~/.local/bin` held 2.1.20 ahead of `/usr/local/bin`'s 2.1.104 on `PATH`. | `findClaude` checks every install and takes the newest; older than 2.1.104 is logged with "run `claude update`". |
+| Started from inside the Claude desktop app, the child inherited the host session's `ANTHROPIC_BASE_URL`, OAuth switches and `CLAUDE_CODE_*` ids, and sent the login there (401). | A parent session's variables are removed when `CLAUDECODE` says they were inherited; a gateway the person set is kept. |
+| An expired login still looks signed in when `claude` opens; Claude Code retries the 401 for about 20 s, then "Invalid API key · Please run /login". | The window says the login may have expired and to sign in with `/login`. |
+
+**Cost of the wait.** Every turn that offers tools pays for the bridge to start
+and settle, about 0.7 s, before the model is asked anything.
 
 **Not built.** A Settings switch (with the web-search-style warning) in place
 of the environment variable; the models in the picker; anything for the MDM

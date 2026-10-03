@@ -26,6 +26,18 @@ const model = flag("--model");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const ev = (event) => out({ type: "stream_event", event });
 
+// Like the real one, it connects its MCP server before it has read a message —
+// the engine waits for that connection before it writes one.
+const config = flag("--mcp-config");
+let client = null;
+let tools = [];
+if (config) {
+  const { command, args, env } = JSON.parse(config).mcpServers.refugio;
+  client = new Client({ name: "fake-claude", version: "0" });
+  await client.connect(new StdioClientTransport({ command, args, env: { ...process.env, ...env } }));
+  ({ tools } = await client.listTools());
+}
+
 let stdin = "";
 for await (const chunk of process.stdin) stdin += chunk;
 const prompt = JSON.parse(stdin.trim().split("\n")[0]).message.content;
@@ -36,7 +48,7 @@ if (process.env.FAKE_CLAUDE_LOG) {
   }) + "\n");
 }
 
-out({ type: "system", subtype: "init", tools: [], model, apiKeySource: "none" });
+out({ type: "system", subtype: "init", tools: tools.map((t) => `mcp__refugio__${t.name}`), mcp_servers: config ? [{ name: "refugio", status: "connected" }] : [], model, apiKeySource: "none" });
 // A timer, because a promise alone does not keep Node running: it would exit 13.
 if (model === "silent") await new Promise(() => setInterval(() => {}, 1000));
 if (model === "broken") { out({ type: "result", subtype: "error_during_execution", is_error: true, result: "rate limited" }); process.exit(1); }
@@ -53,17 +65,12 @@ function say(text, stop, usage = { input_tokens: 20, cache_read_input_tokens: 10
   };
 }
 
-const config = flag("--mcp-config");
 if (!config) {
   say(`Hello from Claude. You said: ${prompt}`, "end_turn")();
   out({ type: "result", subtype: "success", is_error: false, result: "ok" });
   process.exit(0);
 }
 
-const { command, args, env } = JSON.parse(config).mcpServers.refugio;
-const client = new Client({ name: "fake-claude", version: "0" });
-await client.connect(new StdioClientTransport({ command, args, env: { ...process.env, ...env } }));
-const { tools } = await client.listTools();
 const tool = tools[0];
 const use = { type: "tool_use", id: "toolu_1", name: `mcp__refugio__${tool.name}`, input: { list: "today" } };
 

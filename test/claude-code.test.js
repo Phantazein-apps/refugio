@@ -13,11 +13,11 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "http";
 import { spawn } from "child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, existsSync } from "fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join, dirname } from "path";
+import { join, dirname, delimiter } from "path";
 import { fileURLToPath } from "url";
-import { toPrompt, chatStream, findClaude, isClaudeCodeModel, ownSessionEnv } from "../chat/claude-code.js";
+import { toPrompt, chatStream, findClaude, isClaudeCodeModel, ownSessionEnv, checkInit, blockedTools, compareVersions } from "../chat/claude-code.js";
 import { cloudRefusal, isCloudModel } from "../chat/engine.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -75,6 +75,39 @@ test("a parent Claude Code session's plumbing is not handed to the child", () =>
   assert.equal(ownSessionEnv({ ANTHROPIC_BASE_URL: "https://gateway.example" }).ANTHROPIC_BASE_URL, "https://gateway.example");
 });
 
+test("a tool Claude Code offers that REFUGIO did not block is reported, and blocked from then on", () => {
+  const said = [];
+  const extra = checkInit({ tools: ["mcp__refugio__reminders__list", "Bash", "BrandNewTool"] }, (m) => said.push(m));
+  assert.deepEqual(extra, ["Bash", "BrandNewTool"]);
+  assert.match(said.join(), /Bash, BrandNewTool/);
+  assert.ok(blockedTools().includes("BrandNewTool"), "learned for the next turn");
+  checkInit({ tools: ["BrandNewTool"] }, (m) => said.push(m));
+  assert.equal(said.length, 1, "said once, not every turn");
+});
+
+test("a bridge that is not connected when Claude Code starts is reported", () => {
+  const said = [];
+  checkInit({ tools: [], mcp_servers: [{ name: "refugio", status: "pending" }] }, (m) => said.push(m), true);
+  assert.match(said.join(), /"pending"/);
+  checkInit({ tools: [], mcp_servers: [] }, (m) => said.push(m), false);
+  assert.equal(said.length, 1, "no tools offered, nothing to report");
+});
+
+test("the newest Claude Code wins, not the first on PATH", () => {
+  const a = mkdtempSync(join(tmpdir(), "refugio-cc-a-"));
+  const b = mkdtempSync(join(tmpdir(), "refugio-cc-b-"));
+  try {
+    for (const d of [a, b]) writeFileSync(join(d, "claude"), "");
+    const ver = { [join(a, "claude")]: [2, 1, 20], [join(b, "claude")]: [2, 1, 104] };
+    assert.equal(findClaude({ PATH: `${a}${delimiter}${b}` }, (p) => ver[p]), join(b, "claude"));
+    assert.ok(compareVersions([2, 1, 104], [2, 1, 20]) > 0, "numeric, not string, comparison");
+    assert.ok(compareVersions(null, [1, 0, 0]) < 0, "an install that cannot report a version loses");
+  } finally {
+    rmSync(a, { recursive: true, force: true });
+    rmSync(b, { recursive: true, force: true });
+  }
+});
+
 test("an explicit REFUGIO_CLAUDE_BIN that does not exist is not silently replaced", () => {
   assert.equal(findClaude({ REFUGIO_CLAUDE_BIN: "/nonexistent/claude", PATH: "" }), null);
 });
@@ -112,7 +145,11 @@ describe("against a fake claude", { skip: !sdk && "@modelcontextprotocol/sdk is 
   test("Claude Code runs as a model only: no tools of its own, none of the person's settings, REFUGIO's prompt", () => {
     const { argv, cwd, claudecode } = runs().at(-1);
     const val = (f) => argv[argv.indexOf(f) + 1];
-    assert.equal(val("--tools"), "", "built-in tools are off");
+    assert.ok(!argv.includes("--tools"), "any --tools flag also hides REFUGIO's MCP tools from the model");
+    const blocked = val("--disallowedTools").split(",");
+    for (const t of ["Bash", "Read", "Write", "WebFetch", "WebSearch", "Task", "Skill", "CronCreate", "RemoteTrigger", "ScheduleWakeup"]) {
+      assert.ok(blocked.includes(t), `${t} is blocked`);
+    }
     assert.equal(val("--setting-sources"), "", "the person's settings, hooks and skills are not loaded");
     assert.ok(argv.includes("--strict-mcp-config"), "the person's own MCP servers are not loaded");
     assert.ok(argv.includes("--no-session-persistence"));

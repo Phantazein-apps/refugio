@@ -7,9 +7,11 @@
 // installed and signed in to themselves, and reads what it prints.
 //
 // Claude Code is used as a MODEL, not as an agent:
-//   - its built-in tools are off (`--tools ""`), so it cannot read files, run
-//     commands or browse; the only tools it has are the ones REFUGIO offered
-//     for this turn, through chat/claude-code-bridge.mjs
+//   - its built-in tools are blocked (`--disallowedTools`, checked against the
+//     init event every turn) and denied if offered anyway (`dontAsk`), so it
+//     cannot read files, run commands, browse or schedule; the only tools it
+//     can use are the ones REFUGIO offered for this turn, through
+//     chat/claude-code-bridge.mjs
 //   - every tool call comes back out of chatStream() as a tool call, exactly as
 //     Ollama's do, and REFUGIO's turn runner runs it — runTool, the web arming
 //     check, the mode check, the tool budget. The result goes back to Claude
@@ -28,10 +30,10 @@
 // What is said goes over stdin, never on the command line: argv is readable by
 // every user on the machine through `ps`, and a conversation is not.
 
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import http from "http";
 import { randomBytes } from "crypto";
-import { existsSync, mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, realpathSync } from "fs";
 import { tmpdir, homedir } from "os";
 import { join, dirname, delimiter } from "path";
 import { fileURLToPath } from "url";
@@ -40,6 +42,44 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BRIDGE = join(HERE, "claude-code-bridge.mjs");
 const PREFIX = "claude-code/";
 const MCP_PREFIX = "mcp__refugio__";
+
+/**
+ * Claude Code's own tools, every name seen in any version REFUGIO was run
+ * against, all blocked. A name a version does not have is ignored.
+ *
+ * A list will always lag Claude Code, so it is not the only guard. Every turn
+ * reads the init event's tool list (checkInit): anything there that is not
+ * REFUGIO's is logged and joins the list for the next turn — the first turn of
+ * a new version is the only one that can be offered something new. And on that
+ * turn it still cannot run: --permission-mode dontAsk denies every tool that
+ * --allowedTools did not name, and that names only REFUGIO's.
+ */
+const BUILTIN_TOOLS = [
+  "Task", "Agent", "TaskOutput", "TaskStop", "Bash", "BashOutput", "KillShell", "Glob", "Grep", "LS",
+  "Read", "Edit", "MultiEdit", "Write", "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch",
+  "TodoWrite", "TodoRead", "Skill", "SlashCommand", "ToolSearch", "ExitPlanMode", "EnterPlanMode",
+  "AskUserQuestion", "LSP", "CronCreate", "CronDelete", "CronList", "EnterWorktree", "ExitWorktree",
+  "Monitor", "RemoteTrigger", "ScheduleWakeup",
+];
+const learned = new Set();
+
+export function blockedTools() {
+  return [...new Set([...BUILTIN_TOOLS, ...learned])];
+}
+
+/** The init event's tools that are not REFUGIO's. Learned, so the next turn
+ *  blocks them; returned, so the caller can say so. */
+export function checkInit(evt, log = (m) => console.warn(`[claude-code] ${m}`), offeredTools = false) {
+  const bridge = (evt.mcp_servers ?? []).find((s) => s.name === "refugio");
+  if (offeredTools && bridge?.status !== "connected") {
+    log(`the tool bridge was "${bridge?.status ?? "absent"}" when Claude Code started this turn; the model may not see REFUGIO's tools`);
+  }
+  const extra = (evt.tools ?? []).filter((t) => !String(t).startsWith(MCP_PREFIX));
+  const fresh = extra.filter((t) => !learned.has(t));
+  for (const t of fresh) learned.add(t);
+  if (fresh.length) log(`Claude Code offered tools REFUGIO did not block: ${fresh.join(", ")} — blocked from the next turn; denied on this one`);
+  return extra;
+}
 
 /** The models offered. Aliases, so "sonnet" is whatever Claude Code calls the
  *  current Sonnet — REFUGIO does not track Anthropic's model ids. */
@@ -51,7 +91,7 @@ export function isClaudeCodeModel(name) {
 
 /** Where `claude` is. A login item does not get the person's shell PATH, so
  *  the places the installer puts it are checked by name. Null if absent. */
-export function findClaude(env = process.env) {
+export function findClaude(env = process.env, versionOf = claudeVersion) {
   if (env.REFUGIO_CLAUDE_BIN) return existsSync(env.REFUGIO_CLAUDE_BIN) ? env.REFUGIO_CLAUDE_BIN : null;
   const dirs = [
     ...(env.PATH || "").split(delimiter),
@@ -60,12 +100,52 @@ export function findClaude(env = process.env) {
     "/opt/homebrew/bin",
     "/usr/local/bin",
   ];
+  // Every install, not the first on PATH, and the newest wins. Found on a real
+  // Mac: ~/.local/bin held 2.1.20 ahead of /usr/local/bin's 2.1.104, and 2.1.20
+  // starts the bridge but never offers its tools to the model.
+  const seen = new Set();
+  let best = null;
   for (const d of dirs) {
     if (!d) continue;
     const p = join(d, process.platform === "win32" ? "claude.exe" : "claude");
-    if (existsSync(p)) return p;
+    if (!existsSync(p)) continue;
+    let real;
+    try { real = realpathSync(p); } catch { continue; }
+    if (seen.has(real)) continue;
+    seen.add(real);
+    const v = versionOf(p, env);
+    if (!best || compareVersions(v, best.v) > 0) best = { p, v };
   }
-  return null;
+  if (best && best.v && compareVersions(best.v, TESTED_FROM) < 0 && !warnedOld) {
+    warnedOld = true;
+    console.warn(`[claude-code] using Claude Code ${best.v.join(".")} at ${best.p}; tool calls are tested from ${TESTED_FROM.join(".")} — 2.1.20 does not offer REFUGIO's tools to the model. Run \`claude update\`.`);
+  }
+  return best?.p ?? null;
+}
+
+/** The oldest version a full tool round trip was seen working on. */
+const TESTED_FROM = [2, 1, 104];
+let warnedOld = false;
+
+const versions = new Map();
+/** `claude --version`, parsed, cached per path. Null if it will not say. */
+function claudeVersion(p, env) {
+  if (versions.has(p)) return versions.get(p);
+  let v = null;
+  try {
+    const out = execFileSync(p, ["--version"], { env: ownSessionEnv(env), timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).toString();
+    const m = /(\d+)\.(\d+)\.(\d+)/.exec(out);
+    if (m) v = m.slice(1).map(Number);
+  } catch { /* an install that cannot report a version loses to one that can */ }
+  versions.set(p, v);
+  return v;
+}
+
+export function compareVersions(a, b) {
+  if (!a) return b ? -1 : 0;
+  if (!b) return 1;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
 }
 
 /** How long to wait for Claude Code's first word before saying why. A Claude
@@ -76,6 +156,18 @@ function firstEventMs(env = process.env) {
   const n = Number(env.REFUGIO_CLAUDE_FIRST_EVENT_MS);
   return Number.isFinite(n) && n > 0 ? n : 60000;
 }
+
+function mcpWaitMs(env = process.env) {
+  const n = Number(env.REFUGIO_CLAUDE_MCP_WAIT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 15000;
+}
+
+function settleMs(env = process.env) {
+  const n = Number(env.REFUGIO_CLAUDE_MCP_SETTLE_MS);
+  return Number.isFinite(n) && n >= 0 && env.REFUGIO_CLAUDE_MCP_SETTLE_MS !== "" && env.REFUGIO_CLAUDE_MCP_SETTLE_MS != null ? n : 500;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms).unref?.());
 
 const NOT_SIGNED_IN =
   "Claude Code did not answer — its sign-in may have expired. Open Terminal, run `claude`, " +
@@ -139,10 +231,13 @@ export function toPrompt(messages) {
 function openBridge(tools) {
   const token = randomBytes(24).toString("hex");
   const waiting = [];          // calls from Claude Code with no result yet
+  let markListed;
+  const listed = new Promise((r) => { markListed = r; });
   const results = [];          // results from the runner with no call yet
   const server = http.createServer((req, res) => {
     if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401); return res.end(); }
     if (req.method === "GET" && req.url === "/tools") {
+      markListed();
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({
         tools: tools.map((t) => ({
@@ -174,6 +269,7 @@ function openBridge(tools) {
     url: `http://127.0.0.1:${server.address().port}`,
     token,
     answer,
+    listed,
     close: () => { for (const w of waiting.splice(0)) w({ text: "Error: the turn ended", isError: true }); server.close(); },
   })));
 }
@@ -194,6 +290,7 @@ class Turn {
   }
 
   async #start({ bin, model, messages, tools, signal, env }) {
+    this.hasTools = tools.length > 0;
     this.bridge = await openBridge(tools);
     this.dir = mkdtempSync(join(tmpdir(), "refugio-claude-"));
     const { system, prompt } = toPrompt(messages);
@@ -216,7 +313,10 @@ class Turn {
       "--input-format", "stream-json",
       "--output-format", "stream-json", "--verbose", "--include-partial-messages",
       "--model", model.slice(PREFIX.length),
-      "--tools", "",
+      // Not `--tools ""`: on 2.1.20 and 2.1.104 any --tools flag also hides MCP
+      // tools from the model, so REFUGIO's never reach it. Claude Code's own
+      // tools are blocked by name instead, and the init event is checked.
+      "--disallowedTools", blockedTools().join(","),
       "--system-prompt", system,
       "--setting-sources", "",
       "--strict-mcp-config",
@@ -235,7 +335,26 @@ class Turn {
     childEnv.MCP_TOOL_TIMEOUT ||= "600000";
 
     this.proc = spawn(bin, args, { cwd: this.dir, env: childEnv, stdio: ["pipe", "pipe", "pipe"] });
-    this.proc.stdin.end(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
+    // Not yet. Claude Code connects MCP servers in the background and does not
+    // wait for them before its first request, so a message written now goes to
+    // the model with no tools — the bridge "pending" in the init event, and the
+    // model saying it has no access to anything. Measured on 2.1.104.
+    //
+    // Two waits. First for the bridge to be asked for its tool list, which is
+    // when Claude Code has connected. That alone was not enough: the list had
+    // been served and the init event still said "pending". Then a short settle,
+    // which on 2.1.104 made it "connected" every time at 300 ms and 1500 ms;
+    // 500 is the default for margin. Both bounded, so a Claude Code that never
+    // connects still answers — without tools, and logged by checkInit.
+    if (tools.length) {
+      const waitMs = mcpWaitMs(env);
+      const ok = await Promise.race([this.bridge.listed.then(() => true), sleep(waitMs).then(() => false)]);
+      if (ok) await sleep(settleMs(env));
+      else console.warn(`[claude-code] the tool bridge was not connected after ${waitMs} ms; sending without tools`);
+    }
+    if (!this.closed) {
+      this.proc.stdin.end(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
+    }
 
     let buf = "";
     this.proc.stdout.on("data", (d) => {
@@ -286,6 +405,7 @@ class Turn {
       const evt = await this.#next(heard ? 0 : firstEventMs(this.env));
       if (signal?.aborted) throw abortError(signal);
       if (evt.type === "_timeout") { this.close(); throw new Error(NOT_SIGNED_IN); }
+      if (evt.type === "system" && evt.subtype === "init") { this.offered = checkInit(evt, undefined, this.hasTools); continue; }
       if (evt.type !== "system") { heard = this.heardAnything = true; }
 
       if (evt.type === "stream_event") {
