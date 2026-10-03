@@ -50,16 +50,16 @@ test("the system prompt is REFUGIO's, and earlier turns travel as a transcript",
 test("a Claude Code model is a cloud model, and is refused until switched on", () => {
   assert.equal(isClaudeCodeModel("claude-code/sonnet"), true);
   assert.equal(isCloudModel("claude-code/sonnet"), true);
-  assert.equal(cloudRefusal({ model: "qwen3:4b", env: {} }), null);
-  assert.match(cloudRefusal({ model: "claude-code/sonnet", env: {} }), /switched off/);
-  assert.equal(cloudRefusal({ model: "claude-code/sonnet", env: { REFUGIO_CLAUDE_CODE: "1" } }), null);
+  assert.equal(cloudRefusal({ model: "qwen3:4b" }), null);
+  assert.match(cloudRefusal({ model: "claude-code/sonnet" }), /switched off in Settings/);
+  assert.equal(cloudRefusal({ model: "claude-code/sonnet", claudeEnabled: true }), null);
 });
 
 test("a discussion mode never uses a cloud model, switched on or not", () => {
   for (const model of ["claude-code/sonnet", "anthropic/claude-haiku-4-5"]) {
-    assert.match(cloudRefusal({ model, mode: "nvc", env: { REFUGIO_CLAUDE_CODE: "1" } }), /Discussion modes only use the model on this computer/);
+    assert.match(cloudRefusal({ model, mode: "nvc", claudeEnabled: true }), /Modes only use the model on this computer/);
   }
-  assert.equal(cloudRefusal({ model: "qwen3:4b", mode: "nvc", env: {} }), null);
+  assert.equal(cloudRefusal({ model: "qwen3:4b", mode: "nvc" }), null);
 });
 
 test("a parent Claude Code session's plumbing is not handed to the child", () => {
@@ -68,9 +68,9 @@ test("a parent Claude Code session's plumbing is not handed to the child", () =>
   const parent = {
     PATH: "/bin", HOME: "/h", CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "x", CLAUDE_CODE_SESSION_ID: "s",
     CLAUDE_AGENT_SDK_VERSION: "1", CLAUDE_PID: "1", USE_STAGING_OAUTH: "1", USE_LOCAL_OAUTH: "1",
-    ANTHROPIC_BASE_URL: "http://host-proxy", REFUGIO_CLAUDE_CODE: "1",
+    ANTHROPIC_BASE_URL: "http://host-proxy", REFUGIO_EDITION: "listener",
   };
-  assert.deepEqual(ownSessionEnv(parent), { PATH: "/bin", HOME: "/h", REFUGIO_CLAUDE_CODE: "1" });
+  assert.deepEqual(ownSessionEnv(parent), { PATH: "/bin", HOME: "/h", REFUGIO_EDITION: "listener" });
   // A gateway the person set themselves, with no parent session, is theirs.
   assert.equal(ownSessionEnv({ ANTHROPIC_BASE_URL: "https://gateway.example" }).ANTHROPIC_BASE_URL, "https://gateway.example");
 });
@@ -286,26 +286,66 @@ async function ask(base, payload) {
   return events(await res.text());
 }
 
-describe("the chat server with Claude Code switched off", { skip: !sdk && "@modelcontextprotocol/sdk is not installed" }, () => {
+const setClaude = (base, enabled, headers = {}) => fetch(`${base}/api/chat/claude`, {
+  method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ enabled }),
+});
+const status = async (base) => (await fetch(`${base}/api/chat/status`)).json();
+
+describe("the chat server where Claude Code is not installed", { skip: !sdk && "@modelcontextprotocol/sdk is not installed" }, () => {
   let chat;
-  before(async () => { chmodSync(FAKE, 0o755); chat = await startChat({ REFUGIO_CLAUDE_CODE: "" }); });
+  before(async () => { chat = await startChat({ REFUGIO_CLAUDE_BIN: "/nonexistent/claude" }); });
   after(() => chat.stop());
+
+  test("Settings is told so, and the switch cannot be turned on", async () => {
+    const s = await status(chat.base);
+    assert.equal(s.claude.installed, false);
+    assert.equal(s.claude.enabled, false);
+    assert.deepEqual(s.cloudModels, []);
+    const res = await setClaude(chat.base, true);
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /not installed/);
+  });
+});
+
+describe("the chat server, Claude switched off (the default)", { skip: !sdk && "@modelcontextprotocol/sdk is not installed" }, () => {
+  let chat;
+  before(async () => { chmodSync(FAKE, 0o755); chat = await startChat({}); });
+  after(() => chat.stop());
+
+  test("off by default: no Claude in the picker, and Settings knows Claude Code is here", async () => {
+    const s = await status(chat.base);
+    assert.equal(s.claude.enabled, false);
+    assert.equal(s.claude.installed, true);
+    assert.equal(s.claude.version, "2.1.104");
+    assert.match(s.claude.warning, /sent to Anthropic/);
+    assert.deepEqual(s.cloudModels, []);
+  });
 
   test("a Claude Code turn is refused, and nothing is stored", async () => {
     const ev = await ask(chat.base, { message: "hello", model: "claude-code/sonnet", conversation_id: "offconvo" });
     assert.deepEqual(ev.map((e) => e.event), ["error"], JSON.stringify(ev));
-    assert.match(ev[0].data.error, /switched off/);
+    assert.match(ev[0].data.error, /switched off in Settings/);
     const res = await fetch(`${chat.base}/api/chat/conversations/offconvo`);
     assert.notEqual(res.status, 200, "no conversation was created");
   });
+
+  test("another page cannot switch it on", async () => {
+    const res = await setClaude(chat.base, true, { Origin: "https://evil.example" });
+    assert.equal(res.status, 403);
+    assert.equal((await status(chat.base)).claude.enabled, false);
+  });
 });
 
-describe("the chat server with Claude Code switched on", { skip: !sdk && "@modelcontextprotocol/sdk is not installed" }, () => {
+describe("the chat server, Claude switched on in Settings", { skip: !sdk && "@modelcontextprotocol/sdk is not installed" }, () => {
   let chat;
   let modeId = null;
+  // The fake writes its argv here; the server passes its environment through.
+  const log = join(mkdtempSync(join(tmpdir(), "refugio-cc-sys-")), "runs.jsonl");
   before(async () => {
     chmodSync(FAKE, 0o755);
-    chat = await startChat({ REFUGIO_CLAUDE_CODE: "1" });
+    chat = await startChat({ FAKE_CLAUDE_LOG: log });
+    const res = await setClaude(chat.base, true);
+    assert.equal(res.status, 200, chat.output());
     const { modeDef, modeOffered } = await import("../chat/modes.js");
     for (const id of ["nvc", "styles", "career", "life", "listener", "spanish"]) {
       if (!modeOffered(id, "listener") || modeDef(id)?.requiresConnector) continue;
@@ -318,20 +358,49 @@ describe("the chat server with Claude Code switched on", { skip: !sdk && "@model
   });
   after(() => chat.stop());
 
-  test("a turn streams from Claude Code and the answer is stored", async () => {
-    const ev = await ask(chat.base, { message: "hello", model: "claude-code/haiku" });
+  test("the picker is offered Claude, apart from the local models", async () => {
+    const s = await status(chat.base);
+    assert.equal(s.claude.enabled, true);
+    assert.deepEqual(s.cloudModels.map((m) => [m.name, m.label, m.cloud]), [
+      ["claude-code/sonnet", "Claude Sonnet", true],
+      ["claude-code/opus", "Claude Opus", true],
+      ["claude-code/haiku", "Claude Haiku", true],
+    ]);
+    assert.ok(!s.models.some((m) => m.name.startsWith("claude-code/")), "not mixed into the local list");
+    assert.equal(s.available, true, "Claude can answer with Ollama down");
+  });
+
+  test("a turn streams from Claude Code, the answer is stored, and no Claude run is spent on the title", async () => {
+    const ev = await ask(chat.base, { message: "hello there friend", model: "claude-code/haiku" });
     const text = ev.filter((e) => e.event === "token").map((e) => e.data.t).join("");
     assert.match(text, /^Hello from Claude\. You said: hello/, chat.output());
     assert.equal(ev.at(-1).event, "done");
+    assert.equal(ev.at(-1).data.title, "hello there friend");
     const cid = ev[0].data.conversation_id;
     const convo = await (await fetch(`${chat.base}/api/chat/conversations/${cid}`)).json();
     assert.deepEqual(convo.messages.map((m) => [m.role, m.model]), [["user", null], ["assistant", "claude-code/haiku"]]);
   });
 
-  test("a discussion mode refuses Claude Code even when it is switched on", async (t) => {
+  test("Claude is told it is not on this computer, so it never says it is", async () => {
+    await ask(chat.base, { message: "where am I?", model: "claude-code/sonnet" });
+    const { argv } = JSON.parse(readFileSync(log, "utf8").trim().split("\n").at(-1));
+    const system = argv[argv.indexOf("--system-prompt") + 1];
+    assert.match(system, /not running on the user's computer/);
+    assert.match(system, /sent to Anthropic/);
+    assert.doesNotMatch(system, /running entirely on the user's own computer/);
+  });
+
+  test("a discussion mode refuses Claude even when it is switched on", async (t) => {
     if (!modeId) return t.skip("no coaching mode offered");
     const ev = await ask(chat.base, { message: "I am upset", model: "claude-code/sonnet", mode: modeId });
     assert.deepEqual(ev.map((e) => e.event), ["error"]);
-    assert.match(ev[0].data.error, /Discussion modes only use the model on this computer/);
+    assert.match(ev[0].data.error, /Modes only use the model on this computer/);
+  });
+
+  test("switched back off, the picker loses Claude and turns are refused again", async () => {
+    assert.equal((await setClaude(chat.base, false)).status, 200);
+    assert.deepEqual((await status(chat.base)).cloudModels, []);
+    const ev = await ask(chat.base, { message: "hello", model: "claude-code/sonnet" });
+    assert.deepEqual(ev.map((e) => e.event), ["error"]);
   });
 });

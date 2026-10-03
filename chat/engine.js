@@ -40,17 +40,16 @@ export function isCloudModel(name) {
  * before anything is stored or sent.
  *
  * Two rules, and they are not the same rule. A cloud model is off until the
- * person switches it on (REFUGIO_CLAUDE_CODE=1 for now; a Settings switch with
- * the web-search warning later), because "nothing leaves your machine" is the
- * default this product is installed on. And a discussion mode never uses one,
- * switch or no switch: a mode promises the conversation stays here, and the
- * person in it chose the mode, not the model.
+ * person switches it on in Settings, because "nothing leaves your machine" is
+ * the default this product is installed on. And a discussion mode never uses
+ * one, switch or no switch: a mode promises the conversation stays here, and
+ * the person in it chose the mode, not the model.
  */
-export function cloudRefusal({ model, mode = null, env = process.env }) {
+export function cloudRefusal({ model, mode = null, claudeEnabled = false }) {
   if (!isCloudModel(model)) return null;
-  if (mode) return "Discussion modes only use the model on this computer. Choose a local model to continue in this mode.";
-  if (claudeCode.isClaudeCodeModel(model) && env.REFUGIO_CLAUDE_CODE !== "1") {
-    return "Claude through Claude Code is switched off. It sends this conversation to Anthropic, so it has to be switched on first.";
+  if (mode) return "Modes only use the model on this computer. Choose a local model to continue in this mode.";
+  if (claudeCode.isClaudeCodeModel(model) && !claudeEnabled) {
+    return "Claude is switched off in Settings. It sends this conversation to Anthropic, so it has to be switched on there first.";
   }
   return null;
 }

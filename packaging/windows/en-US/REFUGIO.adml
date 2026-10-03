@@ -8,13 +8,22 @@
       <string id="REFUGIO">REFUGIO</string>
 
       <string id="DisableWebSearch">Turn off web search</string>
-      <string id="DisableWebSearch_Help">Web search is the only feature of REFUGIO that sends anything off the computer. It is off by default, and even when a user switches it on, each individual message has to be armed for search separately, with a warning shown at the time.
+      <string id="DisableWebSearch_Help">Web search sends the words of a search off the computer, and nothing else. It is off by default, and even when a user switches it on, each individual message has to be armed for search separately, with a warning shown at the time.
 
 Enabled: the user cannot switch web search on at all. The control in Settings is disabled and says it was set by your organisation.
 
 Disabled or Not Configured: the user decides.
 
 There is deliberately no policy that turns web search on. Arming a search is a decision made by the person at the keyboard, in front of a warning, and REFUGIO will not make it on their behalf.</string>
+
+      <string id="DisableClaudeCode">Turn off Claude</string>
+      <string id="DisableClaudeCode_Help">A user who has Claude Code installed and signed in with their own Claude account can offer Claude as a model in REFUGIO. When they choose it, the whole conversation is sent to Anthropic under their own plan. It is off by default, and no mode ever uses it. REFUGIO never handles the Claude login.
+
+Enabled: the user cannot switch Claude on. The control in Settings is disabled and says it was set by your organisation, and no Claude model appears in the picker.
+
+Disabled or Not Configured: the user decides.
+
+There is deliberately no policy that turns Claude on.</string>
 
       <string id="DisableUpdateChecks">Turn off update checks</string>
       <string id="DisableUpdateChecks_Help">REFUGIO can check whether a newer version exists by asking github.com what commit a public branch points at. No user data is sent — not messages, not a version, not an identifier.

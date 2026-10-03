@@ -291,7 +291,10 @@ function showModelWarning(s) {
   // point it does damage, in the thread, with buttons: see toolGuard().
   let text = null;
   let action = null;
-  if (!s.ollamaUp) {
+  // Neither problem is a problem while a Claude model is the one answering.
+  if (modelInfo(s, modelFor(s))?.cloud) {
+    text = null;
+  } else if (!s.ollamaUp) {
     text = "Ollama isn't running, so REFUGIO can't answer anything. Start the Ollama app and this will clear.";
   } else if (!modelFor(s) || !(s.models || []).length) {
     text = "No model is installed. REFUGIO can't answer anything until there is one.";
@@ -328,7 +331,7 @@ function showModelWarning(s) {
 function modelFor(s) { return activeModel(s); }
 
 function modelInfo(s, name) {
-  return (s?.models || []).find((m) => m.name === name) || null;
+  return [...(s?.models || []), ...(s?.cloudModels || [])].find((m) => m.name === name) || null;
 }
 
 function renderModelButton() {
@@ -338,17 +341,51 @@ function renderModelButton() {
 
   const info = modelInfo(s, name);
   const noTools = info?.tools === false;
+  const cloud = !!info?.cloud;
 
-  els.modelName.textContent = name || "no model";
-  els.modelSize.textContent = noTools ? "NO TOOLS" : info?.needGb ? `${info.needGb} GB` : "";
-  els.modelSize.classList.toggle("warn", noTools);
-  els.modelDot.className = `dot ${!s?.ollamaUp || !name ? "failed" : noTools ? "degraded" : "ok"}`;
+  // A Claude model says so on the button, in the same place a local one shows
+  // its size: the one fact about it that matters is that it leaves the machine.
+  els.modelName.textContent = cloud ? info.label : name || "no model";
+  els.modelSize.textContent = cloud ? "CLOUD" : noTools ? "NO TOOLS" : info?.needGb ? `${info.needGb} GB` : "";
+  els.modelSize.classList.toggle("warn", noTools || cloud);
+  els.modelDot.className = `dot ${cloud ? "ok" : !s?.ollamaUp || !name ? "failed" : noTools ? "degraded" : "ok"}`;
   els.modelBtn.classList.toggle("warn", noTools);
-  els.modelBtn.title = noTools
+  els.modelBtn.title = cloud
+    ? `${info.label}, through your Claude Code — this conversation is sent to Anthropic. Click to change model.`
+    : noTools
     ? `${name} cannot call tools, so it cannot read anything through your connectors.`
     : name ? `${name} — click to change model` : "No model installed";
 
   toolGuard();
+  sayWhereItGoes(cloud ? info : null);
+}
+
+/** Every sentence in the window that promises the conversation stays here.
+ *
+ *  With a Claude model chosen, those promises are false, and a window that
+ *  goes on making them is lying in the one place this product says it never
+ *  will. Rewritten from the model, not from the Settings switch: switched on
+ *  but with a local model chosen, they are still true. */
+function sayWhereItGoes(cloud) {
+  const title = document.getElementById("empty-title");
+  const sub = document.getElementById("empty-sub");
+  if (title) title.textContent = cloud ? `${cloud.label}, through your Claude Code` : "Your AI, on your machine";
+  if (sub) {
+    sub.textContent = cloud
+      ? "This conversation is sent to Anthropic while a Claude model is chosen. Pick a local model to keep it on this computer."
+      : "Nothing leaves this computer. Ask anything to begin.";
+  }
+  if (state.web) { applyWebSetting(state.web); setWebArmed(state.webArmed); }
+}
+
+/** The web-search warning for the model in use. Its own sentence says nothing
+ *  but the search words leave — true for a local model, and false when the
+ *  whole conversation is already going to Anthropic. */
+function webWarning() {
+  const engine = state.web?.engine || "the search engine";
+  return modelInfo(state.status, modelFor(state.status))?.cloud
+    ? `Your search words are sent to ${engine}. This conversation is also being sent to Anthropic, because a Claude model is chosen.`
+    : state.web?.warning || "";
 }
 
 function renderModelPanel() {
@@ -420,6 +457,59 @@ function renderModelPanel() {
     row.append(dot, mid, right);
     if (!tooBigEver) row.addEventListener("click", () => pickModel(m.name));
     panel.appendChild(row);
+  }
+
+  // Claude, under its own heading. Not interleaved with the local rows: those
+  // are a list of what fits in this machine's memory, and these are a list of
+  // where the conversation goes instead. The heading says it once rather than
+  // every row repeating it.
+  const cloud = s?.cloudModels || [];
+  if (cloud.length) {
+    const head = document.createElement("div");
+    head.className = "mp-section";
+    const label = document.createElement("span");
+    label.className = "t-label";
+    label.textContent = "Claude · through your Claude Code";
+    const note = document.createElement("span");
+    note.className = "mp-section-note";
+    note.textContent = "SENT TO ANTHROPIC";
+    head.append(label, note);
+    panel.appendChild(head);
+
+    // A mode never uses Claude; the server refuses it. Disabled here
+    // too, with the reason, so the refusal is never the first the person hears.
+    const inMode = !!state.mode;
+    for (const m of cloud) {
+      const isActive = m.name === active;
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "mp-row cloud" + (isActive ? " active" : "") + (inMode ? " dim" : "");
+      row.disabled = inMode;
+
+      const dot = document.createElement("span");
+      dot.className = `dot ${isActive ? "ok" : "idle"}`;
+      const mid = document.createElement("div");
+      mid.className = "mp-mid";
+      const tag = document.createElement("div");
+      tag.className = "mp-tag";
+      tag.textContent = m.label;
+      const sub = document.createElement("div");
+      sub.className = "mp-sub";
+      sub.textContent = inMode ? "Not available in a mode"
+        : isActive ? "In use · this conversation is sent to Anthropic"
+        : "Calls tools · uses your Claude plan";
+      mid.append(tag, sub);
+      const right = document.createElement("div");
+      right.className = "mp-right";
+      const fit = document.createElement("div");
+      fit.className = "mp-fit cloud";
+      fit.textContent = "CLOUD";
+      right.append(fit);
+
+      row.append(dot, mid, right);
+      if (!inMode) row.addEventListener("click", () => pickModel(m.name));
+      panel.appendChild(row);
+    }
   }
 
   if (!(s?.models || []).length) {
@@ -609,7 +699,7 @@ function applyWebSetting(web) {
   state.web = web || { enabled: false };
   els.webArm.hidden = !state.web.enabled;
   els.webArm.title = state.web.enabled
-    ? `Search the web for the next message only. ${state.web.warning || ""}`.trim()
+    ? `Search the web for the next message only. ${webWarning()}`.trim()
     : "";
   // Turning the permission off must also drop anything already armed, or the
   // next send would still reach the internet after the user said no.
@@ -624,7 +714,7 @@ function setWebArmed(on) {
   // The warning is the point of the arming step. Say what is sent and what
   // isn't, every time, rather than assuming it was read once in the panel.
   els.webWarn.textContent = state.webArmed
-    ? `Web search is on for this message. ${state.web.warning || ""}`.trim()
+    ? `Web search is on for this message. ${webWarning()}`.trim()
     : "";
 }
 

@@ -21,6 +21,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const argv = process.argv.slice(2);
+// The server asks which version is installed, for Settings and to pick the
+// newest of several.
+if (argv[0] === "--version") { console.log("2.1.104 (Claude Code)"); process.exit(0); }
 const flag = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const model = flag("--model");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");

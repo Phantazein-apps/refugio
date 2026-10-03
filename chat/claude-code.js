@@ -85,6 +85,44 @@ export function checkInit(evt, log = (m) => console.warn(`[claude-code] ${m}`), 
  *  current Sonnet — REFUGIO does not track Anthropic's model ids. */
 export const CLAUDE_CODE_MODELS = ["claude-code/sonnet", "claude-code/opus", "claude-code/haiku"];
 
+/** What the picker shows for each. The label is Anthropic's model family; the
+ *  route is said once, in the section heading, not on every row. */
+export const CLAUDE_CODE_LABELS = {
+  "claude-code/sonnet": "Claude Sonnet",
+  "claude-code/opus": "Claude Opus",
+  "claude-code/haiku": "Claude Haiku",
+};
+
+/** The Settings copy, from here so the switch and the engine cannot disagree
+ *  about what the engine does. Shaped like WEB_SEARCH_UI. */
+export const CLAUDE_CODE_UI = {
+  label: "Offer Claude in the model picker",
+  hint:
+    "Uses Claude Code, signed in with your own Claude account, as a model. REFUGIO never " +
+    "sees your Claude login and never asks for it.",
+  warning:
+    "When you choose a Claude model, the whole conversation — your messages, files you " +
+    "attach, and what your connectors return to it — is sent to Anthropic. Local models " +
+    "are unaffected, and no mode ever uses Claude.",
+  usage:
+    "It counts against your Claude plan's usage, the same as using Claude Code yourself.",
+};
+
+/** Whether Claude Code is here, and which. Cheap after the first call: the
+ *  version is cached per path. */
+export function claudeCodeInfo(env = process.env) {
+  const path = findClaude(env);
+  if (!path) return { installed: false, path: null, version: null, tested: false };
+  const v = claudeVersion(path, env);
+  return {
+    installed: true,
+    path,
+    version: v ? v.join(".") : null,
+    tested: !!v && compareVersions(v, TESTED_FROM) >= 0,
+    testedFrom: TESTED_FROM.join("."),
+  };
+}
+
 export function isClaudeCodeModel(name) {
   return String(name || "").startsWith(PREFIX);
 }

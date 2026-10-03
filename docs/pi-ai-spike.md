@@ -95,8 +95,9 @@ a fleet. It does not use pi-ai at all.
 ## 5. The Claude Code engine (built)
 
 `chat/claude-code.js` runs the person's own signed-in `claude` as a model.
-Pick it with a model name of `claude-code/sonnet`, `claude-code/opus` or
-`claude-code/haiku` (per request, or as `REFUGIO_CHAT_MODEL`).
+Switched on in **Settings ▸ Claude**, it adds Claude Sonnet, Opus and Haiku to
+the chat's model picker, under their own heading (model names
+`claude-code/sonnet`, `claude-code/opus`, `claude-code/haiku`).
 
 **What Claude Code is allowed to do.** Nothing of its own. Its built-in tools are
 blocked by name (`--disallowedTools`), the init event is checked every turn for
@@ -119,11 +120,22 @@ command line, because argv is readable by every user through `ps`. REFUGIO
 never sees, stores or asks for a Claude credential.
 
 **Consent.**
-- Off until `REFUGIO_CLAUDE_CODE=1`. A refused turn stores nothing.
-- Never in a discussion mode, switched on or not: a mode promises the
-  conversation stays on this computer.
-- Both rules are enforced in `streamTurn` before anything is written, and are
-  tested through the real server.
+- Off by default. Settings ▸ Claude says, above the switch, that choosing a
+  Claude model sends the whole conversation — messages, attached files and
+  what connectors return — to Anthropic, against the person's own plan.
+- On only adds Claude to the picker; nothing is sent until a Claude model is
+  chosen. A remembered Claude pick is dropped if the switch goes off, and the
+  fallback model is always local: Claude is never chosen for anyone.
+- Never in a mode, switched on or not: a mode promises the conversation stays
+  on this computer. The picker greys Claude out inside one, with the reason.
+- The switch's route refuses cross-origin requests, and refuses to switch on
+  when Claude Code is not installed. A refused turn stores nothing.
+- An administrator can lock it off (`claudeCode: off` — ADMX, .mobileconfig,
+  `/etc/refugio/managed.json`); there is no policy that switches it on.
+- Everything in the window that promises the conversation stays here — the
+  empty-chat line, the web-search warning — changes while a Claude model is
+  chosen. So does the system prompt: with the local default, Claude told a
+  test user it was "running as REFUGIO on your computer".
 
 **Signed out.** Claude Code 2.1.20, signed out or expired, retries the 401 for
 about twenty seconds and then ends with "Invalid API key · Please run /login"
@@ -154,10 +166,10 @@ consent rules).
 **Cost of the wait.** Every turn that offers tools pays for the bridge to start
 and settle, about 0.7 s, before the model is asked anything.
 
-**Not built.** A Settings switch (with the web-search-style warning) in place
-of the environment variable; the models in the picker; anything for the MDM
-packages. Claude Code is a per-user install and sign-in, so a managed fleet
-would need its own answer.
+**Not built.** Anything that installs Claude Code or helps sign it in on an
+MDM fleet: it is a per-user install and sign-in, and REFUGIO deliberately
+never handles the login. The `.msi` has no deploy-time property for
+`claudeCode` yet (the ADMX and the profile do).
 
 ## 6. Cost of going further
 

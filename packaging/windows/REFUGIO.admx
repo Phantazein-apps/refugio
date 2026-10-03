@@ -44,6 +44,17 @@
       <disabledValue><string>user</string></disabledValue>
     </policy>
 
+    <policy name="DisableClaudeCode" class="Machine"
+            displayName="$(string.DisableClaudeCode)"
+            explainText="$(string.DisableClaudeCode_Help)"
+            key="SOFTWARE\Policies\Phantazein\REFUGIO"
+            valueName="claudeCode">
+      <parentCategory ref="REFUGIO" />
+      <supportedOn ref="windows:SUPPORTED_Windows10" />
+      <enabledValue><string>off</string></enabledValue>
+      <disabledValue><string>user</string></disabledValue>
+    </policy>
+
     <policy name="DisableUpdateChecks" class="Machine"
             displayName="$(string.DisableUpdateChecks)"
             explainText="$(string.DisableUpdateChecks_Help)"

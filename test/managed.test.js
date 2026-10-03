@@ -120,6 +120,17 @@ test("policy turns web search off and marks it locked", () => {
   assert.equal(locked.web, true);
 });
 
+test("policy turns Claude off and marks it locked, and can never turn it on", () => {
+  const on = { claude: { enabled: true }, web: { enabled: false }, updates: { enabled: false } };
+  const { settings, locked } = applyPolicy(on, { claudeCode: "off" });
+  assert.equal(settings.claude.enabled, false);
+  assert.equal(locked.claude, true);
+  assert.ok(!POLICY_KEYS.claudeCode.values.includes("on"));
+  const off = { claude: { enabled: false } };
+  assert.equal(applyPolicy(off, normalise({ claudeCode: "on" })).settings.claude.enabled, false);
+  assert.match(describePolicy({ claudeCode: "off" }), /Claude off/);
+});
+
 test("policy can never turn web search on", () => {
   // There is deliberately no "on" — the arming warning in the composer is a
   // promise to the person at the keyboard, and an administrator is not who it

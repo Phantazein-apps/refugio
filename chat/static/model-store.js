@@ -33,9 +33,17 @@ export function setPreferredModel(name) {
  * the server resolved.
  */
 export function activeModel(status) {
-  const installed = (status?.models || []).map((m) => m.name);
+  // A Claude model counts as "installed" while the server offers it — that is,
+  // while Claude is switched on and Claude Code is here. Switched off, the
+  // remembered pick is dropped like a deleted local model, so the next message
+  // goes to a local model rather than to a refusal.
+  const local = (status?.models || []).map((m) => m.name);
+  const installed = [...local, ...(status?.cloudModels || []).map((m) => m.name)];
   const pref = preferredModel();
   if (pref && installed.includes(pref)) return pref;
   if (pref && !installed.includes(pref)) setPreferredModel(null);
-  return status?.model || installed[0] || null;
+  // The fallback is local only. Claude is used when someone picks it, never
+  // because nothing else was installed — that would send a conversation off
+  // the machine without anyone having chosen to.
+  return status?.model || local[0] || null;
 }
