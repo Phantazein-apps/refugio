@@ -78,8 +78,37 @@ function firstEventMs(env = process.env) {
 }
 
 const NOT_SIGNED_IN =
-  "Claude Code did not answer. If it is not signed in, open Terminal, run `claude`, " +
-  "and sign in with your Claude account — REFUGIO never asks for it.";
+  "Claude Code did not answer — its sign-in may have expired. Open Terminal, run `claude`, " +
+  "and sign in with /login (opening it is not enough: an expired login still looks signed in). " +
+  "REFUGIO never asks for your Claude account.";
+
+/**
+ * The environment `claude` runs in: REFUGIO's, minus anything a PARENT Claude
+ * Code session put there.
+ *
+ * When REFUGIO is started from inside Claude Code — a terminal in the desktop
+ * app, a dev session — it inherits that session's plumbing: CLAUDECODE, a set
+ * of CLAUDE_CODE_* session ids and sockets, OAuth switches, and an
+ * ANTHROPIC_BASE_URL pointing at the host's own endpoint. The child then sends
+ * the person's login there and is refused with a 401 it retries in silence.
+ * Found exactly that way: signed in, and every turn failed.
+ *
+ * ANTHROPIC_BASE_URL is only removed when CLAUDECODE says it was inherited. Set
+ * by the person themselves — a company gateway — it is theirs and stays.
+ */
+export function ownSessionEnv(env) {
+  const out = { ...env };
+  const inherited = "CLAUDECODE" in env;
+  for (const k of Object.keys(out)) {
+    if (k === "CLAUDECODE" || k.startsWith("CLAUDE_CODE_") || k.startsWith("CLAUDE_AGENT_SDK")
+      || k === "CLAUDE_PID" || k === "CLAUDE_EFFORT" || k.startsWith("CLAUDE_PREVIEW_")
+      || k === "USE_LOCAL_OAUTH" || k === "USE_STAGING_OAUTH"
+      || (inherited && k === "ANTHROPIC_BASE_URL")) {
+      delete out[k];
+    }
+  }
+  return out;
+}
 
 // ── Prompt ──────────────────────────────────────────────────
 
@@ -200,11 +229,7 @@ class Turn {
       ...(tools.length ? ["--mcp-config", JSON.stringify(mcpConfig)] : []),
     ];
 
-    const childEnv = { ...env };
-    // Set when REFUGIO itself was started from inside Claude Code; the child
-    // would otherwise take itself for a nested session.
-    delete childEnv.CLAUDECODE;
-    delete childEnv.CLAUDE_CODE_ENTRYPOINT;
+    const childEnv = ownSessionEnv(env);
     // A tool call is held open while REFUGIO runs it; Claude Code must not give
     // up on it first.
     childEnv.MCP_TOOL_TIMEOUT ||= "600000";

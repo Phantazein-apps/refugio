@@ -17,7 +17,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { toPrompt, chatStream, findClaude, isClaudeCodeModel } from "../chat/claude-code.js";
+import { toPrompt, chatStream, findClaude, isClaudeCodeModel, ownSessionEnv } from "../chat/claude-code.js";
 import { cloudRefusal, isCloudModel } from "../chat/engine.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -60,6 +60,19 @@ test("a discussion mode never uses a cloud model, switched on or not", () => {
     assert.match(cloudRefusal({ model, mode: "nvc", env: { REFUGIO_CLAUDE_CODE: "1" } }), /Discussion modes only use the model on this computer/);
   }
   assert.equal(cloudRefusal({ model: "qwen3:4b", mode: "nvc", env: {} }), null);
+});
+
+test("a parent Claude Code session's plumbing is not handed to the child", () => {
+  // Found by running REFUGIO from inside the Claude desktop app: the child sent
+  // the person's login to the host's endpoint and was refused, every turn.
+  const parent = {
+    PATH: "/bin", HOME: "/h", CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "x", CLAUDE_CODE_SESSION_ID: "s",
+    CLAUDE_AGENT_SDK_VERSION: "1", CLAUDE_PID: "1", USE_STAGING_OAUTH: "1", USE_LOCAL_OAUTH: "1",
+    ANTHROPIC_BASE_URL: "http://host-proxy", REFUGIO_CLAUDE_CODE: "1",
+  };
+  assert.deepEqual(ownSessionEnv(parent), { PATH: "/bin", HOME: "/h", REFUGIO_CLAUDE_CODE: "1" });
+  // A gateway the person set themselves, with no parent session, is theirs.
+  assert.equal(ownSessionEnv({ ANTHROPIC_BASE_URL: "https://gateway.example" }).ANTHROPIC_BASE_URL, "https://gateway.example");
 });
 
 test("an explicit REFUGIO_CLAUDE_BIN that does not exist is not silently replaced", () => {
@@ -148,7 +161,7 @@ describe("against a fake claude", { skip: !sdk && "@modelcontextprotocol/sdk is 
     const t0 = Date.now();
     await assert.rejects(
       chatStream({ model: "claude-code/silent", messages: [{ role: "user", content: "hi" }], tools: [] }, () => {}, () => {}, env),
-      /open Terminal, run `claude`, and sign in/);
+      /Open Terminal, run `claude`, and sign in with \/login/);
     assert.ok(Date.now() - t0 < 8000, "the first-event limit, not the turn ceiling");
     await sleep(200);
     assert.equal(alive(runs().at(-1).pid), false, "the process was ended");
