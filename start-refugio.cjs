@@ -145,6 +145,22 @@ function getJson(url, timeout = 4000) {
   })
 }
 
+/** The pid of a process listening on `port` that is this install's chat
+ *  server — its command line names `chatEntry` — or null. Asks lsof for the
+ *  listener and ps for its arguments; anything that cannot be read is "not
+ *  ours", which leaves the old adopt-it behaviour in place. */
+function ownChatServerOnPort(port, chatEntry) {
+  try {
+    const pids = execSync(`lsof -nP -tiTCP:${port} -sTCP:LISTEN`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] })
+      .split("\n").map(s => parseInt(s, 10)).filter(n => n > 1 && n !== process.pid)
+    for (const pid of pids) {
+      const args = execSync(`ps -p ${pid} -o args=`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] })
+      if (args.includes(chatEntry)) return pid
+    }
+  } catch {}
+  return null
+}
+
 // ── Open browser ────────────────────────────────────────────
 
 function openBrowser(url) {
@@ -616,7 +632,29 @@ ${C.bold}============================================================
     // and the supervisor would then restart it ten times in a row — a loud,
     // baffling loop whose actual cause is that REFUGIO is already working.
     // Adopt it instead.
-    const portBusy = await probeHttp(`http://127.0.0.1:${CHAT_PORT}/api/chat/status`, 1500)
+    let portBusy = await probeHttp(`http://127.0.0.1:${CHAT_PORT}/api/chat/status`, 1500)
+
+    // Unless it is THIS install's chat server left behind by a supervisor that
+    // died without stopping it — killed outright, or out of memory. The menu-bar
+    // app restarts a supervisor that dies, so this is no longer a rare case:
+    // the new one adopted the orphan, owned nothing, and `refugio stop` then
+    // stopped the supervisor and left the chat server serving, its memory held
+    // and the app showing REFUGIO as running. Found on a real install.
+    //
+    // Only ours — the same chat/server.js, by path. A server someone started
+    // from another checkout is still adopted, not killed.
+    if (portBusy) {
+      const orphan = ownChatServerOnPort(CHAT_PORT, chatEntry)
+      if (orphan) {
+        warn(`Replacing a chat server left behind by an earlier run (pid ${orphan})`)
+        try { process.kill(orphan, "SIGTERM") } catch {}
+        for (let i = 0; i < 20 && portBusy; i++) {
+          await new Promise(r => setTimeout(r, 250))
+          portBusy = await probeHttp(`http://127.0.0.1:${CHAT_PORT}/api/chat/status`, 500)
+        }
+        if (portBusy) { try { process.kill(orphan, "SIGKILL") } catch {} ; await new Promise(r => setTimeout(r, 500)); portBusy = false }
+      }
+    }
     if (portBusy) {
       chatUrl = `http://127.0.0.1:${CHAT_PORT}`
       ok(`REFUGIO chat already running → ${chatUrl} (not started again)`)
