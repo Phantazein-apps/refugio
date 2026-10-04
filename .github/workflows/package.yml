@@ -30,6 +30,60 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  app:
+    # The self-contained REFUGIO.app, as a .dmg per architecture — built by
+    # packaging/macos/build-app.sh. Unsigned until there is a Developer ID: a
+    # downloaded copy needs "Open Anyway" once (README).
+    name: .dmg
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build REFUGIO.app and the .dmg, both architectures
+        run: ARCHES="arm64 x64" ./packaging/macos/build-app.sh
+
+      - name: Smoke-test the arm64 app as a first-time user would meet it
+        run: |
+          set -euo pipefail
+          DMG=$(ls dist/REFUGIO-*-arm64.dmg | head -1)
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint /tmp/refugio-dmg
+          APP=/tmp/refugio-dmg/REFUGIO.app
+          R="$APP/Contents/Resources"
+          test -x "$APP/Contents/MacOS/RefugioBar" || { echo "no app binary"; exit 1; }
+          test -L /tmp/refugio-dmg/Applications || { echo "no Applications shortcut in the .dmg"; exit 1; }
+          "$R/runtime/bin/node" -v
+          # Nothing a run leaves behind may have shipped.
+          for never in data mcpo-config.json; do
+            test ! -e "$R/refugio/$never" || { echo "$never shipped inside the app"; exit 1; }
+          done
+
+          # A brand-new user: no ~/.refugio.env, no data. The supervisor must
+          # write the minimum and keep running — exiting would be a crash loop
+          # under the app — and put its state in the user's home, not the app.
+          export HOME="$(mktemp -d)"
+          REFUGIO_PACKAGED=1 "$R/runtime/bin/node" "$R/refugio/start-refugio.cjs" --no-browser >/tmp/app-sup.log 2>&1 &
+          SUP=$!
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://127.0.0.1:8090/ && break
+            sleep 1
+          done
+          kill -0 $SUP 2>/dev/null || { echo "the supervisor died on startup:"; cat /tmp/app-sup.log; exit 1; }
+          curl -s -o /dev/null -w "chat %{http_code}\n" http://127.0.0.1:8090/ | grep -E "chat (200|302)" \
+            || { echo "the chat server did not answer:"; cat /tmp/app-sup.log; exit 1; }
+          test -f "$HOME/.refugio.env" || { echo "no credentials file was created"; exit 1; }
+          test -d "$HOME/.refugio-data" || { echo "state did not go to ~/.refugio-data"; exit 1; }
+          kill $SUP
+          echo "first run: credentials file created, state in ~/.refugio-data, chat answering"
+          hdiutil detach /tmp/refugio-dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: refugio-dmg-UNSIGNED
+          path: dist/*.dmg
+
   macos:
     name: .pkg
     runs-on: macos-latest

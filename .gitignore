@@ -42,3 +42,8 @@ app/
 
 # Written by `mempalace init` into the eval memory fixture; generated per machine.
 eval/fixtures/memory/mempalace.yaml
+
+# Build output: packaging/macos/build-pkg.sh and build-app.sh stage in build/
+# and write the .pkg and .dmg files to dist/.
+build/
+dist/

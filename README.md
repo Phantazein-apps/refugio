@@ -81,6 +81,35 @@ installer refuses to put the second one on a machine that has the first
 The rest of this README is REFUGIO's. [`docs/editions.md`](docs/editions.md) is
 the split itself: why it exists, what it costs, and what is still REFUGIO-only.
 
+### The app (REFUGIO only)
+
+A self-contained `REFUGIO.app` — REFUGIO, its dependencies and its own Node, in
+one download of about 70 MB. Open the `.dmg`, drag **REFUGIO** to
+**Applications**, open it. The first-run setup in its window does the rest:
+picking a model (it downloads one through Ollama), connectors, web search, and
+— if you have a Claude plan — signing in to Claude.
+
+Build it with `./packaging/macos/build-app.sh`; CI builds both architectures on
+every push (the **Package** workflow's `.dmg` artifact). There are no published
+releases yet.
+
+**It is not signed** — there is no Apple Developer ID yet. A `.dmg` you
+downloaded is refused the first time: macOS says it "cannot verify" REFUGIO. To
+open it anyway, once: **System Settings ▸ Privacy & Security**, scroll to
+*"REFUGIO" was blocked*, **Open Anyway**. One you built on the same Mac opens
+normally.
+
+What the app does not bring, and the command below does:
+
+- **Ollama.** The window says how to get it, and notices by itself when it is running.
+- **WhatsApp (Hermeneia), email (Epistole) and MemPalace**, which the installer
+  downloads and sets up.
+- **Update notices.** The update check compares git commits, and an app has no
+  git; a newer version is a new download, dragged over the old one.
+
+Conversations and settings live in `~/.refugio-data` and `~/.refugio.env` —
+never inside the app, so replacing it keeps them.
+
 ### The command
 
 ```bash

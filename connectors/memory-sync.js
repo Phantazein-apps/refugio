@@ -24,14 +24,23 @@ export class MemorySyncManager {
     // Google Docs sync: needs all four GOOGLE_* vars
     if (process.env.GOOGLE_DOC_ID && process.env.GOOGLE_CLIENT_ID &&
         process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN) {
-      const { GoogleDocsConnector } = await import('./google-docs.js');
-      this.googleDocsConnector = new GoogleDocsConnector(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REFRESH_TOKEN
-      );
-      this.googleDocId = process.env.GOOGLE_DOC_ID;
-      this.targets.push('google-docs');
+      // googleapis is an optional dependency — ~200 MB that nothing else
+      // needs, left out of REFUGIO.app. Without it, memory still works; only
+      // this sync target is missing, and that is said rather than crashing
+      // the memory server over it.
+      try {
+        const { GoogleDocsConnector } = await import('./google-docs.js');
+        this.googleDocsConnector = new GoogleDocsConnector(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          process.env.GOOGLE_REFRESH_TOKEN
+        );
+        this.googleDocId = process.env.GOOGLE_DOC_ID;
+        this.targets.push('google-docs');
+      } catch (e) {
+        console.error(`Google Docs sync is configured but unavailable (${e.message}). ` +
+          'Install it with `npm install googleapis` in the REFUGIO directory.');
+      }
     }
   }
 
