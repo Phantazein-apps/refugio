@@ -28,8 +28,8 @@ const home = os.homedir()
 // test/edition.test.js fails on the same disagreement, so the drift is caught
 // before anyone runs the installer rather than during.
 const EDITION_BOOT = {
-  standard: { dir: "refugio", product: "REFUGIO", chatPort: 8090 },
-  listener: { dir: "refugio-listener", product: "REFUGIO Listener", chatPort: 8091 },
+  standard: { dir: "refugio", product: "REFUGIO", chatPort: 8090, envFile: ".refugio.env" },
+  listener: { dir: "refugio-listener", product: "REFUGIO Listener", chatPort: 8091, envFile: ".refugio-listener.env" },
 }
 
 /** The edition being installed, and its full row once the clone has happened.
@@ -288,7 +288,13 @@ function installMenuBarApp(targetDir) {
     // Capture rather than discard: a build that fails silently leaves someone
     // with no menu bar and no idea why, which is exactly the state this app
     // exists to avoid being in.
-    execSync(`"${script}"`, { cwd: menubarDir, stdio: "pipe", env: { ...process.env, REFUGIO_NO_LAUNCH: "1" } })
+    // Natively, on Apple Silicon. This installer may itself be running under
+    // Rosetta — an Intel Node from an old Homebrew in /usr/local is common —
+    // and everything it starts inherits that: `swift build` then fails with
+    // "unable to load libxcrun … need 'x86_64'", because the toolchain on an
+    // Apple Silicon Mac has no Intel slice. Found on a real install.
+    const cmd = isAppleSilicon() ? `arch -arm64 "${script}"` : `"${script}"`
+    execSync(cmd, { cwd: menubarDir, stdio: "pipe", env: { ...process.env, REFUGIO_NO_LAUNCH: "1" } })
     ok("Menu-bar app installed (/Applications/REFUGIO.app)")
     return true
   } catch (e) {
@@ -305,8 +311,12 @@ function installMenuBarApp(targetDir) {
       if (line.trim()) console.log(`      ${line}`)
     }
     console.log(`    ${C.dim}Retry with: cd "${menubarDir}" && ./install.sh${C.reset}`)
-    // A previous build is still a working app — better than none.
-    return fs.existsSync(installed)
+    // Not "an older build is still there, so use it". That build predates the
+    // app running REFUGIO — it ignores what openTheApp asks of it and starts
+    // nothing — and saying yes here removed the login agent and left nothing
+    // in its place. Seen on a real install: the window never came. The caller
+    // falls back to the agent or the on-demand launchers instead.
+    return false
   }
 }
 

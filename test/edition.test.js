@@ -224,7 +224,8 @@ test("the installer's bootstrap table agrees with editions.cjs", () => {
   // install-node.cjs is downloaded on its own and run before anything is
   // cloned, so it cannot read the table it must agree with. It carries three
   // fields — where to install, what to print, which port to check — and
-  // asserts them itself once the clone lands. This is the same assertion made
+  // asserts them itself once the clone lands. (A fourth, the credentials
+  // file, because one message names it before then.) This is the same assertion made
   // early enough to catch the drift before anyone runs it.
   const src = readFileSync(join(ROOT, "install-node.cjs"), "utf-8");
   const m = src.match(/const EDITION_BOOT = (\{[\s\S]*?\n\})/);
@@ -235,6 +236,9 @@ test("the installer's bootstrap table agrees with editions.cjs", () => {
     assert.equal(boot[id].dir, EDITIONS[id].installDir, `${id}: install directory`);
     assert.equal(boot[id].product, EDITIONS[id].product, `${id}: product name`);
     assert.equal(boot[id].chatPort, EDITIONS[id].chatPort, `${id}: chat port`);
+    // Named before the clone lands ("your credentials in ~/… are not
+    // affected"); missing, it printed "~/undefined".
+    assert.equal(boot[id].envFile, EDITIONS[id].envFile, `${id}: credentials file`);
   }
 });
 
