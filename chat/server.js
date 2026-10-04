@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // REFUGIO chat server — the local chat UI, served by Node.
 //
-// Replaces Open WebUI on the default path. OWUI needs `uv` + a Python venv and
-// loads PyTorch (~1-1.5 GB) just to boot; when `uv` is missing the installer
-// silently skips it and REFUGIO starts with no interface at all. This serves an
-// equivalent single-user chat window with zero extra dependencies.
+// REFUGIO's only interface: a single-user chat window served by plain Node,
+// with no dependencies beyond what REFUGIO already installs — no Python, no
+// PyTorch, nothing an installer can silently skip and leave the machine with
+// no window to open.
 //
 // Usage: node chat/server.js [--port 8090]
 // Env:   REFUGIO_CHAT_PORT, REFUGIO_CHAT_MODEL, OLLAMA_BASE_URL, REFUGIO_DATA_DIR,
@@ -969,8 +969,8 @@ const SETUP_CONNECTOR_KEYS = {
 
 /** The connectors the wizard may offer on THIS machine.
  *
- *  `available` is the load-bearing field. Apple Reminders on Linux, or Things 3
- *  on a Mac that does not have Things 3, is a switch that turns on nothing and
+ *  `available` is the load-bearing field. Things 3 on a Mac that does not have
+ *  Things 3 is a switch that turns on nothing and
  *  then reports a broken connector — so the wizard does not draw it at all,
  *  which is also what the design says ("REFUGIO only offers what it can
  *  actually reach"). */

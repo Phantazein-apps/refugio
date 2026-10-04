@@ -151,7 +151,7 @@ final class ChatWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
             decisionHandler(.allow); return
         }
         let isLocal = target.host == "127.0.0.1" || target.host == "localhost"
-            || target.host == "refugio" || target.host?.hasSuffix(".localhost") == true
+            || target.host?.hasSuffix(".localhost") == true
         if isLocal {
             decisionHandler(.allow)
         } else {

@@ -17,10 +17,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { homedir } from "os"
 import { join } from "path"
 
-const isWin = process.platform === "win32"
-const mempalaceBin = isWin
-  ? join(homedir(), ".local", "bin", "mempalace-mcp.exe")
-  : join(homedir(), ".local", "bin", "mempalace-mcp")
+const mempalaceBin = join(homedir(), ".local", "bin", "mempalace-mcp")
 
 // ── Upstream MemPalace connection (lazy, kept alive) ─────────
 let upstream = null
@@ -40,7 +37,7 @@ async function ensureUpstream() {
   return client
 }
 
-// ── Tools exposed to Open WebUI (only two) ──────────────────
+// ── Tools exposed to the chat window (only two) ─────────────
 const TOOLS = [
   {
     name: "memory_search",

@@ -16,7 +16,6 @@ const fs = require("fs")
 const os = require("os")
 const path = require("path")
 
-const isWin = os.platform() === "win32"
 const OLLAMA = "http://127.0.0.1:11434"
 
 const C = process.stdout.isTTY
@@ -37,23 +36,18 @@ const HF = {
 }
 
 function has(cmd) {
-  try { execSync(isWin ? `where ${cmd}` : `which ${cmd}`, { stdio: "ignore" }); return true } catch { return false }
+  try { execSync(`which ${cmd}`, { stdio: "ignore" }); return true } catch { return false }
 }
 function ollamaBin() {
   const app = "/Applications/Ollama.app/Contents/Resources/ollama"
-  if (!isWin && fs.existsSync(app)) return app
+  if (fs.existsSync(app)) return app
   if (has("ollama")) return "ollama"
-  if (isWin) {
-    // Installed but maybe not on this session's PATH.
-    for (const c of [path.join(process.env.LOCALAPPDATA || "", "Programs", "Ollama", "ollama.exe"), "C:\\Program Files\\Ollama\\ollama.exe"]) {
-      try { if (c && fs.existsSync(c)) return c } catch {}
-    }
-  }
   return null
 }
 
-// Download a URL to a file using Node's https (no external `curl` — not present
-// by default on Windows). Follows redirects (HuggingFace 302s to its CDN).
+// Download a URL to a file using Node's https rather than shelling out to
+// `curl`, so failures surface as errors we can read instead of an exit code.
+// Follows redirects (HuggingFace 302s to its CDN).
 function downloadFile(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error("too many redirects"))

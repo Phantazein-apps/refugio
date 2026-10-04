@@ -1,12 +1,12 @@
 // MCP tool pool — connects directly to REFUGIO's MCP servers.
 //
-// Open WebUI can't speak MCP, so REFUGIO runs MCPO to translate MCP → OpenAPI
-// for it. Nothing here needs that: the SDK REFUGIO already depends on speaks
-// MCP natively, so the chat UI talks to the servers directly and MCPO becomes
-// optional for this path.
+// Every connector is a stdio server this process spawns itself: the SDK REFUGIO
+// already depends on speaks MCP natively, so there is no proxy in between.
 //
-// Config is read from the same mcpo-config.json the supervisor already writes,
-// so there is exactly one place that defines which servers exist.
+// Config is read from mcpo-config.json, which the supervisor writes on every
+// launch, so there is exactly one place that defines which servers exist. The
+// name is historical — the MCPO proxy that Open WebUI needed read it too — and
+// is kept because existing installs and REFUGIO_MCPO_CONFIG point at it.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -92,7 +92,6 @@ function firstCause(stderr) {
  * leftover, and only the user can judge that.
  */
 async function conflictingProcess(errorText, spec) {
-  if (process.platform === "win32") return null;      // no ps; offer plain retry
   const m = /already running \(PID (\d+)\)/i.exec(errorText || "");
   if (!m) return null;
   const pid = parseInt(m[1], 10);
@@ -139,8 +138,9 @@ export class McpPool {
    * Connect to every stdio server in mcpo-config.json.
    *
    * Servers are connected in parallel and failures are isolated: one broken
-   * connector must not cost the user every other tool. Anything non-stdio
-   * (mcp-remote wrappers etc.) is skipped for now.
+   * connector must not cost the user every other tool. An entry without a
+   * `command` is not something this pool can spawn, and is reported as a
+   * failed connector with that reason rather than dropped without a word.
    */
   async connectAll(configPath, { timeoutMs = 20000, only = null } = {}) {
     if (!existsSync(configPath)) {

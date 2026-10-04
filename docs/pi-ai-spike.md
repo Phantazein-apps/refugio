@@ -130,8 +130,8 @@ never sees, stores or asks for a Claude credential.
   on this computer. The picker greys Claude out inside one, with the reason.
 - The switch's route refuses cross-origin requests, and refuses to switch on
   when Claude Code is not installed. A refused turn stores nothing.
-- An administrator can lock it off (`claudeCode: off` — ADMX, .mobileconfig,
-  `/etc/refugio/managed.json`); there is no policy that switches it on.
+- An administrator can lock it off (`claudeCode: off` in the configuration
+  profile); there is no policy that switches it on.
 - Everything in the window that promises the conversation stays here — the
   empty-chat line, the web-search warning — changes while a Claude model is
   chosen. So does the system prompt: with the local default, Claude told a
@@ -168,8 +168,7 @@ and settle, about 0.7 s, before the model is asked anything.
 
 **Not built.** Anything that installs Claude Code or helps sign it in on an
 MDM fleet: it is a per-user install and sign-in, and REFUGIO deliberately
-never handles the login. The `.msi` has no deploy-time property for
-`claudeCode` yet (the ADMX and the profile do).
+never handles the login.
 
 ## 6. Cost of going further
 
@@ -179,7 +178,7 @@ never handles the login. The `.msi` has no deploy-time property for
 | Churn | The package moved scope this year (`@mariozechner/pi-ai` is deprecated); 1.0.1 published today. Pin exact, read changelogs. |
 | Telemetry | It depends on `@earendil-works/pi-telemetry`. The installed build contains no network calls (contracts and a no-op), but a privacy product should re-check on every bump. |
 | Product work | A key field in Settings (stored like the Notion token), a model picker that lists cloud models apart from local ones, and the same consent shape as web search: off by default, a warning that says what leaves the machine, and a mode never sends to the cloud. None of it is in this spike. |
-| LM Studio | Falls out almost free: it is an OpenAI-compatible server, so it is the Ollama `/v1` path with a different base URL. Closes `docs/gaps.md` §9. |
+| LM Studio | Falls out almost free: it is an OpenAI-compatible server, so it is the Ollama `/v1` path with a different base URL. This is the way back for it, which `docs/gaps.md` §9 records as unsupported today. |
 
 ## 7. Recommendation
 

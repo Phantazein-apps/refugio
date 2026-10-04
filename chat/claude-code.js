@@ -145,7 +145,7 @@ export function findClaude(env = process.env, versionOf = claudeVersion) {
   let best = null;
   for (const d of dirs) {
     if (!d) continue;
-    const p = join(d, process.platform === "win32" ? "claude.exe" : "claude");
+    const p = join(d, "claude");
     if (!existsSync(p)) continue;
     let real;
     try { real = realpathSync(p); } catch { continue; }

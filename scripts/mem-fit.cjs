@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Cross-platform "available RAM" detection + runtime model fitting.
+// macOS "available RAM" detection + runtime model fitting.
 //
 // At INSTALL time we download TWO models: the "optimal" one sized to TOTAL RAM,
 // and a lighter "current" one (one tier down) for when the machine is busy. The
@@ -8,7 +8,6 @@
 // No troubleshooting required from the user.
 
 const { execSync } = require("child_process")
-const fs = require("fs")
 const os = require("os")
 
 const GB = 1024 ** 3
@@ -21,9 +20,12 @@ const GB = 1024 ** 3
 //                 is not a smaller REFUGIO; it is a worse version of the local
 //                 chat apps we have no intention of replacing. This flag gates
 //                 the product — see machineSupport() below.
-//   nativeTools - narrower, and Open WebUI's problem specifically: can it drive
-//                 OWUI's *native* function-calling, or does OWUI need its
-//                 prompt-based mode? Independent of `tools`.
+//   nativeTools - a rating from the Open WebUI days (could it drive OWUI's
+//                 native function-calling rather than its prompt-based mode).
+//                 Nothing decides anything on it any more; it stays only
+//                 because models.json and chat/model-catalog.js carry the same
+//                 field and this ladder is merged into that index, so dropping
+//                 it here alone would make builtin and catalog entries differ.
 const MODEL_LADDER = [
   { tag: "qwen2.5:0.5b", ramGb: 0.8,  tools: false, nativeTools: false },
   { tag: "llama3.2:1b",  ramGb: 1.5,  tools: false, nativeTools: false },
@@ -44,38 +46,28 @@ const TOOL_FLOOR = MODEL_LADDER.find(m => m.tools)
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
 const ladderIndex = tag => MODEL_LADDER.findIndex(m => m.tag === tag)
 const modelRamGb = tag => { const m = MODEL_LADDER.find(x => x.tag === tag); return m ? m.ramGb : 0 }
-const supportsNativeTools = tag => { const m = MODEL_LADDER.find(x => x.tag === tag); return m ? m.nativeTools : false }
 // null (not false) for an off-ladder tag: a model we've never rated is unknown,
 // not incapable, and callers must not warn as if they know it can't call tools.
 const supportsTools = tag => { const m = MODEL_LADDER.find(x => x.tag === tag); return m ? m.tools : null }
 
-// Reclaimable ("available") memory in GB — NOT os.freemem(), which on macOS and
-// Linux counts only truly-free pages and wildly under-reports what's usable.
+// Reclaimable ("available") memory in GB — NOT os.freemem(), which on macOS
+// counts only truly-free pages and wildly under-reports what's usable.
 function availableMemGb() {
   const totalGb = os.totalmem() / GB
   try {
-    if (process.platform === "darwin") {
-      const out = execSync("vm_stat", { encoding: "utf-8" })
-      const pm = out.match(/page size of (\d+) bytes/)
-      const page = pm ? parseInt(pm[1], 10) : 4096
-      const get = label => {
-        const m = out.match(new RegExp(label + ":\\s+(\\d+)\\."))
-        return m ? parseInt(m[1], 10) : 0
-      }
-      // free + inactive + speculative + purgeable ≈ what the OS can hand out
-      // without swapping (inactive/purgeable are reclaimable file/cache pages).
-      const pages = get("Pages free") + get("Pages inactive") +
-        get("Pages speculative") + get("Pages purgeable")
-      const avail = (pages * page) / GB
-      if (avail > 0) return clamp(avail, 0, totalGb)
-    } else if (process.platform === "linux") {
-      const mi = fs.readFileSync("/proc/meminfo", "utf-8")
-      const m = mi.match(/MemAvailable:\s+(\d+)\s+kB/)
-      if (m) return clamp((parseInt(m[1], 10) * 1024) / GB, 0, totalGb)
-    } else if (process.platform === "win32") {
-      // On Windows os.freemem() reports available physical memory already.
-      return clamp(os.freemem() / GB, 0, totalGb)
+    const out = execSync("vm_stat", { encoding: "utf-8" })
+    const pm = out.match(/page size of (\d+) bytes/)
+    const page = pm ? parseInt(pm[1], 10) : 4096
+    const get = label => {
+      const m = out.match(new RegExp(label + ":\\s+(\\d+)\\."))
+      return m ? parseInt(m[1], 10) : 0
     }
+    // free + inactive + speculative + purgeable ≈ what the OS can hand out
+    // without swapping (inactive/purgeable are reclaimable file/cache pages).
+    const pages = get("Pages free") + get("Pages inactive") +
+      get("Pages speculative") + get("Pages purgeable")
+    const avail = (pages * page) / GB
+    if (avail > 0) return clamp(avail, 0, totalGb)
   } catch { /* fall through */ }
   // Conservative fallback (may under-pick): truly-free memory.
   return clamp(os.freemem() / GB, 0, totalGb)
@@ -107,9 +99,9 @@ function installPair(optimalTag) {
  *
  *   totalGb  - installed RAM (the hardware ceiling — apps can't be closed to fix it)
  *   freeGb   - RAM free right now (a soft limit — closing apps CAN fix it)
- *   uiGb     - RAM the interface holds: ~0.05 for the built-in chat UI,
- *              ~0.7-1.5 for Open WebUI. Dropping OWUI is most of what makes the
- *              3B floor affordable on an 8 GB machine.
+ *   uiGb     - RAM the interface holds: ~0.05 for the chat window, which is
+ *              plain Node. Keeping that small is most of what makes the 3B
+ *              floor affordable on an 8 GB machine.
  *
  * Returns { supported, transient, needGb, freeGb, totalGb, floor }.
  *   supported=false, transient=false → the hardware can't do it. Say so.
@@ -119,9 +111,9 @@ function installPair(optimalTag) {
 function machineSupport({ totalGb = os.totalmem() / GB, freeGb = null, uiGb = 0.05, safetyGb = 1.0 } = {}) {
   const free = freeGb == null ? availableMemGb() : freeGb
   const needGb = TOOL_FLOOR.ramGb + uiGb + safetyGb
-  // The OS itself is not optional: ~2.5 GB wired on macOS, less elsewhere, and
-  // it is already excluded from `free` but NOT from `totalGb`.
-  const osGb = process.platform === "darwin" ? 2.5 : 1.5
+  // The OS itself is not optional: ~2.5 GB wired on macOS, and it is already
+  // excluded from `free` but NOT from `totalGb`.
+  const osGb = 2.5
   const hardwareOk = totalGb - osGb >= needGb
   return {
     supported: hardwareOk && free >= needGb,
@@ -135,7 +127,7 @@ function machineSupport({ totalGb = os.totalmem() / GB, freeGb = null, uiGb = 0.
 
 // Pick the largest INSTALLED model that fits the RAM available right now.
 //   availableGb    - reclaimable RAM measured at launch
-//   owuiOverheadGb - RAM Open WebUI itself holds (less when embeddings offloaded)
+//   uiOverheadGb   - RAM the chat window itself holds (~0.05 GB; see machineSupport)
 //   installedTags  - model tags currently downloaded (from `ollama list`/api/tags)
 //   safetyGb       - headroom kept free during inference
 // Returns { tag, fits, heavier, tools }. If NO installed tag is on the ladder (e.g.
@@ -149,11 +141,11 @@ function machineSupport({ totalGb = os.totalmem() / GB, freeGb = null, uiGb = 0.
 // Tool-capable models are strongly preferred: a tight qwen2.5:3b that can call
 // connectors is REFUGIO, and a comfortable qwen2.5:0.5b that can't is not. We
 // downgrade below the floor only when nothing else is installed at all.
-function pickInstalledModel({ availableGb, owuiOverheadGb = 1.0, installedTags = [], safetyGb = 1.0 }) {
+function pickInstalledModel({ availableGb, uiOverheadGb = 0.05, installedTags = [], safetyGb = 1.0 }) {
   const installed = MODEL_LADDER.filter(m => installedTags.includes(m.tag))  // ladder order
   if (installed.length === 0) return { tag: null, fits: false, heavier: null, tools: null }
 
-  const budget = availableGb - owuiOverheadGb - safetyGb
+  const budget = availableGb - uiOverheadGb - safetyGb
   const capable = installed.filter(m => m.tools)
   // Choose within the tool-capable set when one exists; the tool-blind models
   // are a last resort, never a convenience upgrade for a busy machine.
@@ -172,10 +164,10 @@ function pickInstalledModel({ availableGb, owuiOverheadGb = 1.0, installedTags =
 }
 
 // Legacy helper (ladder-based, allows on-demand pull). Kept for the CLI.
-function pickRuntimeModel({ availableGb, owuiOverheadGb = 1.0, ceilingTag = null, safetyGb = 1.0 }) {
+function pickRuntimeModel({ availableGb, uiOverheadGb = 0.05, ceilingTag = null, safetyGb = 1.0 }) {
   let ceilingIdx = MODEL_LADDER.length - 1
   if (ceilingTag) { const i = ladderIndex(ceilingTag); if (i >= 0) ceilingIdx = i }
-  const budget = availableGb - owuiOverheadGb - safetyGb
+  const budget = availableGb - uiOverheadGb - safetyGb
   let bestIdx = -1
   for (let i = 0; i <= ceilingIdx; i++) { if (MODEL_LADDER[i].ramGb <= budget) bestIdx = i }
   const floor = MODEL_LADDER[0].tag
@@ -186,7 +178,7 @@ function pickRuntimeModel({ availableGb, owuiOverheadGb = 1.0, ceilingTag = null
 
 module.exports = {
   MODEL_LADDER, TOOL_FLOOR, availableMemGb, ladderIndex, modelRamGb,
-  supportsNativeTools, supportsTools, machineSupport,
+  supportsTools, machineSupport,
   installPair, pickInstalledModel, pickRuntimeModel,
 }
 
@@ -195,7 +187,6 @@ if (require.main === module) {
   const total = os.totalmem() / GB
   const avail = availableMemGb()
   const installed = (process.argv[2] || "").split(",").filter(Boolean)
-  const off = total <= 8 || avail < 6
-  console.log(`total=${total.toFixed(1)}GB  available=${avail.toFixed(1)}GB  free(os)=${(os.freemem() / GB).toFixed(2)}GB  offload=${off}`)
-  if (installed.length) console.log("pickInstalled:", pickInstalledModel({ availableGb: avail, owuiOverheadGb: off ? 0.7 : 1.5, installedTags: installed }))
+  console.log(`total=${total.toFixed(1)}GB  available=${avail.toFixed(1)}GB  free(os)=${(os.freemem() / GB).toFixed(2)}GB`)
+  if (installed.length) console.log("pickInstalled:", pickInstalledModel({ availableGb: avail, installedTags: installed }))
 }

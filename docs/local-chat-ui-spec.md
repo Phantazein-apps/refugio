@@ -2,6 +2,12 @@
 
 **Status:** proposal · **Author:** drafted with Claude Code · **Target:** REFUGIO
 
+> **Historical.** This is the proposal that became the v2 chat window, kept as
+> written. Two things it planned have since gone further than it did: Open WebUI
+> is no longer an opt-in mode (§6) but removed, along with MCPO, Caddy and the
+> `https://refugio` domain, and REFUGIO is now macOS only. What it planned and
+> never built is tracked in [`gaps.md`](gaps.md).
+
 Replace Open WebUI as the default REFUGIO interface with a lightweight chat UI
 served by REFUGIO's own Node process, reusing the SHERPA/PHANTAZEIN chat
 frontend (`thefactremains/Portal`, mirrored at `Phantazein-apps/demos`).

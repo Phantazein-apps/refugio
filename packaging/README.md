@@ -1,14 +1,15 @@
 # Packaging REFUGIO for managed deployment
 
-`.pkg` for macOS, `.msi` for Windows, both installable silently by MDM, both
-configurable by policy. This document is mostly about the parts that are not
-obvious, and one part that is genuinely not possible.
+A `.pkg`, installable silently by MDM and configurable by configuration
+profile. REFUGIO is macOS only; the Windows `.msi` and its Group Policy
+templates were removed with Windows support. This document is mostly about the
+parts that are not obvious, and one part that is genuinely not possible.
 
-**These packages are REFUGIO's.** This repository also builds REFUGIO Listener
+**This package is REFUGIO's.** This repository also builds REFUGIO Listener
 — the coaching product, installed from `install-listener` into its own
 directory with its own data, port and login item ([`docs/editions.md`](../docs/editions.md)).
-It has no packaged install: the bundle identifiers, the configuration profiles
-and the ADMX template below are all written for one product, and a second set
+It has no packaged install: the bundle identifiers and the configuration
+profiles below are all written for one product, and a second set
 is a distribution decision — signing, identifiers, profiles — rather than a
 code change. `allowedModes` still behaves as described; on a REFUGIO machine it
 narrows the modes REFUGIO offers, which is the connector ones.
@@ -25,12 +26,6 @@ packaging/
 │   └── profiles/
 │       ├── …pppc.mobileconfig      TCC grants — template, needs your Team ID
 │       └── …settings.mobileconfig  managed settings — copy and edit
-└── windows/
-    ├── REFUGIO.wxs             WiX v4/v5, perMachine, Active Setup
-    ├── build-msi.ps1           stage → wix build → signtool
-    ├── user-setup.cjs          the per-user half, run by Active Setup
-    ├── REFUGIO.admx            Group Policy template
-    └── en-US/REFUGIO.adml
 ```
 
 ## The design, and why it isn't a wrapper
@@ -46,17 +41,12 @@ where `os.homedir()` is `/var/root`. Wrapping it would install REFUGIO for the
 root account and for no human being, and would do it silently enough that the
 MDM reports success.
 
-So the packages replace that script's job with the standard split:
+So the package replaces that script's job with the standard split:
 
-| | macOS | Windows |
-|---|---|---|
-| **Per machine**, at install | `/usr/local/refugio`, `/Applications/REFUGIO.app`, `/Library/LaunchAgents/…` | `C:\Program Files\REFUGIO`, `HKLM` |
-| **Per user**, at first login | `/Library/LaunchAgents` agent → `refugio-user-setup` | Active Setup → `user-setup.cjs` |
-
-Active Setup is the right Windows mechanism here and is under-used: its
-`StubPath` runs once per user, the first time each user logs on after the
-`Version` string changes. A `Run` key would fire on every logon and could never
-tell the first from the four-hundredth.
+| | |
+|---|---|
+| **Per machine**, at install | `/usr/local/refugio`, `/Applications/REFUGIO.app`, `/Library/LaunchAgents/…` |
+| **Per user**, at each login | `/Library/LaunchAgents` agent → `refugio-user-setup` |
 
 **A LaunchAgent, not a LaunchDaemon**, and that is not a detail. REFUGIO reads
 the user's Notes, Reminders and Messages. Those live inside the user's session
@@ -67,15 +57,15 @@ would mean something much worse than it does now.
 ### Where a packaged install keeps its state
 
 The supervisor decides this by asking whether it can write next to its own
-code — a git checkout in `~/refugio` can, `/usr/local/refugio` and
-`C:\Program Files\REFUGIO` cannot. That one check moves two things:
+code — a git checkout in `~/refugio` can, `/usr/local/refugio` cannot. That
+one check moves two things:
 
 | | git install | packaged install |
 |---|---|---|
 | `mcpo-config.json` | `<install>/mcpo-config.json` | `~/.refugio-data/` |
 | chat database, settings, attachments | `<install>/data/` | `~/.refugio-data/` |
 
-Both were outright bugs before the packages existed. `mcpo-config.json` is
+Both were outright bugs before the package existed. `mcpo-config.json` is
 rewritten on **every** launch — into a root-owned directory that throws
 `EACCES`, the supervisor dies, the login agent's `KeepAlive` restarts it, and
 the machine sits in a crash loop that looks from outside like a package which
@@ -87,15 +77,11 @@ Existing installs are unaffected: their directory is writable, so their history
 stays exactly where it is. Only packaged installs — which are new, and have
 nothing to migrate — go per-user.
 
-Two consequences worth knowing:
-
-- `https://refugio` (the Caddy + mkcert nicety) does **not** work on a packaged
-  install. The certificates live in the install directory and it is read-only.
-  `http://127.0.0.1:8090` is unaffected.
-- The per-user setup writes `REFUGIO_INSTALL=pkg` into `~/.refugio.env`. That
-  line is load-bearing, not decoration: the supervisor reads a file with no
-  keys as "the installer was never run", says so and exits 1 — which under
-  `KeepAlive` is a restart loop every ten seconds, forever.
+One consequence worth knowing: the per-user setup writes `REFUGIO_INSTALL=pkg`
+into `~/.refugio.env`. That line is load-bearing, not decoration: the
+supervisor reads a file with no keys as "the installer was never run", says so
+and exits 1 — which under `KeepAlive` is a restart loop every ten seconds,
+forever.
 
 ### What is bundled, and what is not
 
@@ -117,9 +103,9 @@ and is the obvious next win if size matters to you.
 
 ## Signing: what it actually costs
 
-This is the part that gates everything, and neither platform is free.
-
-### macOS
+This is the part that gates everything, and it is not free. **REFUGIO has no
+Apple Developer ID yet, so every build is unsigned** — the CI artifact says so
+in its name, and the menu-bar app is ad-hoc signed (`codesign --sign -`).
 
 Two **different** certificates, both from an Apple Developer Program
 membership (**$99/year**), and they are not interchangeable — using one for the
@@ -135,29 +121,12 @@ Notarization needs an App Store Connect API key. Stapling the ticket is what
 makes the package work on a machine that is offline at install time — which,
 for a laptop being provisioned, is common.
 
-### Windows
-
-Harder than most people expect. Since **June 2023** the CA/Browser Forum
-requires code-signing private keys to live on FIPS 140-2 Level 2 hardware. **A
-`.pfx` on a CI runner is no longer how this works.** The options are:
-
-| | Cost | CI-friendly |
-|---|---|---|
-| Azure Trusted Signing | ~$10/month | Yes — first-party GitHub Action |
-| DigiCert KeyLocker | ~$500+/year | Yes |
-| SSL.com eSigner | ~$250+/year | Yes |
-| OV cert on a USB token | ~$200–400/year | **No** — cannot be used from a hosted runner |
-
-Azure Trusted Signing is the pragmatic pick, and `build-msi.ps1` has a flag for
-it. Note also that **SmartScreen will still warn** on a newly-signed MSI until
-the certificate builds reputation, unless you buy EV. That is not a bug you can
-fix in the build.
-
 ### CI
 
 `.github/workflows/package.yml` builds on every push. Signing is conditional:
-with no secrets it produces artifacts labelled `-UNSIGNED`, so forks and
-outside PRs still get the build *checked*. Set these to sign:
+with no secrets it produces an artifact labelled `-UNSIGNED` — which, today, is
+every artifact — so forks and outside PRs still get the build *checked*. Set
+these to sign:
 
 | Secret | What |
 |---|---|
@@ -167,7 +136,7 @@ outside PRs still get the build *checked*. Set these to sign:
 | `MACOS_APPLICATION_IDENTITY` | `Developer ID Application: Acme (TEAMID)` |
 | `NOTARY_KEY` / `NOTARY_KEY_ID` / `NOTARY_ISSUER_ID` | App Store Connect API key |
 
-Both jobs **install the package they just built** and check what landed. A
+The job **installs the package it just built** and checks what landed. A
 package that builds is not the same as a package that installs, and the
 difference is discovered by an IT department mid-rollout otherwise.
 
@@ -203,14 +172,11 @@ Messages connector** — do not ship it "just in case".
 
 ## Managed settings
 
-An admin can take decisions away from the user. `chat/managed.js` reads:
-
-| Platform | Source |
-|---|---|
-| macOS | `/Library/Managed Preferences/com.phantazein.refugio.plist` (a config profile) |
-| Windows | `HKLM\SOFTWARE\Policies\Phantazein\REFUGIO` (Group Policy / Intune ADMX / an MSI property) |
-| Linux | `/etc/refugio/managed.json` |
-| any | `REFUGIO_MANAGED_POLICY=/path/to.json` — for trying a policy before pushing it |
+An admin can take decisions away from the user. `chat/managed.js` reads
+`/Library/Managed Preferences/com.phantazein.refugio.plist`, which is what a
+configuration profile built from `profiles/…settings.mobileconfig` installs.
+`REFUGIO_MANAGED_POLICY=/path/to.json` overrides it, for trying a policy before
+pushing it.
 
 | Key | Values | Effect |
 |---|---|---|
@@ -250,8 +216,7 @@ everywhere.
 Check what reached a machine:
 
 ```bash
-refugio policy                                  # macOS
-reg query HKLM\SOFTWARE\Policies\Phantazein\REFUGIO   # Windows
+refugio policy
 ```
 
 ## Deploying
@@ -260,23 +225,9 @@ reg query HKLM\SOFTWARE\Policies\Phantazein\REFUGIO   # Windows
 Configuration Profiles, scope all three to the same smart group. Order does not
 matter; the profiles may land first.
 
-**Intune (macOS)** — *macOS app (PKG)*. It must be signed **and** notarized;
-Intune's agent will not install an unsigned package. Push the profiles as
-*Templates ▸ Custom*.
-
-**Intune (Windows)** — upload the `.msi` as a *Line-of-business app*, or wrap it
-as `.intunewin`. Install command:
-
-```
-msiexec /i REFUGIO.msi /qn
-msiexec /i REFUGIO.msi /qn WEBSEARCH=off UPDATECHECKS=off
-```
-
-Detection: `HKLM\SOFTWARE\Phantazein\REFUGIO\Version`.
-
-For policy via Group Policy instead of MSI properties, copy `REFUGIO.admx` to
-`%SystemRoot%\PolicyDefinitions\` (and the `.adml` to `en-US\`), or import it
-under *Devices ▸ Configuration ▸ Import ADMX*.
+**Intune** — *macOS app (PKG)*. It must be signed **and** notarized; Intune's
+agent will not install an unsigned package, so until there is a Developer ID
+this route is closed. Push the profiles as *Templates ▸ Custom*.
 
 ## Building by hand
 
@@ -288,12 +239,6 @@ NOTARY_PROFILE=refugio \
   ./packaging/macos/build-pkg.sh                   # signed + notarized
 ```
 
-```powershell
-.\packaging\windows\build-msi.ps1
-.\packaging\windows\build-msi.ps1 -AzureTrustedSigning `
-    -Endpoint https://weu.codesigning.azure.net -Account acme -Profile refugio
-```
-
 An unsigned build is genuinely useful for testing and genuinely useless for
 distribution — Gatekeeper refuses the `.pkg` on any Mac that did not build it.
-Both scripts say so loudly rather than producing something that looks finished.
+The script says so loudly rather than producing something that looks finished.
