@@ -62,6 +62,12 @@
                 <key>webSearch</key>
                 <string>off</string>
 
+                <!-- "off" — the user cannot offer Claude (through their own
+                     signed-in Claude Code) as a model. Choosing Claude sends
+                     the conversation to Anthropic; there is no "on". -->
+                <key>claudeCode</key>
+                <string>off</string>
+
                 <!-- "off" stops REFUGIO contacting github.com entirely,
                      including the manual "Check now" button. Set this when
                      updates arrive through MDM, which on a managed fleet they

@@ -36,7 +36,11 @@ import {
   ownerEdition,
 } from "./modes.js";
 import { EDITION, PRODUCT } from "./edition.js";
-import { listModels, isUp, chatStream, complete, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
+import { listModels, isUp, pullModel, showModel, OLLAMA_BASE } from "./ollama.js";
+// The model layer. Local models still default to the native Ollama client;
+// see engine.js for what REFUGIO_ENGINE_LIB=pi changes.
+import { chatStream, complete, cloudRefusal, isCloudModel } from "./engine.js";
+import { CLAUDE_CODE_MODELS, CLAUDE_CODE_LABELS, CLAUDE_CODE_UI, claudeCodeInfo } from "./claude-code.js";
 import * as catalog from "./model-catalog.js";
 import {
   turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
@@ -73,6 +77,24 @@ const SYSTEM_PROMPT =
   process.env.REFUGIO_SYSTEM_PROMPT ||
   "You are REFUGIO, a helpful assistant running entirely on the user's own computer. " +
   "Be concise and direct. If you don't know something, say so.";
+
+/** The system prompt for this model.
+ *
+ *  The default says the assistant runs entirely on this computer, and a model
+ *  repeats what it is told: asked which model it was, Claude answered that it
+ *  was "running as REFUGIO on your computer" — the one claim this product must
+ *  never let be false. So a Claude turn gets the true version. A prompt the
+ *  person wrote themselves is theirs and is kept, with the fact added after it.
+ */
+function systemPromptFor(model) {
+  if (!isCloudModel(model)) return SYSTEM_PROMPT;
+  const fact = "You are Claude, made by Anthropic, reached through the user's own Claude Code. " +
+    "You are not running on the user's computer: this conversation is sent to Anthropic. " +
+    "If the user asks where their conversation goes, say so plainly.";
+  return process.env.REFUGIO_SYSTEM_PROMPT
+    ? `${process.env.REFUGIO_SYSTEM_PROMPT}\n\n${fact}`
+    : `You are REFUGIO, a helpful assistant. ${fact} Be concise and direct. If you don't know something, say so.`;
+}
 
 /** Tell the model, in prose, that it has tools.
  *
@@ -514,6 +536,10 @@ function loadSettings() {
   const defaults = {
     ...defaultSettings(),
     web: { ...WEB_DEFAULTS },
+    // Claude through the person's own Claude Code. Here for the reason web
+    // search is: it is an answer to "what may REFUGIO reach?". Off by default,
+    // because choosing it sends a whole conversation to Anthropic.
+    claude: { enabled: false },
     updates: { enabled: true },
     modes: { ...MODE_DEFAULTS },
     // A mode's own options ride as their own top-level blocks, not as a nested
@@ -778,12 +804,39 @@ function wrongEditionMsg(id) {
     : `${def?.label || id} is not part of ${PRODUCT.product}.`;
 }
 
+/** The Claude switch, for Settings: whether it is on, what it does, and whether
+ *  this machine can do it at all. */
+function claudePayload() {
+  const info = claudeCodeInfo();
+  return {
+    enabled: !!connectorSettings.claude?.enabled,
+    ...CLAUDE_CODE_UI,
+    installed: info.installed,
+    version: info.version,
+    tested: info.tested,
+    testedFrom: info.testedFrom ?? null,
+  };
+}
+
+/** What the picker offers beyond Ollama's list. Empty unless the switch is on
+ *  AND Claude Code is here — a row for a model that cannot answer is a row that
+ *  fails on the first message. Kept apart from `models`, whose every field is
+ *  about memory on this machine and means nothing for a model that runs
+ *  elsewhere. */
+function cloudModels() {
+  if (!connectorSettings.claude?.enabled || !claudeCodeInfo().installed) return [];
+  return CLAUDE_CODE_MODELS.map((name) => ({
+    name, label: CLAUDE_CODE_LABELS[name], cloud: true, provider: "Anthropic", via: "Claude Code", tools: true,
+  }));
+}
+
 function connectorPayload(rows) {
   return {
     connectors: rows,
     starting: !connectorsSettled,
     ...countConnectors(rows),
     web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+    claude: claudePayload(),
     modes: modesPayload(rows),
     managed: LOCKED,
   };
@@ -999,6 +1052,10 @@ function resolveAttachments(ids) {
 async function maybeTitle(convoId, firstMessage, model) {
   if (store.getTitle(convoId)) return null;
   let title = firstMessage.slice(0, 60);
+  // Not a second Claude Code run for six words: it costs the person's plan and
+  // several seconds, for a title the first line of the message does nearly
+  // as well.
+  if (isCloudModel(model)) { store.setTitle(convoId, title); return title; }
   try {
     const out = await complete({
       model,
@@ -1067,6 +1124,21 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   // enough for a client to hang up. See turn-deadline.js.
   const heartbeat = armHeartbeat(res, heartbeatMs());
 
+  // Before the row is written or the message stored: a turn refused here leaves
+  // nothing behind. The mode is the conversation's if it has one already —
+  // regenerate and edit send none — and otherwise the one being asked for.
+  const refusal = cloudRefusal({
+    model,
+    mode: store.getConversation(conversationId)?.mode ?? mode,
+    claudeEnabled: !!connectorSettings.claude?.enabled,
+  });
+  if (refusal) {
+    send("error", { error: refusal });
+    heartbeat.clear();
+    res.end();
+    return;
+  }
+
   // First turn writes the mode onto the row; every later turn is handed back
   // what the row already says, so `mode` from here down is the conversation's,
   // not the caller's. That is what makes regenerate and edit — which have no
@@ -1122,7 +1194,7 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     // than captured when the conversation started: the mode is fixed at
     // creation (Principle 2) and this is not the mode — it is a preference
     // that takes effect on the next turn, the way REFUGIO_SYSTEM_PROMPT does.
-    { role: "system", content: SYSTEM_PROMPT + modePreamble(activeMode, connectorSettings) + toolPreamble(tools) },
+    { role: "system", content: systemPromptFor(model) + modePreamble(activeMode, connectorSettings) + toolPreamble(tools) },
     ...store.historyFor(conversationId),
   ];
 
@@ -1377,6 +1449,23 @@ async function route(req, res, url) {
     return sendJson(res, 200, connectorPayload(await connectorRows()));
   }
 
+  // The Claude switch. Its own route, like web search's, and for the same
+  // reason. Unlike that one it also checks the origin: this switch decides
+  // whether a conversation may be sent to Anthropic, and any page in any tab
+  // can aim a POST at loopback.
+  if (p === "/api/chat/claude" && req.method === "POST") {
+    if (!sameOrigin(req)) return sendJson(res, 403, { error: "cross-origin requests are not accepted here" });
+    if (LOCKED.claude) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
+    const body = await readBody(req);
+    if (body.enabled && !claudeCodeInfo().installed) {
+      return sendJson(res, 400, { error: "Claude Code is not installed on this computer, so there is nothing to switch on." });
+    }
+    connectorSettings.claude = { ...connectorSettings.claude, enabled: !!body.enabled };
+    saveSettings(connectorSettings);
+    log(`Claude ${connectorSettings.claude.enabled ? "enabled" : "disabled"}`);
+    return sendJson(res, 200, connectorPayload(await connectorRows()));
+  }
+
   if (p === "/api/chat/modes" && req.method === "POST") {
     // Policy is checked here and not only at load. `clamped()` runs once at
     // startup, so without this a locked deployment would accept the write and
@@ -1439,9 +1528,12 @@ async function route(req, res, url) {
     const models = up ? await listModels() : [];
     const model = await resolveModel();
     const rows = await connectorRows();
+    const cloud = cloudModels();
     return sendJson(res, 200, {
       connectors: countConnectors(rows),
-      available: up && !!model,
+      // A Claude model answers without Ollama, so "nothing can answer" is only
+      // true when neither is there.
+      available: (up && !!model) || cloud.length > 0,
       // Reported separately from `available`, which is false for two different
       // reasons — Ollama down, or Ollama up with nothing installed — that need
       // opposite advice. Collapsing them meant the UI could only say "no
@@ -1466,6 +1558,8 @@ async function route(req, res, url) {
       // The composer needs this on every poll: when web search is switched off
       // the per-message control must disappear, not sit there doing nothing.
       web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+      claude: claudePayload(),
+      cloudModels: cloud,
       modes: modesPayload(rows),
       // Which controls an administrator has taken away. The chat needs it as
       // much as Settings does — the paperclip has to go, not sit there and

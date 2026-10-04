@@ -28,6 +28,7 @@
   "author": "Dennis Kittrell",
   "license": "MIT",
   "dependencies": {
+    "@earendil-works/pi-ai": "1.0.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "dotenv": "^16.4.7",
     "googleapis": "^171.4.0",

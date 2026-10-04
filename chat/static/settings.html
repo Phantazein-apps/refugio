@@ -54,6 +54,7 @@
     <button type="button" class="snav-item is-active" data-pane="connectors">Connectors</button>
     <button type="button" class="snav-item" data-pane="models">Models</button>
     <button type="button" class="snav-item" data-pane="web">Web search</button>
+    <button type="button" class="snav-item" data-pane="claude">Claude</button>
     <button type="button" class="snav-item" data-pane="modes">Discussion modes</button>
     <button type="button" class="snav-item" data-pane="appearance">Appearance</button>
     <button type="button" class="snav-item" data-pane="updates">Updates<span class="nav-dot" id="update-dot" hidden></span></button>
@@ -109,10 +110,21 @@
       <div class="pane-head">
         <div>
           <h2 class="t-display" id="h-web">Web <span class="red">search</span></h2>
-          <div class="pane-sub">The one thing in REFUGIO that leaves this machine.</div>
+          <div class="pane-sub">Only your search words leave this machine — never the conversation.</div>
         </div>
       </div>
       <div id="web-body"></div>
+    </section>
+
+    <!-- ── Claude ──────────────────────────────────────── -->
+    <section class="pane" id="pane-claude" aria-labelledby="h-claude">
+      <div class="pane-head">
+        <div>
+          <h2 class="t-display" id="h-claude">Claude <span class="red">model</span></h2>
+          <div class="pane-sub">Claude instead of a local model, through your own Claude Code. The conversation leaves this machine.</div>
+        </div>
+      </div>
+      <div id="claude-body"></div>
     </section>
 
     <section class="pane" id="pane-modes" aria-labelledby="h-modes">

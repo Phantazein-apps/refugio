@@ -966,6 +966,96 @@ async function setWebEnabled(enabled, box) {
   }
 }
 
+// ── Claude ──────────────────────────────────────────────────
+// Shaped like the web-search pane, because it is the same kind of decision: a
+// switch that lets something leave this machine. The difference is how much.
+// Web search sends a few search words; a Claude model is sent the whole
+// conversation. The warning says that in those words, above the switch.
+
+function renderClaude() {
+  const box = $("claude-body");
+  box.replaceChildren();
+  const c = state.connectors?.claude || state.status?.claude;
+  if (!c) { box.append(el("div.waiting", { text: "Checking…" })); return; }
+
+  // Nothing to switch on without Claude Code. Say how to get it, and that
+  // REFUGIO will not do the signing in — that is the whole arrangement.
+  if (!c.installed) {
+    box.append(el("div.card", {},
+      el("h3", { text: "Claude Code is not installed" }),
+      el("div.prose", { text: c.hint }),
+      el("div.prose", {
+        text: "Install Claude Code, open it once in Terminal with `claude`, and sign in with " +
+          "/login. Then come back here — this page checks again on its own.",
+      }),
+    ));
+    return;
+  }
+
+  const card = el("div.card.warn", {},
+    el("h3", { text: "Claude" }),
+    el("div.prose", { text: c.hint }),
+    el("div.prose", {}, el("strong", { text: c.warning })),
+    el("label.check", {},
+      el("input", {
+        type: "checkbox",
+        checked: !!c.enabled,
+        disabled: isManaged("claude"),
+        on: { change: (e) => setClaudeEnabled(e.currentTarget.checked, e.currentTarget) },
+      }),
+      el("span.box"),
+      c.label,
+    ),
+    managedNote("claude"),
+    el("div.aside", {
+      text: "Turning this on sends nothing by itself. It adds Claude to the model picker in the " +
+        "chat; a conversation goes to Anthropic only while a Claude model is the one chosen. " +
+        "Off is the default.",
+    }),
+  );
+  box.append(card);
+
+  box.append(el("div.card", {},
+    el("h3", { text: "How it runs" }),
+    el("div.kv", {}, el("span.k", { text: "claude code" }), el("span", { text: c.version ? `v${c.version}` : "installed" })),
+    el("div.prose", { text: c.usage }),
+    el("div.aside", {
+      text: "Claude Code runs with its own tools switched off. It can use your connectors only " +
+        "through REFUGIO, with the same limits as a local model.",
+    }),
+    // Below the version a full tool round trip was seen working on, Claude
+    // answers but cannot use connectors. Said here, where it can be fixed.
+    !c.tested && c.version
+      ? el("div.prose", {}, el("strong", {
+        text: `This Claude Code is older than ${c.testedFrom}, the first version REFUGIO has seen ` +
+          "use connectors. Run `claude update` in Terminal.",
+      }))
+      : null,
+  ));
+}
+
+async function setClaudeEnabled(enabled, box) {
+  box.disabled = true;
+  try {
+    const res = await fetch("/api/chat/claude", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "failed");
+    }
+    markWrite();
+    state.connectors = await res.json();
+    renderClaude();
+  } catch (e) {
+    box.checked = !enabled;
+    box.disabled = false;
+    toast(e.message && e.message !== "failed" ? e.message : "That didn't save.");
+  }
+}
+
 // ── Discussion modes ────────────────────────────────────────
 
 /** Name this pane after the product serving it.
@@ -1568,6 +1658,7 @@ async function refresh() {
   renderConnectors();
   renderModels();
   renderWeb();
+  renderClaude();
   renderModes();
   renderUpdates();
   updateBadge();
@@ -1577,7 +1668,7 @@ applyAppearance();
 if (localStorage.getItem(MOTION_KEY) === "1") document.documentElement.classList.add("reduce-motion");
 renderAppearance();
 
-const PANES = ["connectors", "models", "web", "modes", "appearance", "updates", "data"];
+const PANES = ["connectors", "models", "web", "claude", "modes", "appearance", "updates", "data"];
 showPane(PANES.includes(location.hash.slice(1)) ? location.hash.slice(1) : "connectors");
 
 // A link to /settings#models has to work when this window is ALREADY open —

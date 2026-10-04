@@ -215,6 +215,7 @@ An admin can take decisions away from the user. `chat/managed.js` reads:
 | Key | Values | Effect |
 |---|---|---|
 | `webSearch` | `off` \| `user` | The user cannot switch web search on at all. |
+| `claudeCode` | `off` \| `user` | The user cannot offer Claude (through their own Claude Code) as a model. |
 | `updateChecks` | `off` \| `user` | No contact with github.com, including "Check now". |
 | `attachments` | `off` \| `user` | The paperclip is removed from the chat. |
 | `allowedConnectors` | list | Only these connectors are **started**. |

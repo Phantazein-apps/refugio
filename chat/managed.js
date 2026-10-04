@@ -42,6 +42,13 @@ export const POLICY_KEYS = {
     type: "enum", values: ["user", "off"], default: "user",
     describes: "Whether the user may turn on web search at all.",
   },
+  // Off-only, like web search: an administrator may take Claude away from a
+  // fleet, never switch it on. Choosing to send a conversation to Anthropic is
+  // the person's decision, made in front of the warning in Settings.
+  claudeCode: {
+    type: "enum", values: ["user", "off"], default: "user",
+    describes: "Whether the user may offer Claude (through their own Claude Code) as a model.",
+  },
   updateChecks: {
     type: "enum", values: ["user", "off"], default: "user",
     describes: "Whether REFUGIO may contact github.com to look for a newer version.",
@@ -184,6 +191,10 @@ export function applyPolicy(settings, policy = {}) {
     next.web = { ...next.web, enabled: false };
     locked.web = true;
   }
+  if (policy.claudeCode === "off") {
+    next.claude = { ...next.claude, enabled: false };
+    locked.claude = true;
+  }
   if (policy.updateChecks === "off") {
     next.updates = { ...next.updates, enabled: false };
     locked.updates = true;
@@ -244,6 +255,7 @@ export function connectorAllowed(id, policy = {}) {
 export function describePolicy(policy = {}) {
   const parts = [];
   if (policy.webSearch === "off") parts.push("web search off");
+  if (policy.claudeCode === "off") parts.push("Claude off");
   if (policy.updateChecks === "off") parts.push("update checks off");
   if (policy.attachments === "off") parts.push("attachments off");
   if (policy.allowedConnectors) parts.push(`connectors limited to ${policy.allowedConnectors.join(", ")}`);
