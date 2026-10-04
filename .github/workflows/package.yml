@@ -75,9 +75,16 @@ jobs:
             || { echo "the chat server did not answer:"; cat /tmp/app-sup.log; exit 1; }
           test -f "$HOME/.refugio.env" || { echo "no credentials file was created"; exit 1; }
           test -d "$HOME/.refugio-data" || { echo "state did not go to ~/.refugio-data"; exit 1; }
-          kill $SUP
           echo "first run: credentials file created, state in ~/.refugio-data, chat answering"
-          hdiutil detach /tmp/refugio-dmg
+          # Stopping takes a few seconds — the chat server waits for its
+          # connectors to close — and the image cannot be unmounted while
+          # anything still runs from it ("Resource busy").
+          kill $SUP; wait $SUP 2>/dev/null || true
+          for i in $(seq 1 10); do
+            pgrep -f /tmp/refugio-dmg >/dev/null || break
+            sleep 1
+          done
+          hdiutil detach /tmp/refugio-dmg || hdiutil detach -force /tmp/refugio-dmg
 
       - uses: actions/upload-artifact@v4
         with:
