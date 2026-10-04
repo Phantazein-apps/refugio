@@ -53,6 +53,7 @@ const STEPS = [
   { id: "model", label: "Model", render: renderModel },
   { id: "connectors", label: "Connectors", render: renderConnectors },
   { id: "web", label: "Web search", render: renderWeb },
+  { id: "claude", label: "Claude", render: renderClaude },
   { id: "done", label: "Done", render: renderDone },
 ];
 
@@ -62,7 +63,10 @@ const STEPS = [
  *  a screen whose only control is disabled is a screen that wastes a step and
  *  invites someone to try anyway. */
 function steps() {
-  return STEPS.filter((s) => !(s.id === "web" && state.setup?.managed?.web));
+  return STEPS.filter((s) =>
+    !(s.id === "web" && state.setup?.managed?.web) &&
+    // Same rule for Claude: an organisation that locked it off has answered.
+    !(s.id === "claude" && state.setup?.managed?.claude));
 }
 
 // ── Saving ──────────────────────────────────────────────────
@@ -464,10 +468,10 @@ function renderWeb() {
   const w = state.setup.web || {};
   return el("section", {},
     el("div.eyebrow", { text: "04 / Web search" }),
-    el("h1", {}, "The only thing that ", el("span.em", { text: "leaves" }), "."),
+    el("h1", {}, "Only the ", el("span.em", { text: "words" }), " leave."),
     el("p.lede", {
-      text: "Everything else in REFUGIO stays on this machine. Web search does not: your query goes to a " +
-        "search engine. It is off, and even switched on it does nothing until you arm it on a specific message.",
+      text: "Web search sends your query to a search engine — the query, and nothing else. It is off, and even " +
+        "switched on it does nothing until you arm it on a specific message.",
     }),
     el("div.card.warn", {},
       el("h3", { text: "Allow web search" }),
@@ -505,6 +509,137 @@ async function setWeb(input) {
   }
 }
 
+// ── Claude ──────────────────────────────────────────────────
+//
+// Claude instead of a local model, through the person's own Claude Code and
+// Claude plan. Optional, off, and the step can be skipped like every other.
+//
+// Signing in is Claude Code's, not ours: the button runs `claude auth login`,
+// which opens Anthropic's page in the browser, and this step asks Claude Code
+// every few seconds whether it is signed in now. Anthropic's terms are that
+// sign-in completes through Anthropic's own flow, and that a third-party app
+// never holds the credential — so REFUGIO starts it and watches the answer,
+// and that is all.
+
+let claudePoll = null;
+
+function renderClaude() {
+  const section = el("section", {},
+    el("div.eyebrow", { text: "05 / Claude" }),
+    el("h1", {}, "Or ", el("span.em", { text: "Claude" }), ", if you have it."),
+    el("p.lede", {
+      text: "If you have a Claude plan, REFUGIO can use Claude instead of the model on this computer — " +
+        "through your own Claude Code, signed in with your own account. It is off, and you can leave it off.",
+    }),
+  );
+  const card = el("div.card", {}, el("div.prose", { text: "Checking for Claude Code…" }));
+  section.append(card, actions({}));
+  refreshClaude(card);
+  return section;
+}
+
+async function refreshClaude(card, { fresh = false } = {}) {
+  let c;
+  try {
+    c = await (await fetch(`/api/chat/claude${fresh ? "?fresh=1" : ""}`)).json();
+  } catch {
+    card.replaceChildren(el("div.prose", { text: "Couldn't ask REFUGIO about Claude. You can set it up later in Settings ▸ Claude." }));
+    return;
+  }
+  state.setup.claude = c;
+  // Stop watching once this step is no longer on screen, or once there is an
+  // answer that will not change by itself.
+  if (!card.isConnected) { clearInterval(claudePoll); claudePoll = null; return; }
+
+  if (!c.installed) {
+    card.replaceChildren(
+      el("h3", { text: "Claude Code is not installed" }),
+      el("div.prose", {
+        text: "REFUGIO uses Claude through Claude Code, Anthropic's app for your terminal. Install it, open it " +
+          "once, and come back — this page checks again by itself.",
+      }),
+      el("div.aside", {}, "Get it at ", el("a", { href: "https://claude.com/claude-code", target: "_blank", rel: "noopener noreferrer", text: "claude.com/claude-code" }),
+        ". Skip this and nothing changes: REFUGIO runs on the model on this computer."),
+    );
+    watchClaude(card, 5000);
+    return;
+  }
+
+  if (c.signedIn === false) {
+    const btn = el("button.btn.primary", { type: "button", text: "Sign in to Claude" });
+    const note = el("div.aside", { style: "margin-top:10px" });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/chat/claude/login", { method: "POST" });
+        const r = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(r.error || "Couldn't start the sign-in");
+        btn.textContent = "Waiting for you to finish in the browser…";
+        note.textContent = "Anthropic's sign-in page opened in your browser. Finish there — this page notices " +
+          "by itself. If no page opened, run `claude auth login` in Terminal instead.";
+        watchClaude(card, 3000, true);
+      } catch (e) {
+        btn.disabled = false;
+        note.textContent = e.message;
+      }
+    });
+    card.replaceChildren(
+      el("h3", { text: "Sign in to Claude" }),
+      el("div.prose", {
+        text: `Claude Code ${c.version ? `${c.version} ` : ""}is installed but not signed in. Signing in happens on ` +
+          "Anthropic's own page, in your browser — REFUGIO never sees your Claude password or login.",
+      }),
+      el("div", { style: "margin-top:12px" }, btn),
+      note,
+    );
+    return;
+  }
+
+  // Signed in — or a Claude Code too old to say (signedIn null), which is
+  // offered the switch too: a turn will say so if it is not signed in.
+  clearInterval(claudePoll); claudePoll = null;
+  const who = c.signedIn
+    ? `Signed in${c.plan ? ` · Claude ${c.plan[0].toUpperCase()}${c.plan.slice(1)}` : ""}${c.email ? ` · ${c.email}` : ""}`
+    : `Claude Code ${c.version || ""} is installed.`;
+  card.className = "card warn";
+  card.replaceChildren(
+    el("h3", { text: "Offer Claude in the model picker" }),
+    el("div.prose", { text: who }),
+    el("label.switch", { style: "margin-top:12px" },
+      el("input", {
+        type: "checkbox",
+        checked: !!c.enabled,
+        on: { change: (e) => setClaude(e.currentTarget) },
+      }),
+      el("span.track"),
+    ),
+    el("div.prose", { style: "margin-top:12px" }, el("strong", { text: c.warning || "" })),
+    el("div.aside", { style: "margin-top:8px",
+      text: (c.usage || "") + " Discussion and connector modes never use Claude." }),
+  );
+}
+
+function watchClaude(card, ms, fresh = false) {
+  clearInterval(claudePoll);
+  claudePoll = setInterval(() => refreshClaude(card, { fresh }), ms);
+}
+
+async function setClaude(input) {
+  const enabled = input.checked;
+  try {
+    const res = await fetch("/api/chat/claude", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "could not save");
+    state.setup.claude = { ...state.setup.claude, enabled };
+  } catch (e) {
+    input.checked = !enabled;
+    input.closest(".card")?.append(el("div.managed", { text: e.message }));
+  }
+}
+
 // ── 3o · Done ───────────────────────────────────────────────
 
 const ASKS = {
@@ -531,7 +666,7 @@ function renderDone() {
   }
 
   return el("section", {},
-    el("div.eyebrow", { text: "05 / Ready" }),
+    el("div.eyebrow", { text: "06 / Ready" }),
     el("h1", {}, "Ask it something ", el("span.em", { text: "real" }), "."),
     el("p.lede", { text: on.length
       ? `${on.map((r) => r.label).join(", ")} ${on.length === 1 ? "is" : "are"} set up. Click one to start.`

@@ -309,8 +309,31 @@ describe("the chat server where Claude Code is not installed", { skip: !sdk && "
 
 describe("the chat server, Claude switched off (the default)", { skip: !sdk && "@modelcontextprotocol/sdk is not installed" }, () => {
   let chat;
-  before(async () => { chmodSync(FAKE, 0o755); chat = await startChat({}); });
+  const authFile = join(mkdtempSync(join(tmpdir(), "refugio-cc-auth-")), "signed-in");
+  before(async () => { chmodSync(FAKE, 0o755); chat = await startChat({ FAKE_CLAUDE_AUTH: authFile }); });
   after(() => chat.stop());
+
+  test("signing in is Claude Code's own: REFUGIO starts it, then reads whether it worked", async () => {
+    let c = await (await fetch(`${chat.base}/api/chat/claude`)).json();
+    assert.equal(c.installed, true);
+    assert.equal(c.signedIn, false);
+    assert.equal(c.email, null, "nothing about an account that is not signed in");
+
+    const res = await fetch(`${chat.base}/api/chat/claude/login`, { method: "POST" });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).started, true);
+    await sleep(800);                       // the fake signs in at once; the real one waits on a browser
+
+    c = await (await fetch(`${chat.base}/api/chat/claude?fresh=1`)).json();
+    assert.equal(c.signedIn, true);
+    assert.equal(c.plan, "pro");
+    assert.equal(c.enabled, false, "signing in does not switch Claude on — that stays the person's choice");
+  });
+
+  test("another page cannot start a sign-in", async () => {
+    const res = await fetch(`${chat.base}/api/chat/claude/login`, { method: "POST", headers: { Origin: "https://evil.example" } });
+    assert.equal(res.status, 403);
+  });
 
   test("off by default: no Claude in the picker, and Settings knows Claude Code is here", async () => {
     const s = await status(chat.base);
