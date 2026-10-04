@@ -67,12 +67,29 @@ if [ ! -x "/Applications/Ollama.app/Contents/Resources/ollama" ] && ! command -v
   echo "no local LLM engine found — REFUGIO will explain this in its window"
 fi
 
-# ── Start the supervisor ────────────────────────────────────
+# ── Start REFUGIO ───────────────────────────────────────────
 #
-# Under the agent, so launchd owns the process and restarts it if it dies.
-# The agent runs THIS script and this script execs the supervisor, which means
-# launchd's KeepAlive applies to the thing that matters rather than to a
-# wrapper that exits immediately.
+# The menu-bar app runs REFUGIO: it starts the supervisor, restarts it if it
+# dies, and is the icon and window this user sees. This used to exec the
+# supervisor here instead, under launchd — which is why a machine that got
+# REFUGIO from MDM ran it with no icon anywhere (docs/gaps.md §1).
+#
+# The app is told where this install is and which Node runs it before it opens;
+# it would otherwise look for ~/refugio and a Homebrew Node, neither of which a
+# packaged Mac has. It exits 0 after opening the app, and the agent's KeepAlive
+# only restarts on failure, so this runs once per login.
+APP="/Applications/REFUGIO.app"
+APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null || echo com.phantazein.refugio.app)"
+if [ -d "$APP" ]; then
+  defaults write "$APP_ID" installDir -string "$ROOT"
+  defaults write "$APP_ID" nodePath -string "$NODE"
+  echo "opening $APP"
+  open "$APP" && exit 0
+  echo "could not open $APP — starting the supervisor directly instead"
+fi
+
+# No app (a payload built without it), or it would not open: the supervisor
+# directly, under launchd, as before. KeepAlive applies to it because it is
+# exec'd rather than wrapped.
 echo "starting the supervisor"
-export REFUGIO_HOME="$ROOT"
 exec "$NODE" "$ROOT/start-refugio.cjs"

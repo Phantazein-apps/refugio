@@ -146,9 +146,9 @@ Deleting `~/refugio` by hand is not the same thing: your **chat history lives in
 
 ### After install
 
-On machines with comfortable RAM, REFUGIO **auto-starts on login**. On **low-RAM (≤ 8 GB)** machines it runs **on demand** instead — so it never holds memory when you're not using it (start with `refugio`, stop with `refugio stop`).
+REFUGIO is run by its **menu-bar app**, which opens at login. With more than 8 GB of memory the app also **starts REFUGIO at login** and restarts it if it ever stops. With **8 GB or less** it doesn't — the icon is there, and REFUGIO starts when you click it, so the model's memory stays free until you want it. **Start REFUGIO Automatically** in the app's menu changes either default.
 
-1. Open REFUGIO — the **menu-bar app** (or its Dock icon), or **http://127.0.0.1:8090** in any browser
+1. Open REFUGIO — click the **menu-bar icon**, or go to **http://127.0.0.1:8090** in any browser
 2. Start chatting — your local model is ready
 3. Open **Settings** to see your connectors, fix a broken one, choose how much each may read, switch or download models, and turn web search on
 
@@ -348,36 +348,42 @@ Memory scales to your RAM:
 
 ## Day-to-Day Usage
 
-**Comfortable RAM (> 8 GB):** REFUGIO auto-starts on login. To start it manually:
+Everything is in the **menu-bar app**. Click REFUGIO's mark — three walls open at the bottom — to open the window; right-click it for the menu:
+
+| Menu item | What it does |
+|---|---|
+| **Open / Show REFUGIO** | The chat window. Starts REFUGIO first if it isn't running. |
+| **Start / Stop REFUGIO** | Stop frees the memory and keeps the icon, so starting again is one click. |
+| **Settings…** | Connectors, models, web search, Claude. |
+| **Show Log** | `~/.refugio-logs/refugio.log` — what REFUGIO printed, including why it stopped. |
+| **Launch at Login** | Whether the app opens at login. On by default. |
+| **Start REFUGIO Automatically** | Whether the app starts REFUGIO when it opens. On by default above 8 GB of memory. |
+| **Quit REFUGIO** | Removes the icon, and asks whether to stop REFUGIO too. |
+
+The app owns REFUGIO: it starts the supervisor, and if it dies it is restarted — after 1, 2, 4… seconds, up to a minute. Five stops inside five minutes means it won't start rather than that it hit a bad moment, so the app leaves it stopped and says so in the menu; **Show Log** has the reason. The model is always loaded on the first message and unloaded shortly after — starting REFUGIO never loads one — so a running REFUGIO you are not chatting with costs about 50 MB.
+
+From a terminal, the same things:
 
 ```bash
-node ~/refugio/start-refugio.cjs   # or: cd ~/refugio && npm start
-```
-
-**Low RAM (≤ 8 GB):** REFUGIO runs **on demand** so it doesn't hold ~0.6 GB all day. (The model itself is always loaded lazily on the first chat and unloaded shortly after — startup never loads a model — so idle cost is just the chat server at ~50 MB.)
-
-```bash
-refugio          # start it and open it
+refugio          # start it in this terminal
+refugio bg       # start it in the background
 refugio stop     # stop everything and free the RAM
 refugio status   # is it running?
-# or double-click "Start REFUGIO.command"
 ```
 
-To reconfigure or update, run the installer again.
+A REFUGIO started from a terminal is shown by the app as running, but is not restarted by it if it stops — it belongs to the terminal.
+
+To reconfigure or update, run the installer again. It rebuilds the app when its sources changed, stops a REFUGIO still running the old code, and opens the app to start the new one.
 
 ### Menu-bar app
-
-A tiny native menu-bar app gives non-technical users a one-click **Start / Stop / Open** control, a **Launch at Login** toggle, and **Quit** — no terminal needed. It just drives the existing `~/refugio` supervisor (quitting the app does *not* stop REFUGIO; use **Stop**).
 
 ```bash
 cd ~/refugio/menubar && ./install.sh      # builds REFUGIO.app → /Applications, launches it
 ```
 
-Requires the Swift toolchain (`xcode-select --install`). Look for REFUGIO's mark — three walls open at the bottom — in the menu bar.
+The installer does this for you. It needs the Swift toolchain (`xcode-select --install`); on a Mac without it the installer says so and falls back to what REFUGIO did before the app ran it — a login agent above 8 GB, the `refugio` command at 8 GB or less.
 
-**Auto-start details (> 8 GB):**
-- **launchd**: `~/Library/LaunchAgents/com.phantazein.refugio.plist`
-- **Logs**: `~/.refugio-logs/refugio.log` and `~/.refugio-logs/refugio.err`
+**Logs:** `~/.refugio-logs/refugio.log` (REFUGIO), `~/.refugio-logs/chat.log` (the chat server), `~/.refugio-logs/menubar.log` (the app — including every start, stop and restart, and why).
 
 ## How It Works
 

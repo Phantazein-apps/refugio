@@ -10,13 +10,16 @@ enum LoginItem {
         return false
     }
 
-    static func setEnabled(_ on: Bool) {
+    /// `promptIfNeeded: false` is for the app turning itself on, on its first
+    /// run: if macOS wants approval, that is left for the person to give from
+    /// the menu, rather than System Settings opening unasked after an install.
+    static func setEnabled(_ on: Bool, promptIfNeeded: Bool = true) {
         guard #available(macOS 13.0, *) else { return }
         let svc = SMAppService.mainApp
         do {
             if on {
                 if svc.status != .enabled { try svc.register() }
-                if svc.status == .requiresApproval {
+                if svc.status == .requiresApproval && promptIfNeeded {
                     SMAppService.openSystemSettingsLoginItems()
                 }
             } else if svc.status == .enabled {

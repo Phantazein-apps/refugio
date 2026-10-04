@@ -1,8 +1,8 @@
 import AppKit
 
-/// REFUGIO menu-bar controller: start / stop the local AI stack, open it, toggle
-/// launch-at-login, quit. Very light — just an NSStatusItem that shells out to the
-/// existing supervisor (~/refugio/start-refugio.cjs).
+/// REFUGIO menu-bar controller, and the owner of REFUGIO's stack: it opens at
+/// login, starts the supervisor (start-refugio.cjs) and keeps it running — see
+/// StackSupervisor — opens the window, and stops everything when asked.
 ///
 /// The icon and the stack are separate lifetimes: "Stop REFUGIO" frees the
 /// memory and keeps the icon (so restarting is one click), "Quit REFUGIO"
@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var toggleItem: NSMenuItem!
     private var openItem: NSMenuItem!
     private var loginItem: NSMenuItem!
+    private var autoStartItem: NSMenuItem!
     private var pollTimer: Timer?
 
     private var running = false
@@ -26,9 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Paths / URLs
     private let home = FileManager.default.homeDirectoryForCurrentUser
-    private var refugioDir: URL { home.appendingPathComponent("refugio") }
-    private var startScript: URL { refugioDir.appendingPathComponent("start-refugio.cjs") }
-    private var pidFile: URL { home.appendingPathComponent(".refugio-logs/supervisor.pid") }
+    private var logDir: URL { home.appendingPathComponent(".refugio-logs") }
+    private lazy var stack = StackSupervisor(logDir: logDir) { [weak self] line in self?.log(line) }
     /// The chat server — REFUGIO's only interface, so its port being open is
     /// what "running" means.
     private let chatPort: UInt16 = 8090
@@ -41,9 +41,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         createStatusItem()
+        stack.onChange = { [weak self] in self?.refreshStatus() }
         refreshStatus()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.refreshStatus()
+        }
+        startAtLaunch()
+    }
+
+    // ── What happens when the app opens ─────────────────────
+    //
+    // The app opens at login (it registers itself as a login item the first
+    // time it runs) and is what starts REFUGIO. Whether it starts the stack
+    // straight away is a separate choice from whether the icon is there:
+    //
+    //   - More than 8 GB of memory: on. The stack is resident from login, as
+    //     the launchd agent this replaces made it.
+    //   - 8 GB or less: off. The icon is there, the stack is not, and the
+    //     model's few GB stay free until someone clicks — the old "low-RAM
+    //     mode", without needing a terminal to start it.
+    //
+    // Either way it is a menu item ("Start REFUGIO Automatically"), so the
+    // default is only a default.
+
+    private static let autoStartKey = "startAutomatically"
+    private var autoStart: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: Self.autoStartKey) == nil {
+                return ProcessInfo.processInfo.physicalMemory > 8 * 1024 * 1024 * 1024
+            }
+            return UserDefaults.standard.bool(forKey: Self.autoStartKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: Self.autoStartKey) }
+    }
+
+    private func startAtLaunch() {
+        let defaults = UserDefaults.standard
+
+        // Register as a login item once, on the first run. Not again: someone
+        // who turned it off in the menu or in System Settings meant it. Quietly
+        // — an install should not end with System Settings opening by itself.
+        if !defaults.bool(forKey: "loginItemDefaulted") {
+            defaults.set(true, forKey: "loginItemDefaulted")
+            LoginItem.setEnabled(true, promptIfNeeded: false)
+            loginItem?.state = LoginItem.isEnabled ? .on : .off
+        }
+
+        // The installer opens the app when it finishes and sets this first, so
+        // the person who just installed REFUGIO sees it — whatever the
+        // automatic-start setting says. Read once, then cleared.
+        if defaults.bool(forKey: "showWindowOnce") {
+            defaults.removeObject(forKey: "showWindowOnce")
+            showWhenUp = true
+            if !portOpen(chatPort) { startStack() } else { chatWindow.show(url: chatURL, navigate: true) }
+            return
+        }
+        if autoStart && !portOpen(chatPort) {
+            log("starting REFUGIO automatically (\(ProcessInfo.processInfo.physicalMemory / 1_073_741_824) GB memory)")
+            startStack()
         }
     }
 
@@ -206,12 +261,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.target = self
         menu.addItem(settings)
 
+        // The supervisor's own output. With no terminal anywhere, this is the
+        // only place "why did it stop?" can be answered.
+        let showLog = NSMenuItem(title: "Show Log", action: #selector(openLog), keyEquivalent: "")
+        showLog.target = self
+        menu.addItem(showLog)
+
         menu.addItem(.separator())
 
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
+
+        let auto = NSMenuItem(title: "Start REFUGIO Automatically", action: #selector(toggleAutoStart), keyEquivalent: "")
+        auto.target = self
+        auto.state = autoStart ? .on : .off
+        auto.toolTip = "When this app opens — at login, usually. Off by default on Macs with 8 GB of memory or less, so the model's memory stays free until you start it."
+        menu.addItem(auto)
 
         // One exit, and ⌘Q maps to it. It used to map to "Stop REFUGIO & Quit",
         // which meant the reflexive keystroke removed the only way back — quit
@@ -220,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quit.target = self
         menu.addItem(quit)
 
-        headerItem = header; openItem = open; toggleItem = toggle; loginItem = login
+        headerItem = header; openItem = open; toggleItem = toggle; loginItem = login; autoStartItem = auto
         return menu
     }
 
@@ -381,6 +448,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem?.state = LoginItem.isEnabled ? .on : .off
     }
 
+    @objc private func toggleAutoStart() {
+        autoStart.toggle()
+        autoStartItem?.state = autoStart ? .on : .off
+    }
+
+    @objc private func openLog() {
+        let url = logDir.appendingPathComponent("refugio.log")
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(logDir)
+        }
+    }
+
     /// Quit the menu-bar app. Quitting the icon is not the same as stopping the
     /// stack, and either answer can be the one the user meant — so when REFUGIO
     /// is actually up, ask rather than guess. Cancel is the default button: this
@@ -410,14 +491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
     }
 
-    // ── Start / stop the supervisor ─────────────────────────
-    private func nodePath() -> String? {
-        for p in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
-            if FileManager.default.isExecutableFile(atPath: p) { return p }
-        }
-        return nil
-    }
-
+    // ── Start / stop ────────────────────────────────────────
     /// Cheap liveness probe: a TCP connect to the chat server's port.
     ///
     /// Not an HTTP request to /api/chat/status. That endpoint asks Ollama for
@@ -443,63 +517,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startStack() {
-        guard FileManager.default.fileExists(atPath: startScript.path) else {
-            headerItem?.title = "REFUGIO not installed (~/refugio)"
+        if let why = stack.start() {
+            headerItem?.title = why.count > 60 ? "REFUGIO couldn't start — see Show Log" : why
+            showWhenUp = false
             return
         }
-        let task = Process()
-        var args: [String] = []
-        if let node = nodePath() {
-            task.executableURL = URL(fileURLWithPath: node)
-            args = [startScript.path]
-        } else {
-            // Fall back to `env node` if no well-known node path exists.
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            args = ["node", startScript.path]
-        }
-        // Always. This app has its own window, and shows it itself.
-        args.append("--no-browser")
-        task.arguments = args
-        task.currentDirectoryURL = refugioDir
-
-        // Detach IO to the log so the child runs independently of this app.
-        let logURL = home.appendingPathComponent(".refugio-logs/refugio.log")
-        try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: logURL.path) {
-            FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        }
-        if let fh = try? FileHandle(forWritingTo: logURL) {
-            fh.seekToEndOfFile()
-            task.standardOutput = fh
-            task.standardError = fh
-        } else {
-            task.standardOutput = FileHandle.nullDevice
-            task.standardError = FileHandle.nullDevice
-        }
-
-        do {
-            try task.run()
-            startedAt = Date()
-            headerItem?.title = "REFUGIO — starting…"
-            toggleItem?.title = "Stop REFUGIO (frees memory)"
-            setIcon(running: true)
-        } catch {
-            headerItem?.title = "Start failed: \(error.localizedDescription)"
-        }
+        startedAt = Date()
+        headerItem?.title = "REFUGIO — starting…"
+        toggleItem?.title = "Stop REFUGIO (frees memory)"
+        setIcon(running: true)
     }
 
     private func stopStack() {
-        // SIGTERM the supervisor by its pidfile; it shuts down its own children
-        // (the chat server, Ollama). Fall back to pkill.
-        if let pidStr = try? String(contentsOf: pidFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           let pid = Int32(pidStr), pid > 1 {
-            kill(pid, SIGTERM)
+        stack.stop()
+        // A supervisor this app did not start, and that the pidfile no longer
+        // names — the same fallback the menu has always had.
+        if !stack.isRunningOurs {
+            let pk = Process()
+            pk.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            pk.arguments = ["-f", "start-refugio"]
+            try? pk.run()
         }
-        let pk = Process()
-        pk.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        pk.arguments = ["-f", "start-refugio"]
-        try? pk.run()
 
         startedAt = nil
         showWhenUp = false
@@ -536,8 +574,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateUI(up: Bool) {
-        // Hold a transient "starting…" for up to 90s after a start click.
-        let starting = !up && (startedAt.map { Date().timeIntervalSince($0) < 90 } ?? false)
+        // Starting: the supervisor this app runs is alive but not serving yet,
+        // or a restart is scheduled. Without one of ours (a supervisor started
+        // from a terminal), hold "starting…" for up to 90s after a start click.
+        let starting = !up && (stack.isRunningOurs || stack.isRestarting
+            || (startedAt.map { Date().timeIntervalSince($0) < 90 } ?? false))
         running = up
         if up {
             startedAt = nil
@@ -560,7 +601,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Gave up waiting. A window appearing minutes after the click that
             // asked for it would be a surprise, not an answer.
             showWhenUp = false
-            headerItem?.title = "REFUGIO — stopped"
+            headerItem?.title = stack.failure != nil
+                ? "REFUGIO stopped unexpectedly — see Show Log"
+                : "REFUGIO — stopped"
             toggleItem?.title = "Start REFUGIO"
         }
         openItem?.title = openTitle()

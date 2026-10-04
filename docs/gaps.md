@@ -12,23 +12,25 @@ README's rough-edges list, a spec's milestone table and two dead branches.
 
 ---
 
-## 1. The packaged install never starts the menu-bar app
+## 1. The packaged install never starts the menu-bar app — closed, untested
 
-**The largest gap.**
+**Closed in code; not yet run on a managed Mac.**
 
-A terminal install builds `REFUGIO.app` and launches it (`install-node.cjs`
-runs `menubar/install.sh`), so the person has an icon that starts and stops a
-stack holding gigabytes of RAM. The `.pkg` builds and installs the same
-`/Applications/REFUGIO.app` and then never opens it:
-`refugio-user-setup` execs the supervisor and stops there. There is no login
-item either — `SMAppService` self-registration in `LoginItem.swift` only
-happens after a human launches the app from `/Applications` by hand.
+The `.pkg` installed `/Applications/REFUGIO.app` and never opened it:
+`refugio-user-setup` exec'd the supervisor and stopped there, so a Mac that got
+REFUGIO by MDM ran it with no icon anywhere. Opening the app would not have
+helped either — `build-pkg.sh` copied its binary as `MacOS/REFUGIO` while
+`Info.plist` names `RefugioBar`, which macOS refuses to launch.
 
-The consequence is specific: a Mac that receives REFUGIO by MDM runs it with no
-icon anywhere, and the only way to stop it is a terminal the deployment was
-designed to avoid. `refugio-user-setup` is the right place for the fix — it
-already runs once per user with the user's own privileges, which is exactly
-what opening the app or registering a login item requires.
+Now the menu-bar app runs REFUGIO on every install, and `refugio-user-setup`
+records the install directory and the packaged Node in the app's preferences,
+opens the app and exits; the app registers itself as a login item on its first
+run. The binary is copied under the name `Info.plist` gives.
+
+What is unverified is all of it on a real managed Mac: the agent's `open` at
+login, the login-item registration with no human present, and a configuration
+profile's PPPC grants applying to an ad-hoc-signed app (they are keyed to a
+signature, and there is no Developer ID yet — §8).
 
 ## 2. Withdrawn
 
