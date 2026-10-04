@@ -46,7 +46,13 @@ So the package replaces that script's job with the standard split:
 | | |
 |---|---|
 | **Per machine**, at install | `/usr/local/refugio`, `/Applications/REFUGIO.app`, `/Library/LaunchAgents/…` |
-| **Per user**, at each login | `/Library/LaunchAgents` agent → `refugio-user-setup` |
+| **Per user**, at each login | `/Library/LaunchAgents` agent → `refugio-user-setup` → opens `REFUGIO.app`, which runs the supervisor and restarts it if it dies |
+
+`refugio-user-setup` provisions the user once, writes the install directory and
+the packaged Node into the app's preferences, opens the app and exits. The
+agent's `KeepAlive` only restarts it on failure, so it runs once per login. If
+the app is missing or will not open, it runs the supervisor itself, under the
+agent, as it did before the app owned it.
 
 **A LaunchAgent, not a LaunchDaemon**, and that is not a detail. REFUGIO reads
 the user's Notes, Reminders and Messages. Those live inside the user's session

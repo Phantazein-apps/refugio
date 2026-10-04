@@ -32,6 +32,8 @@ pkill -f "/usr/local/refugio/start-refugio.cjs" 2>/dev/null && say "stopped supe
 
 # Quit the menu-bar app so /Applications/REFUGIO.app can be replaced. Killing
 # it is fine — it holds no state of its own; everything lives in the supervisor.
-pkill -x "REFUGIO" 2>/dev/null && say "quit the menu-bar app"
+# By path: the binary is RefugioBar (it was briefly named REFUGIO in packages,
+# which macOS would not launch), and either name may be running from before.
+pkill -f "REFUGIO.app/Contents/MacOS/" 2>/dev/null && say "quit the menu-bar app"
 
 exit 0

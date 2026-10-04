@@ -236,6 +236,10 @@ async function promptGithubFields(env, existing) {
 // Needs the Swift toolchain. If it's absent we skip with a one-line hint
 // rather than failing the install or dragging the user through an Xcode
 // download mid-setup.
+// Returns whether /Applications/REFUGIO.app is in place and current — the app
+// is what starts REFUGIO now, so the caller needs to know whether there is one.
+// It is not launched here: the installer opens it once everything it reads on
+// launch has been written (see openTheApp).
 function installMenuBarApp(targetDir) {
   // The menu-bar app is REFUGIO's, and only REFUGIO's, for now. It is a Swift
   // bundle that hard-codes the standard install's directory, port, log path
@@ -247,11 +251,11 @@ function installMenuBarApp(targetDir) {
   if (ED.id !== "standard") {
     console.log(`  ${C.dim}The menu-bar app is REFUGIO-only for now — use the`)
     console.log(`    ${ED.cli} command (or "${startCommandName()}") to start and stop.${C.reset}`)
-    return
+    return false
   }
   const menubarDir = path.join(targetDir, "menubar")
   const script = path.join(menubarDir, "install.sh")
-  if (!fs.existsSync(script)) return
+  if (!fs.existsSync(script)) return false
 
   // "Already installed" used to end it, so the app never picked up a newer
   // build — someone who installed once kept a months-old menu bar forever, and
@@ -268,7 +272,7 @@ function installMenuBarApp(targetDir) {
     } catch { /* can't tell — rebuilding is the safe answer */ }
     if (!stale) {
       ok("Menu-bar app is up to date (/Applications/REFUGIO.app)")
-      return
+      return true
     }
     console.log(`  ${C.dim}Menu-bar app is out of date — rebuilding.${C.reset}`)
   }
@@ -276,7 +280,7 @@ function installMenuBarApp(targetDir) {
     console.log(`  ${C.dim}Menu-bar app skipped — needs the Swift toolchain.`)
     console.log(`    Install it with: xcode-select --install`)
     console.log(`    Then run: cd "${menubarDir}" && ./install.sh${C.reset}`)
-    return
+    return false
   }
 
   console.log(`  ${C.bold}Menu-bar app${C.reset} ${C.dim}— start/stop/quit REFUGIO without a terminal${C.reset}`)
@@ -284,9 +288,9 @@ function installMenuBarApp(targetDir) {
     // Capture rather than discard: a build that fails silently leaves someone
     // with no menu bar and no idea why, which is exactly the state this app
     // exists to avoid being in.
-    execSync(`"${script}"`, { cwd: menubarDir, stdio: "pipe" })
-    ok("Menu-bar app installed — look for REFUGIO's mark in your menu bar")
-    console.log(`    ${C.dim}Use “Stop REFUGIO” there to free the memory it uses.${C.reset}`)
+    execSync(`"${script}"`, { cwd: menubarDir, stdio: "pipe", env: { ...process.env, REFUGIO_NO_LAUNCH: "1" } })
+    ok("Menu-bar app installed (/Applications/REFUGIO.app)")
+    return true
   } catch (e) {
     // Print install.sh's OWN output, whole. It already says the important
     // thing — that /Applications still holds the previous build, and when it
@@ -301,6 +305,76 @@ function installMenuBarApp(targetDir) {
       if (line.trim()) console.log(`      ${line}`)
     }
     console.log(`    ${C.dim}Retry with: cd "${menubarDir}" && ./install.sh${C.reset}`)
+    // A previous build is still a working app — better than none.
+    return fs.existsSync(installed)
+  }
+}
+
+// ── The menu-bar app runs REFUGIO ────────────────────────────
+//
+// On a standard install the app is what starts REFUGIO, at login and on a
+// click, and what restarts it if it dies — menubar/Sources/RefugioBar/Stack.swift.
+// It replaces the launchd agent that used to run the supervisor, which had the
+// app as a second, unaware owner of the same process.
+//
+// The app reads three things from its preferences on launch, written here
+// BEFORE it is opened so its first launch already has them:
+//
+//   installDir      this checkout — it used to assume ~/refugio
+//   nodePath        the Node this installer ran with and checked, which may be
+//                   nvm's or nodejs.org's rather than Homebrew's
+//   showWindowOnce  start REFUGIO and show the window this one time, whatever
+//                   the automatic-start setting says — someone just installed it
+
+// The identifier install.sh builds the app with, including its override.
+const APP_BUNDLE_ID = process.env.REFUGIO_BUNDLE_ID || "com.phantazein.refugio.app"
+const APP_PATH = "/Applications/REFUGIO.app"
+
+function recordInstallForApp(targetDir, nodePath) {
+  try {
+    execFileSync("defaults", ["write", APP_BUNDLE_ID, "installDir", "-string", targetDir], { stdio: "ignore" })
+    execFileSync("defaults", ["write", APP_BUNDLE_ID, "nodePath", "-string", nodePath], { stdio: "ignore" })
+  } catch {
+    warn("Couldn't record the install location for the menu-bar app — it will look in ~/refugio")
+  }
+}
+
+/** Stop the old login agent for good: unload it (which stops the supervisor it
+ *  was running) and delete it, so it cannot come back at the next login and
+ *  run a second supervisor beside the app's. */
+function removeLaunchAgent() {
+  const plistPath = path.join(home, "Library", "LaunchAgents", `${ED.agentLabel}.plist`)
+  try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
+  try { if (fs.existsSync(plistPath)) fs.unlinkSync(plistPath) } catch {}
+}
+
+/** Open the app so it starts REFUGIO and shows the window.
+ *
+ *  A supervisor still running from before this install is stopped first — it
+ *  is running the code this install just replaced. So is a running copy of
+ *  the app: it read its preferences when it opened, and would not see
+ *  showWindowOnce until the next login. */
+async function openTheApp() {
+  const pidFile = path.join(home, ED.logDir, "supervisor.pid")
+  try {
+    const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10)
+    if (pid > 1) {
+      process.kill(pid, "SIGTERM")
+      for (let i = 0; i < 20; i++) {
+        try { process.kill(pid, 0) } catch { break }
+        await new Promise(r => setTimeout(r, 500))
+      }
+    }
+  } catch { /* nothing running, or not ours to signal */ }
+  try { execSync(`pkill -f "REFUGIO.app/Contents/MacOS/RefugioBar"`, { stdio: "ignore" }) } catch {}
+  await new Promise(r => setTimeout(r, 1000))
+  try {
+    execFileSync("defaults", ["write", APP_BUNDLE_ID, "showWindowOnce", "-bool", "true"], { stdio: "ignore" })
+    execFileSync("open", [APP_PATH], { stdio: "ignore" })
+    return true
+  } catch (e) {
+    warn(`Couldn't open ${APP_PATH}: ${e.message}`)
+    return false
   }
 }
 
@@ -1571,14 +1645,18 @@ async function setupMemPalace(env) {
   console.log("")
 }
 
-async function startREFUGIO(targetDir, env, autoStarted) {
+async function startREFUGIO(targetDir, env, mode) {
   console.log(`${C.bold}Starting ${ED.product}...${C.reset}\n`)
 
   // The chat server is the whole UI, and this is the one address it has.
   const PORT = parseInt(env.REFUGIO_CHAT_PORT || String(ED.chatPort), 10)
   const url = `http://127.0.0.1:${PORT}`
 
-  if (autoStarted) {
+  if (mode === "app") {
+    // The app starts the supervisor and shows its own window when the server
+    // answers, so this only waits to report it.
+    if (await openTheApp()) ok(`Opened ${APP_PATH} — it starts ${ED.product} and shows the window`)
+  } else if (mode === "launchd") {
     // The supervisor (start-refugio.cjs) is already running via launchd
     // (setupAutoStart runs before this function)
     ok(`${ED.product} supervisor started via auto-start service`)
@@ -1618,9 +1696,11 @@ async function startREFUGIO(targetDir, env, autoStarted) {
     process.stdout.write(`\r  Waiting for ${ED.product} to be ready... done (${elapsed}s)\x1b[K\n`)
     ok(`${ED.product} → ${url}`)
     // It is already serving, speaks MCP itself and has no login, so opening
-    // the window is the whole of it.
-    ok(`Opening ${ED.product}...`)
-    openBrowser(url)
+    // the window is the whole of it. The app opens its own.
+    if (mode !== "app") {
+      ok(`Opening ${ED.product}...`)
+      openBrowser(url)
+    }
   } else {
     process.stdout.write(" timed out\n")
     warn(`${ED.product} is still starting — open ${url} once it is up`)
@@ -1664,14 +1744,43 @@ function cleanupLegacyIbex() {
 // Returns true if REFUGIO was registered to auto-start on login (caller relies on
 // the service having started the supervisor); false in on-demand (low-RAM) mode,
 // where the caller must start the supervisor itself for this session.
+// Returns how REFUGIO will be started: "app" (the menu-bar app owns it),
+// "launchd" (a login agent runs the supervisor) or "ondemand" (nothing at
+// login; the `refugio` command or a double-click starts it).
 function setupAutoStart(targetDir) {
   const nodePath = process.execPath
   const startScript = path.join(targetDir, "start-refugio.cjs")
+  try { fs.mkdirSync(path.join(home, ED.logDir), { recursive: true }) } catch {}
 
-  // Low-RAM: set up on-demand launchers instead of login auto-start.
+  // The terminal way in, on every Mac: it is how REFUGIO is reached when the
+  // menu-bar icon is not there, and how a log is read without one.
+  writeLaunchers(targetDir, nodePath)
+
+  // A standard install is run by the menu-bar app. The two below are for an
+  // edition without one, and for a Mac that cannot build it (no Swift
+  // toolchain) — the agent and the on-demand launchers exactly as they were.
+  if (ED.id === "standard") {
+    recordInstallForApp(targetDir, nodePath)
+    if (installMenuBarApp(targetDir)) {
+      removeLaunchAgent()
+      if (isLowRam()) {
+        ok(`The menu-bar app opens at login. With ${Math.round(os.totalmem() / 1024 ** 3)} GB of memory it does NOT start ${ED.product} by itself —`)
+        console.log(`    ${C.dim}click its icon when you want it. "Start REFUGIO Automatically" in its menu changes that.${C.reset}`)
+      } else {
+        ok(`The menu-bar app opens at login and starts ${ED.product}, and restarts it if it stops`)
+      }
+      return "app"
+    }
+    warn(`No menu-bar app, so ${ED.product} falls back to ${isLowRam() ? "starting on demand" : "a login agent"}`)
+  }
+
+  // Low-RAM: on-demand launchers instead of login auto-start.
   if (isLowRam()) {
-    setupOnDemand(targetDir, nodePath, startScript)
-    return false
+    removeLaunchAgent()
+    ok(`Low-RAM mode: ${ED.product} will NOT auto-start on login (keeps your RAM free)`)
+    ok(`Start anytime:  ${ED.cli}   ·   stop + free RAM:  ${ED.cli} stop`)
+    ok(`Or double-click:  ${path.join(targetDir, startCommandName())}`)
+    return "ondemand"
   }
 
   // macOS: launchd plist
@@ -1724,21 +1833,14 @@ function setupAutoStart(targetDir) {
     }
   }
 
-  return true
+  return "launchd"
 }
 
-// On-demand setup for low-RAM machines: create convenient launchers (a `refugio`
-// CLI + a clickable shortcut) and ensure NO login auto-start remains, so the
-// stack isn't resident all day. The user starts REFUGIO when they want it and
-// frees the RAM by quitting (Ctrl+C / `refugio stop`).
-function setupOnDemand(targetDir, nodePath, startScript) {
-  try { fs.mkdirSync(path.join(home, ED.logDir), { recursive: true }) } catch {}
-
-  // Remove any existing login auto-start so it truly won't launch at boot.
-  const plistPath = path.join(home, "Library", "LaunchAgents", `${ED.agentLabel}.plist`)
-  try { execSync(`launchctl bootout gui/$(id -u) "${plistPath}"`, { stdio: "ignore" }) } catch {}
-  try { if (fs.existsSync(plistPath)) fs.unlinkSync(plistPath) } catch {}
-
+// The terminal launchers: a `refugio` command and a double-clickable
+// "Start REFUGIO.command". Written on every Mac — on a low-RAM one without the
+// menu-bar app they are the only way to start REFUGIO, and everywhere else
+// they are how it is reached when the icon is not there.
+function writeLaunchers(targetDir, nodePath) {
   // `refugio` CLI in ~/.local/bin (uv's installer puts that on PATH; the hint
   // at the end covers a machine where it isn't):
   //   start | bg | stop | restart | status | menubar
@@ -1810,13 +1912,9 @@ esac
   const cmd = `#!/bin/sh\nexec "${nodePath}" "${targetDir}/start-refugio.cjs"\n`
   const cmdPath = path.join(targetDir, startCommandName())
   try { fs.writeFileSync(cmdPath, cmd); fs.chmodSync(cmdPath, 0o755) } catch {}
-  installMenuBarApp(targetDir)
 
-  ok(`Low-RAM mode: ${ED.product} will NOT auto-start on login (keeps your RAM free)`)
-  ok(`Start anytime:  ${ED.cli}   ·   stop + free RAM:  ${ED.cli} stop`)
   const onPath = (process.env.PATH || "").split(":").includes(path.join(home, ".local", "bin"))
   if (!onPath) ok(`(if '${ED.cli}' isn't found: run ${path.join(home, ".local", "bin", ED.cli)}, or add ~/.local/bin to PATH)`)
-  ok(`Or double-click:  ${path.join(targetDir, startCommandName())}`)
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -1947,14 +2045,14 @@ async function main() {
 
   // Set up auto-start (login service on capable machines; on-demand launchers on
   // low-RAM). Must happen BEFORE startREFUGIO so we don't spawn a duplicate.
-  let autoStarted = false
+  let startMode = "ondemand"
   if (!flags.has("--no-start") && !flags.has("--non-interactive")) {
-    autoStarted = setupAutoStart(targetDir)
+    startMode = setupAutoStart(targetDir)
   }
 
   // Wait for the chat server to be ready and open the window
   if (!flags.has("--no-start") && !flags.has("--non-interactive")) {
-    await startREFUGIO(targetDir, env, autoStarted)
+    await startREFUGIO(targetDir, env, startMode)
   }
 
   console.log(`${C.bold}============================================================`)
@@ -1978,6 +2076,10 @@ async function main() {
     // Headless: nothing was auto-started or launcher-installed.
     console.log(`  To start ${ED.product}:`)
     console.log(`    node ${path.join(targetDir, "start-refugio.cjs")}`)
+  } else if (startMode === "app") {
+    console.log(`  ${ED.product} lives in your menu bar. Click its mark to open the window;`)
+    console.log(`  right-click for Start / Stop, Settings and the log.`)
+    console.log(`  From a terminal:   ${ED.cli} status   ·   ${ED.cli} stop`)
   } else if (isLowRam()) {
     console.log(`  Start ${ED.product}:     ${ED.cli}   (or double-click "${startCommandName()}")`)
     console.log(`  Stop + free RAM:   ${ED.cli} stop`)

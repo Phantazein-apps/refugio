@@ -109,7 +109,11 @@ if [ -d "$ROOT/menubar" ]; then
   ( cd "$ROOT/menubar" && swift build -c release ) || die "the menu-bar app did not compile"
   APP="$ROOTDIR/Applications/REFUGIO.app"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-  cp "$ROOT/menubar/.build/release/RefugioBar" "$APP/Contents/MacOS/REFUGIO"
+  # Named as Info.plist's CFBundleExecutable says. This was copied as
+  # MacOS/REFUGIO, which macOS refuses to launch ("can't be opened") — unseen
+  # while nothing in a packaged install opened the app, and fatal now that the
+  # app is what starts REFUGIO there.
+  cp "$ROOT/menubar/.build/release/RefugioBar" "$APP/Contents/MacOS/RefugioBar"
   [ -f "$ROOT/menubar/Info.plist" ] && cp "$ROOT/menubar/Info.plist" "$APP/Contents/Info.plist"
   [ -f "$ROOT/menubar/Resources/AppIcon.icns" ] && cp "$ROOT/menubar/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 

@@ -161,6 +161,14 @@ if [ "$DEST_AT" -lt "$BUILT_AT" ]; then
   exit 1
 fi
 
+# The installer opens the app itself, after it has written the preferences the
+# app reads on launch (where REFUGIO is, which Node runs it, and to show the
+# window once). Opened here first, it would start before those exist.
+if [ "${REFUGIO_NO_LAUNCH:-}" = "1" ]; then
+  echo "✓ Installed to /Applications — the installer opens it."
+  exit 0
+fi
+
 echo "▸ Launching…"
 open "$DEST"
 echo "✓ Installed to /Applications and launched."
