@@ -1024,7 +1024,7 @@ function renderClaude() {
   }
 
   const card = el("div.card.warn", {},
-    el("h3", { text: "Claude" }),
+    el("h3", { text: "Claude, through your Claude Code" }),
     el("div.prose", { text: c.hint }),
     el("div.prose", {}, el("strong", { text: c.warning })),
     el("label.check", {},

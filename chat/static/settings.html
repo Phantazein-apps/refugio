@@ -54,7 +54,7 @@
     <button type="button" class="snav-item is-active" data-pane="connectors">Connectors</button>
     <button type="button" class="snav-item" data-pane="models">Models</button>
     <button type="button" class="snav-item" data-pane="web">Web search</button>
-    <button type="button" class="snav-item" data-pane="claude">Claude</button>
+    <button type="button" class="snav-item" data-pane="claude">Cloud model</button>
     <button type="button" class="snav-item" data-pane="modes">Discussion modes</button>
     <button type="button" class="snav-item" data-pane="appearance">Appearance</button>
     <button type="button" class="snav-item" data-pane="updates">Updates<span class="nav-dot" id="update-dot" hidden></span></button>
@@ -116,12 +116,17 @@
       <div id="web-body"></div>
     </section>
 
-    <!-- ── Claude ──────────────────────────────────────── -->
+    <!-- ── Cloud model ───────────────────────────────────
+         Named for what it is rather than after Anthropic's product:
+         Anthropic asks that its names not be used as the name of another
+         product's feature. Saying, in the pane, that it runs Claude through
+         Claude Code is fine, and it does. The id stays "claude" so links and
+         code that name the pane keep working. -->
     <section class="pane" id="pane-claude" aria-labelledby="h-claude">
       <div class="pane-head">
         <div>
-          <h2 class="t-display" id="h-claude">Claude <span class="red">model</span></h2>
-          <div class="pane-sub">Claude instead of a local model, through your own Claude Code. The conversation leaves this machine.</div>
+          <h2 class="t-display" id="h-claude">Cloud <span class="red">model</span></h2>
+          <div class="pane-sub">Use Claude instead of the model on this computer, through your own Claude Code. The conversation leaves this machine.</div>
         </div>
       </div>
       <div id="claude-body"></div>

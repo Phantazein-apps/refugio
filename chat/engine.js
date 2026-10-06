@@ -46,7 +46,7 @@ export function cloudRefusal({ model, mode = null, claudeEnabled = false }) {
   if (!isCloudModel(model)) return null;
   if (mode) return "Modes only use the model on this computer. Choose a local model to continue in this mode.";
   if (claudeCode.isClaudeCodeModel(model) && !claudeEnabled) {
-    return "Claude is switched off in Settings. It sends this conversation to Anthropic, so it has to be switched on there first.";
+    return "Claude is switched off in Settings ▸ Cloud model. It sends this conversation to Anthropic, so it has to be switched on there first.";
   }
   return null;
 }
