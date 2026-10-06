@@ -40,7 +40,9 @@ import { listModels, isUp, pullModel, showModel, OLLAMA_BASE } from "./ollama.js
 // The model layer. Local models still default to the native Ollama client;
 // see engine.js for what REFUGIO_ENGINE_LIB=pi changes.
 import { chatStream, complete, cloudRefusal, isCloudModel } from "./engine.js";
-import { CLAUDE_CODE_MODELS, CLAUDE_CODE_LABELS, CLAUDE_CODE_UI, claudeCodeInfo } from "./claude-code.js";
+import {
+  CLAUDE_CODE_MODELS, CLAUDE_CODE_LABELS, CLAUDE_CODE_UI, claudeCodeInfo, claudeAuthStatus, startClaudeLogin,
+} from "./claude-code.js";
 import * as catalog from "./model-catalog.js";
 import {
   turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
@@ -1453,6 +1455,38 @@ async function route(req, res, url) {
   // reason. Unlike that one it also checks the origin: this switch decides
   // whether a conversation may be sent to Anthropic, and any page in any tab
   // can aim a POST at loopback.
+  // Claude, with whether Claude Code is signed in. Separate from the payload
+  // the status poll carries, because finding out is a process spawn: the setup
+  // page and the Settings pane ask when they are showing Claude, not every
+  // fifteen seconds for as long as the window is open. `fresh` skips the
+  // short cache — the setup page sets it while someone is signing in.
+  if (p === "/api/chat/claude" && req.method === "GET") {
+    const info = claudePayload();
+    const auth = info.installed ? await claudeAuthStatus(process.env, { fresh: url.searchParams.has("fresh") }) : null;
+    return sendJson(res, 200, {
+      ...info,
+      managed: !!LOCKED.claude,
+      // null is "could not tell" (an older Claude Code with no `auth status`),
+      // which is not the same as signed out.
+      signedIn: auth ? auth.loggedIn : null,
+      plan: auth?.loggedIn ? auth.plan : null,
+      email: auth?.loggedIn ? auth.email : null,
+    });
+  }
+
+  // Start Claude Code's own sign-in — `claude auth login`, which opens
+  // Anthropic's page in the browser. REFUGIO starts it and asks afterwards
+  // whether it worked; it never sees the credential. Origin-checked like the
+  // switch: a page in another tab must not be able to start a sign-in.
+  if (p === "/api/chat/claude/login" && req.method === "POST") {
+    if (!sameOrigin(req)) return sendJson(res, 403, { error: "cross-origin requests are not accepted here" });
+    if (LOCKED.claude) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
+    const r = startClaudeLogin();
+    if (r.error) return sendJson(res, 400, r);
+    log("started Claude Code sign-in (claude auth login)");
+    return sendJson(res, 200, r);
+  }
+
   if (p === "/api/chat/claude" && req.method === "POST") {
     if (!sameOrigin(req)) return sendJson(res, 403, { error: "cross-origin requests are not accepted here" });
     if (LOCKED.claude) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
@@ -1707,6 +1741,9 @@ async function route(req, res, url) {
       // and then reports a broken connector.
       connectors: setupConnectors(saved),
       web: { enabled: !!connectorSettings.web?.enabled, ...WEB_SEARCH_UI },
+      // Install state only; whether Claude Code is signed in is asked for when
+      // the step is on screen (GET /api/chat/claude).
+      claude: claudePayload(),
       // The wizard has no connector rows of its own — it is describing a
       // machine that may not have started any yet — so paired modes report
       // their connector as not ready here rather than guessing it is.
@@ -2086,12 +2123,25 @@ server.listen(PORT, "127.0.0.1", async () => {
   scheduleUpdateChecks();
 });
 
+let shuttingDown = false;
 for (const sig of ["SIGINT", "SIGTERM"]) {
-  process.on(sig, () => {
+  process.on(sig, async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log("shutting down");
     server.close();
     store.closeStore();
-    mcp?.close();
+    // Awaited. Closing a connector is not instant — the SDK ends its input,
+    // waits, sends SIGTERM, waits, then SIGKILL — and exiting first skipped
+    // all of it. A connector that does not quit when its input closes was left
+    // running with no parent: Hermeneia, holding the WhatsApp session lock, so
+    // every later start's WhatsApp failed with "Another Hermeneia is already
+    // running". Found by stopping a chat server on a real install. Bounded, so
+    // one connector that hangs cannot keep REFUGIO from stopping.
+    await Promise.race([
+      mcp?.close() ?? Promise.resolve(),
+      new Promise((r) => setTimeout(r, 5000).unref()),
+    ]);
     process.exit(0);
   });
 }

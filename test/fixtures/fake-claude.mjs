@@ -24,6 +24,26 @@ const argv = process.argv.slice(2);
 // The server asks which version is installed, for Settings and to pick the
 // newest of several.
 if (argv[0] === "--version") { console.log("2.1.104 (Claude Code)"); process.exit(0); }
+
+// `claude auth status` / `claude auth login`, with the signed-in state kept in
+// the file FAKE_CLAUDE_AUTH names: present means signed in. `login` signs in
+// at once — the real one waits for a browser.
+if (argv[0] === "auth") {
+  const { existsSync, writeFileSync } = await import("fs");
+  const file = process.env.FAKE_CLAUDE_AUTH;
+  if (argv[1] === "status") {
+    const inn = !!file && existsSync(file);
+    console.log(JSON.stringify(inn
+      ? { loggedIn: true, authMethod: "claude.ai", subscriptionType: "pro", email: "test@example.com" }
+      : { loggedIn: false }));
+    process.exit(0);
+  }
+  if (argv[1] === "login") {
+    if (file) writeFileSync(file, "signed in\n");
+    process.exit(0);
+  }
+  process.exit(1);
+}
 const flag = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const model = flag("--model");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");

@@ -11,6 +11,9 @@ import Foundation
 struct Install {
     let dir: URL
     let node: String
+    /// The code ships inside this app (REFUGIO.app from the .dmg), rather than
+    /// in a checkout or the .pkg's /usr/local/refugio.
+    let bundled: Bool
 
     /// Written by the installer with `defaults write`. Read every time rather
     /// than cached: a reinstall can move either, and the app outlives it.
@@ -19,6 +22,18 @@ struct Install {
     static func locate() -> Install? {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
+
+        // A self-contained app carries its own code, and uses nothing else:
+        // whatever an installer recorded in these preferences describes some
+        // other copy of REFUGIO on this Mac, not this one.
+        if let resources = Bundle.main.resourceURL {
+            let code = resources.appendingPathComponent("refugio")
+            if fm.fileExists(atPath: code.appendingPathComponent("start-refugio.cjs").path),
+               let node = node(for: code) {
+                return Install(dir: code, node: node, bundled: true)
+            }
+        }
+
         var dirs: [URL] = []
         if let recorded = defaults.string(forKey: "installDir") {
             dirs.append(URL(fileURLWithPath: recorded))
@@ -29,7 +44,7 @@ struct Install {
             fm.fileExists(atPath: $0.appendingPathComponent("start-refugio.cjs").path)
         }) else { return nil }
         guard let node = node(for: dir) else { return nil }
-        return Install(dir: dir, node: node)
+        return Install(dir: dir, node: node, bundled: false)
     }
 
     /// First match wins, most specific first.
@@ -132,6 +147,10 @@ final class StackSupervisor {
         let nodeDir = URL(fileURLWithPath: install.node).deletingLastPathComponent().path
         let inherited = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         env["PATH"] = [nodeDir, "/opt/homebrew/bin", "/usr/local/bin", inherited].joined(separator: ":")
+        // Said outright rather than left for the supervisor to infer from the
+        // path: state goes to ~/.refugio-data, never into the app, whose next
+        // version replaces everything inside it.
+        if install.bundled { env["REFUGIO_PACKAGED"] = "1" }
         task.environment = env
 
         // Appended, not truncated: the log of the run that crashed is the one

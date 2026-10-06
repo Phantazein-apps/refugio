@@ -1018,6 +1018,7 @@ function renderClaude() {
   box.append(el("div.card", {},
     el("h3", { text: "How it runs" }),
     el("div.kv", {}, el("span.k", { text: "claude code" }), el("span", { text: c.version ? `v${c.version}` : "installed" })),
+    claudeAuthRow(),
     el("div.prose", { text: c.usage }),
     el("div.aside", {
       text: "Claude Code runs with its own tools switched off. It can use your connectors only " +
@@ -1032,6 +1033,58 @@ function renderClaude() {
       }))
       : null,
   ));
+}
+
+// Whether Claude Code is signed in. Asked when this pane draws, and at most
+// once a minute — the answer is a process spawn, and the page redraws every
+// fifteen seconds. Signing in is Claude Code's own `claude auth login`; this
+// starts it and reads the answer afterwards, nothing more.
+let claudeAuth = { at: 0, value: null, loading: false };
+
+function claudeAuthRow() {
+  const row = el("div.kv", {}, el("span.k", { text: "account" }));
+  const a = claudeAuth.value;
+  if (!a || a.signedIn == null) {
+    row.append(el("span", { text: claudeAuth.loading || !a ? "checking…" : "can't tell — run `claude auth status`" }));
+  } else if (a.signedIn) {
+    const plan = a.plan ? ` · Claude ${a.plan[0].toUpperCase()}${a.plan.slice(1)}` : "";
+    row.append(el("span", { text: `signed in${plan}${a.email ? ` · ${a.email}` : ""}` }));
+  } else {
+    const btn = el("button.btn", { type: "button", text: "Sign in to Claude" });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/chat/claude/login", { method: "POST" });
+        const r = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(r.error || "Couldn't start the sign-in");
+        btn.textContent = "Finish in your browser…";
+        toast("Anthropic's sign-in page opened in your browser.");
+        // Ask again soon, uncached, until the answer changes.
+        const until = Date.now() + 10 * 60 * 1000;
+        const poll = setInterval(async () => {
+          await loadClaudeAuth(true);
+          if (claudeAuth.value?.signedIn || Date.now() > until) { clearInterval(poll); renderClaude(); }
+        }, 3000);
+      } catch (e) {
+        btn.disabled = false;
+        toast(e.message);
+      }
+    });
+    row.append(el("span", {}, "not signed in  ", btn));
+  }
+  if (!claudeAuth.loading && Date.now() - claudeAuth.at > 60000) {
+    loadClaudeAuth().then(() => renderClaude());
+  }
+  return row;
+}
+
+async function loadClaudeAuth(fresh = false) {
+  claudeAuth.loading = true;
+  try {
+    const r = await fetch(`/api/chat/claude${fresh ? "?fresh=1" : ""}`);
+    claudeAuth.value = await r.json();
+  } catch { /* keep what we had */ }
+  claudeAuth = { ...claudeAuth, at: Date.now(), loading: false };
 }
 
 async function setClaudeEnabled(enabled, box) {

@@ -30,7 +30,7 @@
 // What is said goes over stdin, never on the command line: argv is readable by
 // every user on the machine through `ps`, and a conversation is not.
 
-import { spawn, execFileSync } from "child_process";
+import { spawn, execFileSync, execFile } from "child_process";
 import http from "http";
 import { randomBytes } from "crypto";
 import { existsSync, mkdtempSync, rmSync, realpathSync } from "fs";
@@ -107,6 +107,77 @@ export const CLAUDE_CODE_UI = {
   usage:
     "It counts against your Claude plan's usage, the same as using Claude Code yourself.",
 };
+
+// ── Signing in ──────────────────────────────────────────────
+//
+// REFUGIO does not sign anyone in to Claude, and could not if it wanted to:
+// Anthropic's terms say sign-in "must complete through Anthropic's own flow",
+// and that a third-party app may not offer Claude.ai login or hold its tokens
+// (docs/pi-ai-spike.md §4). What it can do is what a person at a terminal
+// would: ask Claude Code whether it is signed in, and run Claude Code's own
+// `claude auth login`, which opens Anthropic's page in the browser. The
+// credential goes from that page into Claude Code's keychain entry. REFUGIO
+// sees neither — only whether the answer to `claude auth status` changed.
+
+const AUTH_TTL_MS = 20000;
+let authCache = { at: 0, value: null };
+let login = null;          // the `claude auth login` in flight, if any
+
+/**
+ * { loggedIn, method, plan, email } from `claude auth status --json`, or null
+ * when it cannot be asked (no Claude Code, or an older one without `auth`).
+ *
+ * Cached for twenty seconds: it is a process spawn, and the setup page polls
+ * it while someone is signing in.
+ */
+export async function claudeAuthStatus(env = process.env, { fresh = false } = {}) {
+  if (!fresh && authCache.value && Date.now() - authCache.at < AUTH_TTL_MS) return authCache.value;
+  const bin = findClaude(env);
+  if (!bin) return null;
+  const out = await new Promise((resolve) => {
+    execFile(bin, ["auth", "status", "--json"], { env: ownSessionEnv(env), timeout: 15000 },
+      (err, stdout) => resolve(err && !stdout ? null : stdout));
+  });
+  let value = null;
+  try {
+    const j = JSON.parse(out);
+    value = {
+      loggedIn: !!j.loggedIn,
+      method: j.authMethod ?? null,
+      plan: j.subscriptionType ?? null,
+      email: j.email ?? null,
+    };
+  } catch { /* not JSON: an older Claude Code, or it failed — "can't tell" */ }
+  authCache = { at: Date.now(), value };
+  return value;
+}
+
+/**
+ * Start Claude Code's own sign-in. It opens Anthropic's page in the browser
+ * and waits there for the person to finish; this returns as soon as it has
+ * started. One at a time, and given up after ten minutes, so a page left open
+ * and forgotten does not leave a process behind for ever.
+ *
+ * Returns { started } or { error }. Whether it WORKED is for claudeAuthStatus
+ * to say, afterwards.
+ */
+export function startClaudeLogin(env = process.env) {
+  const bin = findClaude(env);
+  if (!bin) return { error: "Claude Code is not installed on this computer." };
+  if (login && login.exitCode === null) return { started: true, already: true };
+  authCache = { at: 0, value: null };
+  try {
+    login = spawn(bin, ["auth", "login"], { env: ownSessionEnv(env), stdio: ["ignore", "ignore", "ignore"] });
+  } catch (e) {
+    return { error: `Couldn't start Claude Code's sign-in: ${e.message}` };
+  }
+  const proc = login;
+  const giveUp = setTimeout(() => { try { proc.kill("SIGTERM"); } catch {} }, 10 * 60 * 1000);
+  giveUp.unref?.();
+  proc.on("exit", () => { clearTimeout(giveUp); authCache = { at: 0, value: null }; });
+  proc.on("error", () => { clearTimeout(giveUp); });
+  return { started: true };
+}
 
 /** Whether Claude Code is here, and which. Cheap after the first call: the
  *  version is cached per path. */

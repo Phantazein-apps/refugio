@@ -62,6 +62,11 @@ const ENV_FILE = path.join(home, PRODUCT.envFile)
  * per-user.
  */
 const PACKAGED = (() => {
+  // Code inside an app bundle is packaged however its directory is permissioned.
+  // /Applications is writable by an admin, so the check below would answer
+  // "a checkout" for REFUGIO.app and put the chat database INSIDE the app —
+  // where the next version, dragged over it, would replace it.
+  if (process.env.REFUGIO_PACKAGED === "1" || REFUGIO_DIR.includes(".app/Contents/")) return true
   try { fs.accessSync(REFUGIO_DIR, fs.constants.W_OK); return false } catch { return true }
 })()
 
@@ -314,7 +319,27 @@ ${C.bold}============================================================
 ============================================================${C.reset}
 `)
 
-  const env = loadEnv()
+  let env = loadEnv()
+  // A packaged install has no installer to have written this file: REFUGIO.app
+  // was dragged into /Applications, or a .pkg laid it down for a user it has
+  // never met. Exiting here — what a checkout without credentials should do —
+  // is a crash loop under the app, which restarts what exits. So a packaged
+  // install writes the minimum and carries on; connectors are switched on in
+  // Settings, which writes this same file.
+  if (Object.keys(env).length === 0 && PACKAGED && !fs.existsSync(ENV_FILE)) {
+    try {
+      fs.writeFileSync(ENV_FILE,
+        `# Created by ${PRODUCT.product}. Connectors are configured in Settings.\n` +
+        "REFUGIO_INSTALL=app\n" +
+        // So the supervisor starts `ollama serve` when Ollama is installed but
+        // not running. Without Ollama the window says how to get it.
+        "REFUGIO_ENGINE=ollama\n", { mode: 0o600 })
+      ok(`Created ${ENV_FILE}`)
+    } catch (e) {
+      warn(`Couldn't create ${ENV_FILE}: ${e.message}`)
+    }
+    env = loadEnv()
+  }
   if (Object.keys(env).length === 0) {
     fail(`No credentials found at ~/${PRODUCT.envFile}`)
     fail("Run the installer first: curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/refugio/main/install-refugio | bash")

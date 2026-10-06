@@ -26,11 +26,13 @@
   ],
   "author": "Dennis Kittrell",
   "license": "MIT",
-  "dependencies": {
+  "optionalDependencies": {
     "@earendil-works/pi-ai": "1.0.1",
+    "googleapis": "^171.4.0"
+  },
+  "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "dotenv": "^16.4.7",
-    "googleapis": "^171.4.0",
     "just-claude-things": "github:Phantazein-apps/just-claude-things",
     "mcp-remote": "^0.1.38",
     "node-fetch": "^3.3.2",

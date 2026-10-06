@@ -17,6 +17,7 @@ narrows the modes REFUGIO offers, which is the connector ones.
 ```
 packaging/
 ├── macos/
+│   ├── build-app.sh            self-contained REFUGIO.app → .dmg, per architecture
 │   ├── build-pkg.sh            pkgbuild → productbuild → productsign → notarytool
 │   ├── distribution.xml        rootVolumeOnly + enable_localSystem
 │   ├── scripts/{pre,post}install
@@ -234,6 +235,52 @@ matter; the profiles may land first.
 **Intune** — *macOS app (PKG)*. It must be signed **and** notarized; Intune's
 agent will not install an unsigned package, so until there is a Developer ID
 this route is closed. Push the profiles as *Templates ▸ Custom*.
+
+## The .dmg (one person, no MDM)
+
+`build-app.sh` builds what a person downloads: a self-contained `REFUGIO.app`
+with REFUGIO's code, its production dependencies and a Node runtime inside,
+and a `.dmg` per architecture holding it beside a shortcut to Applications.
+
+```bash
+./packaging/macos/build-app.sh                     # this Mac's architecture
+ARCHES="arm64 x64" ./packaging/macos/build-app.sh  # both
+APP_ID="Developer ID Application: Acme (TEAM)" \
+NOTARY_PROFILE=refugio ./packaging/macos/build-app.sh   # signed + notarized
+```
+
+What it does, in the order that matters:
+
+- **Code from `git ls-files`, not the working tree.** A checkout that has been
+  run holds `data/` (conversations), `mcpo-config.json` and launchers, none of
+  them tracked; an exclude list is one forgotten pattern from shipping a chat
+  database. The build fails if any of them is found in the payload anyway.
+- **Production dependencies without the optional ones.** `googleapis` (Google
+  Docs memory sync, ~195 MB) and `@earendil-works/pi-ai` (the pi-ai engine
+  spike, ~90 MB) are optional dependencies, loaded lazily; a checkout installs
+  them, the app does not. 251 MB → 48 MB.
+- **Node from nodejs.org, checked against its published SHA-256**, then cut to
+  the `node` binary and its LICENSE — npm, npx and headers are for installing
+  and building, and nothing in REFUGIO launches them.
+- **One app per architecture.** The Swift binary is built for the target; the
+  dependencies are pure JavaScript (the build fails if a native addon appears),
+  so only Node differs, and a universal Node is ~110 MB of the other machine's
+  code in every download.
+
+Sizes for 2.0.0-beta.2 on arm64: the app is 157 MB, the `.dmg` 67 MB.
+
+At runtime the app finds the code and Node inside itself first and tells the
+supervisor it is packaged, so state goes to `~/.refugio-data`, exactly as for
+the `.pkg` above — never into the app, which the next version replaces whole. A
+first run with no `~/.refugio.env` writes a minimal one rather than exiting,
+because the app restarts a supervisor that exits.
+
+**Unsigned**, without a Developer ID: ad-hoc signed (Apple silicon will not run
+anything less), and a downloaded copy needs **Open Anyway** in System Settings ▸
+Privacy & Security once. The CI job (`Package` ▸ `.dmg`) builds both
+architectures and smoke-tests the arm64 one as a brand-new user: mounted, run
+from a fresh home directory, credentials file created, state outside the app,
+chat answering.
 
 ## Building by hand
 
