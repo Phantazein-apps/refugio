@@ -30,10 +30,10 @@
 // What is said goes over stdin, never on the command line: argv is readable by
 // every user on the machine through `ps`, and a conversation is not.
 
-import { spawn, execFileSync, execFile } from "child_process";
+import { spawn, spawnSync, execFileSync, execFile } from "child_process";
 import http from "http";
 import { randomBytes } from "crypto";
-import { existsSync, mkdtempSync, rmSync, realpathSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, realpathSync, writeFileSync } from "fs";
 import { tmpdir, homedir } from "os";
 import { join, dirname, delimiter } from "path";
 import { fileURLToPath } from "url";
@@ -179,6 +179,115 @@ export function startClaudeLogin(env = process.env) {
   return { started: true };
 }
 
+// ── Installing ──────────────────────────────────────────────
+//
+// For someone who answers "yes" to using Claude and has no Claude Code yet.
+// REFUGIO runs Anthropic's own installer — https://claude.ai/install.sh, the
+// command Anthropic's documentation gives — exactly as published. It installs
+// the signed binary into ~/.local/bin, needs no administrator password, and
+// keeps itself updated. Nothing about it is REFUGIO's: not the binary, not its
+// updates, and (see Signing in) not the login. Then the result is checked: on a
+// Mac the binary must be signed by Anthropic, or it is not used.
+//
+// The script is downloaded to a file and run from there rather than piped into
+// a shell, so a connection that drops halfway runs nothing instead of half a
+// script.
+
+const INSTALLER_URL = "https://claude.ai/install.sh";
+// Who signs Claude Code on macOS, per Anthropic's documentation.
+const ANTHROPIC_SIGNER = "Anthropic PBC";
+let install = { state: "idle" };      // idle | installing | installed | failed
+
+/** What the last install did, for the setup page to show. */
+export function claudeInstallState() {
+  return { ...install };
+}
+
+/**
+ * Start installing Claude Code. Returns at once; claudeInstallState() says how
+ * it went. One at a time; already-installed is a success, not an error.
+ *
+ * REFUGIO_CLAUDE_INSTALLER, a local script, replaces the download — for tests,
+ * which also skip the signature check, since what they install is a stand-in.
+ */
+export function startClaudeInstall(env = process.env) {
+  if (install.state === "installing") return { started: true, already: true };
+  if (findClaude(env)) {
+    install = { state: "installed", at: Date.now() };
+    return { started: false, installed: true };
+  }
+  install = { state: "installing", startedAt: Date.now() };
+  runInstaller(env).then(
+    (r) => { install = { state: "installed", at: Date.now(), ...r }; },
+    (e) => { install = { state: "failed", at: Date.now(), error: e.message }; },
+  );
+  return { started: true };
+}
+
+async function runInstaller(env) {
+  const local = env.REFUGIO_CLAUDE_INSTALLER;
+  const dir = mkdtempSync(join(tmpdir(), "refugio-claude-install-"));
+  try {
+    let script = local;
+    if (!script) {
+      const res = await fetch(INSTALLER_URL, { signal: AbortSignal.timeout(30000) });
+      if (!res.ok) throw new Error(`Couldn't download Anthropic's installer (${res.status}).`);
+      const text = await res.text();
+      // A captive portal or an error page answers 200 with HTML.
+      if (!text.startsWith("#!")) throw new Error("The download was not Anthropic's installer — is this Mac behind a login page?");
+      script = join(dir, "install.sh");
+      writeFileSync(script, text, { mode: 0o700 });
+    }
+    const output = await new Promise((resolve, reject) => {
+      let out = "";
+      const p = spawn("/bin/bash", [script], {
+        env: ownSessionEnv(env), cwd: dir, stdio: ["ignore", "pipe", "pipe"],
+      });
+      const keep = (d) => { out = (out + d).slice(-4000); };
+      p.stdout.on("data", keep);
+      p.stderr.on("data", keep);
+      const timer = setTimeout(() => { try { p.kill("SIGTERM"); } catch {} }, 10 * 60 * 1000);
+      timer.unref?.();
+      p.on("error", (e) => { clearTimeout(timer); reject(e); });
+      p.on("exit", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve(out);
+        else reject(new Error(`Anthropic's installer stopped (exit ${code}): ${lastLine(out)}`));
+      });
+    });
+
+    const bin = findClaude(env);
+    if (!bin) throw new Error(`The installer finished, but no claude was found afterwards: ${lastLine(output)}`);
+    if (!local && process.platform === "darwin") verifyAnthropicSignature(bin);
+    authCache = { at: 0, value: null };
+    return { path: bin, version: claudeVersion(bin, env)?.join(".") ?? null };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Refuse a claude that Anthropic did not sign. The launcher in ~/.local/bin is
+ *  a symlink into ~/.local/share/claude/versions/, so it is resolved first. */
+export function verifyAnthropicSignature(bin) {
+  const real = realpathSync(bin);
+  const verify = spawnSync("codesign", ["--verify", "--strict", real], { encoding: "utf-8" });
+  if (verify.status !== 0) {
+    throw new Error(`Claude Code's signature did not verify: ${lastLine(verify.stderr)}`);
+  }
+  // codesign describes a signature on stderr, one "Authority=" line per
+  // certificate in the chain; the first is the signer.
+  const info = spawnSync("codesign", ["-dv", "--verbose=2", real], { encoding: "utf-8" });
+  const signer = /^Authority=(.*)$/m.exec(`${info.stdout}\n${info.stderr}`)?.[1] ?? "";
+  if (!signer.includes(ANTHROPIC_SIGNER)) {
+    throw new Error(`The installed Claude Code is signed by "${signer || "nobody"}", not Anthropic, so REFUGIO won't use it.`);
+  }
+  return signer;
+}
+
+function lastLine(s) {
+  return String(s || "").trim().split("\n").filter(Boolean).at(-1)?.slice(0, 300) ?? "";
+}
+
 /** Whether Claude Code is here, and which. Cheap after the first call: the
  *  version is cached per path. */
 export function claudeCodeInfo(env = process.env) {
@@ -237,16 +346,25 @@ const TESTED_FROM = [2, 1, 104];
 let warnedOld = false;
 
 const versions = new Map();
+const versionFailedAt = new Map();
 /** `claude --version`, parsed, cached per path. Null if it will not say. */
 function claudeVersion(p, env) {
   if (versions.has(p)) return versions.get(p);
+  // A failure is remembered for a minute: long enough that one that never
+  // answers is not re-run on every fifteen-second status poll, short enough
+  // that one that was only slow gets asked again.
+  if (Date.now() - (versionFailedAt.get(p) ?? 0) < 60000) return null;
   let v = null;
   try {
-    const out = execFileSync(p, ["--version"], { env: ownSessionEnv(env), timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).toString();
+    const out = execFileSync(p, ["--version"], { env: ownSessionEnv(env), timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).toString();
     const m = /(\d+)\.(\d+)\.(\d+)/.exec(out);
     if (m) v = m.slice(1).map(Number);
   } catch { /* an install that cannot report a version loses to one that can */ }
-  versions.set(p, v);
+  // Only an answer is remembered. A check that timed out on a busy Mac would
+  // otherwise read as "no version" until REFUGIO restarted — seen in tests
+  // under load, and the same thing on a Mac doing something heavier.
+  if (v) versions.set(p, v);
+  else versionFailedAt.set(p, Date.now());
   return v;
 }
 

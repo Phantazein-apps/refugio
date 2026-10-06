@@ -511,133 +511,183 @@ async function setWeb(input) {
 
 // ── Claude ──────────────────────────────────────────────────
 //
-// Claude instead of a local model, through the person's own Claude Code and
-// Claude plan. Optional, off, and the step can be skipped like every other.
+// One question — "Do you want to use Claude?" — and a yes does the rest:
 //
-// Signing in is Claude Code's, not ours: the button runs `claude auth login`,
-// which opens Anthropic's page in the browser, and this step asks Claude Code
-// every few seconds whether it is signed in now. Anthropic's terms are that
-// sign-in completes through Anthropic's own flow, and that a third-party app
-// never holds the credential — so REFUGIO starts it and watches the answer,
-// and that is all.
+//   1. no Claude Code yet → install it, with Anthropic's own installer
+//   2. not signed in      → open Anthropic's sign-in page (Claude Code's own
+//                           `claude auth login`) and wait for it to finish
+//   3. signed in          → switch Claude on, so it is in the model picker
+//
+// Each step is something the person asked for by saying yes, and each is
+// Anthropic's, not REFUGIO's: the installer, the binary, the sign-in page. The
+// credential goes from that page into Claude Code; REFUGIO only asks Claude
+// Code afterwards whether it is signed in. A no changes nothing, and the step
+// can be skipped like every other. The warning — the whole conversation goes to
+// Anthropic — is on the question, before the yes, not after it.
 
 let claudePoll = null;
 
 function renderClaude() {
+  const card = el("div.card", {});
   const section = el("section", {},
     el("div.eyebrow", { text: "05 / Claude" }),
-    el("h1", {}, "Or ", el("span.em", { text: "Claude" }), ", if you have it."),
+    el("h1", {}, "Do you want to use ", el("span.em", { text: "Claude" }), "?"),
     el("p.lede", {
-      text: "If you have a Claude plan, REFUGIO can use Claude instead of the model on this computer — " +
-        "through your own Claude Code, signed in with your own account. It is off, and you can leave it off.",
+      text: "With a Claude plan, REFUGIO can use Claude instead of the model on this computer — through " +
+        "Claude Code, Anthropic's own app, signed in with your own account.",
     }),
+    card,
+    actions({ next: "Continue" }),
   );
-  const card = el("div.card", {}, el("div.prose", { text: "Checking for Claude Code…" }));
-  section.append(card, actions({}));
-  refreshClaude(card);
+  drawClaudeQuestion(card);
   return section;
 }
 
-async function refreshClaude(card, { fresh = false } = {}) {
-  let c;
-  try {
-    c = await (await fetch(`/api/chat/claude${fresh ? "?fresh=1" : ""}`)).json();
-  } catch {
-    card.replaceChildren(el("div.prose", { text: "Couldn't ask REFUGIO about Claude. You can set it up later in Settings ▸ Claude." }));
-    return;
-  }
-  state.setup.claude = c;
-  // Stop watching once this step is no longer on screen, or once there is an
-  // answer that will not change by itself.
-  if (!card.isConnected) { clearInterval(claudePoll); claudePoll = null; return; }
+/** The question, or — if Claude is already on — where things stand. */
+async function drawClaudeQuestion(card) {
+  const c = await getClaude();
+  if (!card.isConnected) return;
+  if (c?.enabled) return drawClaudeReady(card, c);
 
-  if (!c.installed) {
-    card.replaceChildren(
-      el("h3", { text: "Claude Code is not installed" }),
-      el("div.prose", {
-        text: "REFUGIO uses Claude through Claude Code, Anthropic's app for your terminal. Install it, open it " +
-          "once, and come back — this page checks again by itself.",
-      }),
-      el("div.aside", {}, "Get it at ", el("a", { href: "https://claude.com/claude-code", target: "_blank", rel: "noopener noreferrer", text: "claude.com/claude-code" }),
-        ". Skip this and nothing changes: REFUGIO runs on the model on this computer."),
-    );
-    watchClaude(card, 5000);
-    return;
-  }
+  const warning = c?.warning ||
+    "When you choose a Claude model, the whole conversation is sent to Anthropic.";
+  // The warning (from the server) already says no mode uses Claude.
+  const plan = "It needs a paid Claude plan (Pro, Max, Team or Enterprise) and counts against its usage.";
+  const what = !c?.installed
+    ? "Saying yes installs Claude Code from Anthropic (into your home folder — no password needed), " +
+      "then opens Anthropic's sign-in page in your browser."
+    : c.signedIn === false
+      ? "Claude Code is already installed. Saying yes opens Anthropic's sign-in page in your browser."
+      : "Claude Code is installed and signed in. Saying yes adds Claude to the model picker.";
 
-  if (c.signedIn === false) {
-    const btn = el("button.btn.primary", { type: "button", text: "Sign in to Claude" });
-    const note = el("div.aside", { style: "margin-top:10px" });
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      try {
-        const res = await fetch("/api/chat/claude/login", { method: "POST" });
-        const r = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(r.error || "Couldn't start the sign-in");
-        btn.textContent = "Waiting for you to finish in the browser…";
-        note.textContent = "Anthropic's sign-in page opened in your browser. Finish there — this page notices " +
-          "by itself. If no page opened, run `claude auth login` in Terminal instead.";
-        watchClaude(card, 3000, true);
-      } catch (e) {
-        btn.disabled = false;
-        note.textContent = e.message;
-      }
-    });
-    card.replaceChildren(
-      el("h3", { text: "Sign in to Claude" }),
-      el("div.prose", {
-        text: `Claude Code ${c.version ? `${c.version} ` : ""}is installed but not signed in. Signing in happens on ` +
-          "Anthropic's own page, in your browser — REFUGIO never sees your Claude password or login.",
-      }),
-      el("div", { style: "margin-top:12px" }, btn),
-      note,
-    );
-    return;
-  }
+  const yes = el("button.btn.primary", { type: "button", text: "Yes, use Claude" });
+  yes.addEventListener("click", () => setUpClaude(card));
+  const no = el("button.btn.link", { type: "button", text: "No thanks", on: { click: () => go(1) } });
 
-  // Signed in — or a Claude Code too old to say (signedIn null), which is
-  // offered the switch too: a turn will say so if it is not signed in.
-  clearInterval(claudePoll); claudePoll = null;
-  const who = c.signedIn
-    ? `Signed in${c.plan ? ` · Claude ${c.plan[0].toUpperCase()}${c.plan.slice(1)}` : ""}${c.email ? ` · ${c.email}` : ""}`
-    : `Claude Code ${c.version || ""} is installed.`;
   card.className = "card warn";
   card.replaceChildren(
-    el("h3", { text: "Offer Claude in the model picker" }),
-    el("div.prose", { text: who }),
-    el("label.switch", { style: "margin-top:12px" },
-      el("input", {
-        type: "checkbox",
-        checked: !!c.enabled,
-        on: { change: (e) => setClaude(e.currentTarget) },
-      }),
-      el("span.track"),
-    ),
-    el("div.prose", { style: "margin-top:12px" }, el("strong", { text: c.warning || "" })),
-    el("div.aside", { style: "margin-top:8px",
-      text: (c.usage || "") + " Discussion and connector modes never use Claude." }),
+    el("div.prose", {}, el("strong", { text: warning })),
+    el("div.prose", { style: "margin-top:10px", text: plan }),
+    el("div.aside", { style: "margin-top:10px", text: what }),
+    el("div", { style: "margin-top:14px; display:flex; gap:12px; align-items:center" }, yes, no),
   );
 }
 
-function watchClaude(card, ms, fresh = false) {
-  clearInterval(claudePoll);
-  claudePoll = setInterval(() => refreshClaude(card, { fresh }), ms);
+/** After the yes: install → sign in → switch on, each only if needed, with the
+ *  card saying which one it is on. */
+async function setUpClaude(card) {
+  stopClaudePoll();
+  let c = await getClaude();
+  if (!c) return claudeFailed(card, "Couldn't ask REFUGIO about Claude.");
+
+  if (!c.installed) {
+    claudeWorking(card, "Installing Claude Code…",
+      "Downloading Anthropic's installer from claude.ai and running it. This takes about a minute.");
+    const r = await post("/api/chat/claude/install");
+    if (r.error) return claudeFailed(card, r.error);
+    c = await waitForClaude(card, (x) => x.install?.state !== "installing", 2000, 12 * 60 * 1000);
+    if (!c) return;
+    if (!c.installed) {
+      return claudeFailed(card, c.install?.error || "Claude Code didn't install.",
+        "To install it yourself, run this in Terminal, then come back: curl -fsSL https://claude.ai/install.sh | bash");
+    }
+  }
+
+  if (c.signedIn === false) {
+    claudeWorking(card, "Sign in to Claude in your browser",
+      "Anthropic's sign-in page is opening. Finish there — this page notices by itself. " +
+      "REFUGIO never sees your Claude password or login.");
+    const r = await post("/api/chat/claude/login");
+    if (r.error) return claudeFailed(card, r.error);
+    c = await waitForClaude(card, (x) => x.signedIn !== false, 3000, 10 * 60 * 1000, true);
+    if (!c) return;
+    if (c.signedIn === false) {
+      return claudeFailed(card, "Sign-in didn't finish.",
+        "Try again, or run `claude auth login` in Terminal and come back.");
+    }
+  }
+
+  const r = await post("/api/chat/claude", { enabled: true });
+  if (r.error) return claudeFailed(card, r.error);
+  drawClaudeReady(card, await getClaude() || c);
 }
 
-async function setClaude(input) {
-  const enabled = input.checked;
+function drawClaudeReady(card, c) {
+  stopClaudePoll();
+  const plan = c.plan ? ` · Claude ${c.plan[0].toUpperCase()}${c.plan.slice(1)}` : "";
+  const off = el("button.btn.link", { type: "button", text: "Turn it off" });
+  off.addEventListener("click", async () => {
+    const r = await post("/api/chat/claude", { enabled: false });
+    if (!r.error) drawClaudeQuestion(card);
+  });
+  card.className = "card";
+  card.replaceChildren(
+    el("h3", { text: "Claude is ready" }),
+    el("div.prose", { text: `${c.signedIn ? "Signed in" : "Claude Code installed"}${plan}${c.email ? ` · ${c.email}` : ""}` }),
+    el("div.aside", { style: "margin-top:8px",
+      text: "Pick a Claude model from the model menu in the chat. While one is chosen, that conversation is sent to Anthropic." }),
+    el("div", { style: "margin-top:10px" }, off),
+  );
+}
+
+function claudeWorking(card, title, detail) {
+  card.className = "card";
+  card.replaceChildren(el("h3", { text: title }), el("div.prose", { text: detail }));
+}
+
+function claudeFailed(card, why, hint = "") {
+  stopClaudePoll();
+  const again = el("button.btn", { type: "button", text: "Try again" });
+  again.addEventListener("click", () => setUpClaude(card));
+  card.className = "card warn";
+  card.replaceChildren(
+    el("h3", { text: "That didn't work" }),
+    el("div.prose", { text: why }),
+    hint ? el("div.aside", { style: "margin-top:8px", text: hint }) : null,
+    el("div", { style: "margin-top:12px; display:flex; gap:12px" }, again,
+      el("button.btn.link", { type: "button", text: "Skip", on: { click: () => go(1) } })),
+  );
+}
+
+async function getClaude(fresh = false) {
   try {
-    const res = await fetch("/api/chat/claude", {
+    const c = await (await fetch(`/api/chat/claude${fresh ? "?fresh=1" : ""}`)).json();
+    state.setup.claude = c;
+    return c;
+  } catch { return null; }
+}
+
+async function post(url, body) {
+  try {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
+      body: body ? JSON.stringify(body) : undefined,
     });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "could not save");
-    state.setup.claude = { ...state.setup.claude, enabled };
+    const data = await res.json().catch(() => ({}));
+    return res.ok ? data : { error: data.error || `Failed (${res.status})` };
   } catch (e) {
-    input.checked = !enabled;
-    input.closest(".card")?.append(el("div.managed", { text: e.message }));
+    return { error: e.message };
   }
+}
+
+/** Ask until `done` says so, the time runs out, or the step leaves the screen
+ *  (null — nothing to draw). */
+function waitForClaude(card, done, everyMs, forMs, fresh = false) {
+  stopClaudePoll();
+  const until = Date.now() + forMs;
+  return new Promise((resolve) => {
+    claudePoll = setInterval(async () => {
+      if (!card.isConnected) { stopClaudePoll(); return resolve(null); }
+      const c = await getClaude(fresh);
+      if (c && (done(c) || Date.now() > until)) { stopClaudePoll(); resolve(c); }
+    }, everyMs);
+  });
+}
+
+function stopClaudePoll() {
+  clearInterval(claudePoll);
+  claudePoll = null;
 }
 
 // ── 3o · Done ───────────────────────────────────────────────

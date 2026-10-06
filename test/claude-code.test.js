@@ -17,7 +17,10 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync
 import { tmpdir } from "os";
 import { join, dirname, delimiter } from "path";
 import { fileURLToPath } from "url";
-import { toPrompt, chatStream, findClaude, isClaudeCodeModel, ownSessionEnv, checkInit, blockedTools, compareVersions } from "../chat/claude-code.js";
+import {
+  toPrompt, chatStream, findClaude, isClaudeCodeModel, ownSessionEnv, checkInit, blockedTools, compareVersions,
+  startClaudeInstall, claudeInstallState, verifyAnthropicSignature,
+} from "../chat/claude-code.js";
 import { cloudRefusal, isCloudModel } from "../chat/engine.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -304,6 +307,70 @@ describe("the chat server where Claude Code is not installed", { skip: !sdk && "
     const res = await setClaude(chat.base, true);
     assert.equal(res.status, 400);
     assert.match((await res.json()).error, /not installed/);
+  });
+});
+
+// ── Installing Claude Code ──────────────────────────────────
+
+const INSTALLER = join(ROOT, "test", "fixtures", "fake-claude-installer.sh");
+
+test("a failed install says why, and installs nothing", async () => {
+  chmodSync(INSTALLER, 0o755);
+  const target = join(mkdtempSync(join(tmpdir(), "refugio-cc-inst-")), "bin", "claude");
+  const env = { ...process.env, REFUGIO_CLAUDE_BIN: target, REFUGIO_CLAUDE_INSTALLER: INSTALLER,
+    FAKE_INSTALL_TARGET: target, FAKE_INSTALL_FAIL: "1" };
+  assert.equal(startClaudeInstall(env).started, true);
+  for (let i = 0; i < 50 && claudeInstallState().state === "installing"; i++) await sleep(100);
+  const st = claudeInstallState();
+  assert.equal(st.state, "failed");
+  assert.match(st.error, /exit 3.*could not reach downloads\.claude\.ai/);
+  assert.equal(existsSync(target), false);
+});
+
+test("a claude that Anthropic did not sign is refused", (t) => {
+  if (process.platform !== "darwin") return t.skip("codesign is macOS");
+  // Node is signed, and not by Anthropic — or not signed for this
+  // architecture. Either way it must not pass for Claude Code.
+  assert.throws(() => verifyAnthropicSignature(process.execPath), /not Anthropic|did not verify/);
+});
+
+describe("the chat server, installing Claude Code on request", { skip: !sdk && "@modelcontextprotocol/sdk is not installed" }, () => {
+  let chat;
+  const target = join(mkdtempSync(join(tmpdir(), "refugio-cc-inst-srv-")), "bin", "claude");
+  before(async () => {
+    chmodSync(INSTALLER, 0o755);
+    chat = await startChat({
+      REFUGIO_CLAUDE_BIN: target, REFUGIO_CLAUDE_INSTALLER: INSTALLER,
+      FAKE_INSTALL_TARGET: target, FAKE_CLAUDE_SCRIPT: FAKE,
+    });
+  });
+  after(() => chat.stop());
+
+  test("another page cannot start an install", async () => {
+    const res = await fetch(`${chat.base}/api/chat/claude/install`, { method: "POST", headers: { Origin: "https://evil.example" } });
+    assert.equal(res.status, 403);
+    assert.equal(existsSync(target), false);
+  });
+
+  test("not installed → install → installed, with its version, and not switched on by it", async () => {
+    let c = await (await fetch(`${chat.base}/api/chat/claude`)).json();
+    assert.equal(c.installed, false);
+    assert.equal(c.install.state, "idle");
+
+    const r = await (await fetch(`${chat.base}/api/chat/claude/install`, { method: "POST" })).json();
+    assert.equal(r.started, true);
+    for (let i = 0; i < 100; i++) {
+      c = await (await fetch(`${chat.base}/api/chat/claude`)).json();
+      if (c.install.state !== "installing") break;
+      await sleep(100);
+    }
+    assert.equal(c.install.state, "installed", JSON.stringify(c.install));
+    assert.equal(c.installed, true);
+    assert.equal(c.version, "2.1.104", JSON.stringify(c));
+    assert.equal(c.enabled, false, "installing is not consent to send anything to Anthropic");
+
+    const again = await (await fetch(`${chat.base}/api/chat/claude/install`, { method: "POST" })).json();
+    assert.deepEqual(again, { started: false, installed: true }, "already there is a success, not a second install");
   });
 });
 

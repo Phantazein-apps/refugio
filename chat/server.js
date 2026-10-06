@@ -42,6 +42,7 @@ import { listModels, isUp, pullModel, showModel, OLLAMA_BASE } from "./ollama.js
 import { chatStream, complete, cloudRefusal, isCloudModel } from "./engine.js";
 import {
   CLAUDE_CODE_MODELS, CLAUDE_CODE_LABELS, CLAUDE_CODE_UI, claudeCodeInfo, claudeAuthStatus, startClaudeLogin,
+  startClaudeInstall, claudeInstallState,
 } from "./claude-code.js";
 import * as catalog from "./model-catalog.js";
 import {
@@ -1471,7 +1472,22 @@ async function route(req, res, url) {
       signedIn: auth ? auth.loggedIn : null,
       plan: auth?.loggedIn ? auth.plan : null,
       email: auth?.loggedIn ? auth.email : null,
+      // Progress of an install this server started, for the setup page.
+      install: claudeInstallState(),
     });
+  }
+
+  // Install Claude Code with Anthropic's own installer, for someone who said
+  // yes to Claude and has none. Starts it and returns; GET /api/chat/claude
+  // reports progress. Origin-checked and policy-checked like the switch: it
+  // downloads and runs a program, which another page must not be able to ask
+  // for, and an organisation that locked Claude off has answered already.
+  if (p === "/api/chat/claude/install" && req.method === "POST") {
+    if (!sameOrigin(req)) return sendJson(res, 403, { error: "cross-origin requests are not accepted here" });
+    if (LOCKED.claude) return sendJson(res, 403, { error: MANAGED_MSG, managed: true });
+    const r = startClaudeInstall();
+    if (r.started) log("installing Claude Code with Anthropic's installer (claude.ai/install.sh)");
+    return sendJson(res, 200, r);
   }
 
   // Start Claude Code's own sign-in — `claude auth login`, which opens
