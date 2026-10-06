@@ -87,7 +87,9 @@ A self-contained `REFUGIO.app` — REFUGIO, its dependencies and its own Node, i
 one download of about 70 MB. Open the `.dmg`, drag **REFUGIO** to
 **Applications**, open it. The first-run setup in its window does the rest:
 picking a model (it downloads one through Ollama), connectors, web search, and
-— if you have a Claude plan — signing in to Claude.
+— if you have a Claude plan and say yes to using Claude — installing Claude Code
+with Anthropic's own installer, signing in on Anthropic's page, and switching
+it on.
 
 Build it with `./packaging/macos/build-app.sh`; CI builds both architectures on
 every push (the **Package** workflow's `.dmg` artifact). There are no published

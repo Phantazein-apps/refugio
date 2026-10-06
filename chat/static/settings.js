@@ -981,13 +981,44 @@ function renderClaude() {
   // Nothing to switch on without Claude Code. Say how to get it, and that
   // REFUGIO will not do the signing in — that is the whole arrangement.
   if (!c.installed) {
+    // Installed with Anthropic's own installer, on request — the same one the
+    // setup page uses. Signing in is the next step, from the account row.
+    const btn = el("button.btn", { type: "button", text: "Install Claude Code" });
+    const note = el("div.aside", { style: "margin-top:8px",
+      text: "From Anthropic (claude.ai), into your home folder — no password needed. It needs a paid Claude plan." });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Installing… (about a minute)";
+      try {
+        const res = await fetch("/api/chat/claude/install", { method: "POST" });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't start the install");
+        const until = Date.now() + 12 * 60 * 1000;
+        const poll = setInterval(async () => {
+          const s = await (await fetch("/api/chat/claude")).json().catch(() => null);
+          const st = s?.install?.state;
+          if (st === "installing" && Date.now() < until) return;
+          clearInterval(poll);
+          if (s?.installed) {
+            toast("Claude Code is installed. Sign in from the account row.");
+            await refresh();
+          } else {
+            btn.disabled = false;
+            btn.textContent = "Install Claude Code";
+            note.textContent = `${s?.install?.error || "The install didn't finish."} ` +
+              "To install it yourself: curl -fsSL https://claude.ai/install.sh | bash";
+          }
+        }, 2000);
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Install Claude Code";
+        toast(e.message);
+      }
+    });
     box.append(el("div.card", {},
       el("h3", { text: "Claude Code is not installed" }),
       el("div.prose", { text: c.hint }),
-      el("div.prose", {
-        text: "Install Claude Code, open it once in Terminal with `claude`, and sign in with " +
-          "/login. Then come back here — this page checks again on its own.",
-      }),
+      el("div", { style: "margin-top:12px" }, btn),
+      note,
     ));
     return;
   }
