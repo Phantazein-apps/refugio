@@ -385,7 +385,7 @@ Everything is in the **menu-bar app**. Click REFUGIO's mark — three walls open
 |---|---|
 | **Open / Show REFUGIO** | The chat window. Starts REFUGIO first if it isn't running. |
 | **Start / Stop REFUGIO** | Stop frees the memory and keeps the icon, so starting again is one click. |
-| **Settings…** | Connectors, models, web search, Claude. |
+| **Settings…** | Connectors, models, web search, and a cloud model (Claude, through your Claude Code). |
 | **Show Log** | `~/.refugio-logs/refugio.log` — what REFUGIO printed, including why it stopped. |
 | **Launch at Login** | Whether the app opens at login. On by default. |
 | **Start REFUGIO Automatically** | Whether the app starts REFUGIO when it opens. On by default above 8 GB of memory. |

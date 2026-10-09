@@ -95,7 +95,7 @@ a fleet. It does not use pi-ai at all.
 ## 5. The Claude Code engine (built)
 
 `chat/claude-code.js` runs the person's own signed-in `claude` as a model.
-Switched on in **Settings ▸ Claude**, it adds Claude Sonnet, Opus and Haiku to
+Switched on in **Settings ▸ Cloud model**, it adds Claude Sonnet, Opus and Haiku to
 the chat's model picker, under their own heading (model names
 `claude-code/sonnet`, `claude-code/opus`, `claude-code/haiku`).
 
@@ -120,7 +120,7 @@ command line, because argv is readable by every user through `ps`. REFUGIO
 never sees, stores or asks for a Claude credential.
 
 **Consent.**
-- Off by default. Settings ▸ Claude says, above the switch, that choosing a
+- Off by default. Settings ▸ Cloud model says, above the switch, that choosing a
   Claude model sends the whole conversation — messages, attached files and
   what connectors return — to Anthropic, against the person's own plan.
 - On only adds Claude to the picker; nothing is sent until a Claude model is
