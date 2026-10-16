@@ -97,7 +97,7 @@ to install a model that cannot call tools at all, caps the surface
 model-capability limit, not a bug to fix — it is recorded so it is not
 rediscovered as one.
 
-## 8. The installer builds, and nothing it produces is signed
+## 8. The installers build, and nothing they produce is signed
 
 **Corrected 2026-08-27.** This entry used to read *"neither installer has ever
 been built"*. That is no longer true. `.github/workflows/package.yml` builds
@@ -105,11 +105,16 @@ the `.pkg` on every push, installs it silently on a real macOS runner and
 asserts what landed — the payload, the login agent, the CLI on `PATH`, both
 Node runtimes, and a supervisor that survives being started.
 
-What remains is signing. There is no Apple Developer ID yet, so the job
-publishes its artifact as `refugio-pkg-UNSIGNED` — which means *"cannot be
-opened because Apple cannot check it for malicious software"* on every Mac
-since Catalina, and an MDM that will not install it at all. See
-`packaging/README.md` for the certificate types and costs.
+The same workflow now also builds the self-contained `REFUGIO.app` as a `.dmg`
+per architecture (#58) and smoke-tests the arm64 one as a brand-new user.
+
+What remains is signing. There is no Apple Developer ID yet, so both are
+published unsigned (`refugio-pkg-UNSIGNED`, `refugio-dmg-UNSIGNED`). The `.pkg`
+means *"cannot be opened because Apple cannot check it for malicious
+software"* on every Mac since Catalina, and an MDM that will not install it at
+all. The `.dmg`'s app is ad-hoc signed, which Apple silicon requires to run, and
+a downloaded copy needs **Open Anyway** in System Settings ▸ Privacy & Security
+once. See `packaging/README.md` for the certificate types and costs.
 
 ## 9. LM Studio is not supported
 
@@ -428,3 +433,96 @@ measurement with no policy in it, and it has been applied.
 The context question above took the option that leaves these standing: capping
 tool results per turn does not touch the context, so every figure here is still
 good. Raising `num_ctx` would re-open all of them, and remains open.
+
+## 13. The uninstaller leaves the WhatsApp link behind
+
+`uninstall-refugio` asks before deleting the WhatsApp link, and then deletes
+`~/hermeneia` and `~/.hermeneia`. The link is not there any more: current
+Hermeneia keeps its session under `~/Library/Application Support/Hermeneia/`
+(seen on a real install, in the WhatsApp bridge's own arguments:
+`…/Application Support/Hermeneia/accounts/default`). So answering *"yes, delete
+my WhatsApp link"* leaves it on disk, and a later install finds it still paired.
+
+The fix is one more path in the uninstaller's WhatsApp step, behind the same
+question — and checking whether Hermeneia's own data directory is configurable,
+so the uninstaller asks Hermeneia where it is rather than hard-coding it again.
+
+## 14. The old https://refugio domain leaves a certificate in the Keychain
+
+The `https://refugio` domain was removed with Caddy (#56). The installer and the
+uninstaller stop a leftover Caddy, delete `certs/` and the `Caddyfile`, and tell
+the person the `127.0.0.1 refugio` line in `/etc/hosts` can go. What nothing
+removes is **mkcert's root certificate**, which the old setup installed into the
+login Keychain as a trusted root: `mkcert -uninstall` is never run.
+
+It is harmless while its private key stays on the machine, and it is also a
+trusted root nobody is using. Removing it needs `mkcert` (which may be gone
+too) or Keychain Access, so the honest version is a line in the uninstaller's
+output saying where it is and how to delete it, rather than doing it silently.
+
+## 15. Hermeneia's bridge outlives Hermeneia
+
+When Hermeneia is stopped with SIGTERM it exits, and its WhatsApp bridge
+(`hermeneia-bridge-darwin-*`) keeps running with no parent. Seen on a real
+install. REFUGIO's side of this was fixed in #58 — stopping the chat server now
+waits for its connectors to close, so it no longer orphans Hermeneia itself —
+but what Hermeneia does with its own child is Hermeneia's.
+
+This belongs upstream, in [Hermeneia](https://github.com/Phantazein-apps/hermeneia):
+stop the bridge on SIGTERM. Until then a stopped REFUGIO can leave a bridge
+running, which holds the WhatsApp session for the next start.
+
+## 16. The .dmg app: what it does not do, and what has not been run
+
+`REFUGIO.app` from the `.dmg` (#58) runs REFUGIO with nothing else installed.
+By design it does **not**:
+
+- **set up WhatsApp, email or MemPalace** — the terminal installer downloads
+  and configures those; the app has no installer to do it. Hermeneia in
+  particular is a separate clone plus a prebuilt bridge.
+- **tell anyone a newer version exists** — the update check compares git
+  commits, and an app has no git. A newer version is a new download, dragged
+  over the old one; nothing says one is out.
+
+And it has **not been run**:
+
+- **as a download** — every test so far was of a `.dmg` built on the same Mac,
+  which macOS does not quarantine. The Open Anyway flow is documented, not
+  exercised.
+- **on an Intel Mac** — CI builds the x64 `.dmg`; nobody has opened it.
+
+## 17. Claude: what is not settled
+
+Claude through the person's own Claude Code (#55, #57–#60) works end to end on
+a real Mac. These are the parts that are not done:
+
+- **Anthropic's Commercial Terms are not accepted.** Anthropic's
+  [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
+  says preinstalling or running Claude Code in a product requires agreeing to
+  its Commercial Terms of Service. REFUGIO meets the listed conditions —
+  unmodified binary, no sign-in method disabled, each user on their own plan,
+  nothing resold — but the agreement is a business step, not code.
+- **Anthropic has not confirmed the subscription use.** The same page says
+  developers building products should use API keys, and that Pro/Max limits
+  assume "ordinary, individual usage". REFUGIO never holds a credential, but it
+  does drive the person's subscription programmatically. One person on their
+  own Mac fits the wording; a fleet is the case to confirm with Anthropic
+  first. The unambiguous route is an API key, which the pi-ai path in #55
+  supports (`docs/pi-ai-spike.md`).
+- **The real installer has not run end to end.** "Do you want to use Claude?"
+  downloads `claude.ai/install.sh`, runs it, and checks the result is signed by
+  Anthropic PBC. The flow is tested against a stand-in installer, and the
+  signature check against real binaries, but the Mac it was built on already
+  had Claude Code. Signing in from signed-out is likewise tested against a
+  stand-in, not the real CLI.
+- **The setup wizard's step is still called "Claude."** The Settings pane was
+  renamed "Cloud model" (#60) because Anthropic asks that its names not be used
+  as another product's feature name. The wizard's question — *Do you want to
+  use Claude?* — is a question about using Claude rather than a feature name,
+  but it is the same judgement.
+- **The 500 ms wait for the tool bridge is measured, not signalled.** Claude
+  Code does not wait for MCP servers before its first request, so REFUGIO waits
+  until the bridge is asked for its tools and then 500 ms more
+  (`REFUGIO_CLAUDE_MCP_SETTLE_MS`). On Claude Code 2.1.104, 300 ms and 1,500 ms
+  both worked every time. A later Claude Code could need more; the per-turn
+  check logs it when the bridge was not connected.
