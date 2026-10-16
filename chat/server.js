@@ -48,6 +48,7 @@ import * as catalog from "./model-catalog.js";
 import {
   turnTimeoutMs, configureServerTimeouts, armTurnDeadline, deadlineMessage,
   heartbeatMs, armHeartbeat, THINKING_EVENT_MS, thoughtWithoutAnswerMessage,
+  outOfRoomMessage, cutShortNote,
 } from "./turn-deadline.js";
 import { toolResultBudget, applyBudget } from "./tool-budget.js";
 
@@ -1223,6 +1224,8 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
   // when the turn starts, not when the process did.
   const toolBudget = toolResultBudget();
   let toolCharsSpent = 0;
+  /** The round that ended `done=length`, if one did. @type {null|object} */
+  let outOfRoom = null;
 
   // Reasoning is counted, not kept. Ollama streams it a token per chunk, so the
   // count is close to the model's own. The window shows it so that minutes of
@@ -1261,6 +1264,11 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
       // (and a stub that reports none) would otherwise produce a line of nulls
       // on every round, which is noise in the log and an event that tells a
       // reader nothing.
+      // Ollama's own word for "the context filled before I finished". Kept for
+      // the end of the turn, where the person is finally told — #50 recorded
+      // this and told nobody.
+      if (usage?.doneReason === "length") outOfRoom = usage;
+
       if (usage && (usage.promptTokens != null || usage.evalTokens != null || usage.doneReason)) {
         const parts = [
           `round ${round + 1}`,
@@ -1328,6 +1336,16 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     // reads as a machine that was not listening. Appended to `acc` before the
     // message is stored, so reopening the conversation still shows it.
     const answered = acc.length > 0;
+
+    // An answer that simply stops reads like a finished one. Said before the
+    // crisis layer so that, when both apply, the notice the person's own words
+    // called for is the last thing on screen.
+    if (answered && outOfRoom) {
+      const note = cutShortNote();
+      acc += note;
+      if (!res.writableEnded) send("token", { t: note });
+    }
+
     if (carriesCrisisLayer(activeMode)) {
       const lastUser = [...store.historyFor(conversationId)].reverse().find((m) => m.role === "user");
       const notice = crisisNotice(lastUser?.content, acc);
@@ -1343,11 +1361,22 @@ async function streamTurn(res, { conversationId, message, model, persistUser, we
     // it: a notice the person's words called for is still owed when the model
     // said nothing, and it is kept. An empty reply is not stored, because an
     // empty assistant turn is sent back as history on the next question.
-    if (!answered && thinkingTokens > 0) {
+    // `outOfRoom` joins the thinking count as a reason to end with one: a turn
+    // can fill its context on tool results without thinking at all, and that
+    // used to reach the window as `done` over an empty answer.
+    if (!answered && (thinkingTokens > 0 || outOfRoom)) {
       if (acc) store.addMessage(conversationId, "assistant", acc, model);
-      log(`turn ended after ${thinkingTokens} thinking tokens with no answer (${model})`);
+      log(outOfRoom
+        ? `turn ran out of context at ${outOfRoom.promptTokens ?? "?"} prompt tokens with no answer (${model})`
+        : `turn ended after ${thinkingTokens} thinking tokens with no answer (${model})`);
       if (!res.writableEnded) {
-        send("error", { error: thoughtWithoutAnswerMessage(thinkingTokens) });
+        // Known beats guessed: thoughtWithoutAnswerMessage says small models
+        // "often" run out of room this way. When Ollama has said so, say so.
+        send("error", {
+          error: outOfRoom
+            ? outOfRoomMessage(outOfRoom.promptTokens, toolCharsSpent)
+            : thoughtWithoutAnswerMessage(thinkingTokens),
+        });
         res.end();
       }
       return;

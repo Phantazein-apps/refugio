@@ -418,8 +418,17 @@ fit. Nor does it settle the context size: it makes 4,096 survivable, so raising
 in this entry.
 
 Whichever is chosen, `REFUGIO_MAX_TOOL_ROUNDS` (default 5) sets how many times
-this can compound, and nothing today tells a person why a turn stopped. The
-`done=length` line is in the log, not in the window.
+this can compound.
+
+The person is now told, which they were not: `done=length` went to the log and
+nowhere else. Since 2026-09-25 an answer cut off mid-sentence carries *"Cut
+short: the model ran out of room in its context"*, kept with the message so
+reopening the conversation still shows it, and a turn that filled its context
+without writing anything ends with the reason and the number it ran out at
+(`chat/turn-deadline.js`). That last case used to reach the window as `done`
+over an empty answer, or as a guess that the model had thought for too long —
+which was the wrong sentence for a turn that filled up on tool results without
+thinking at all.
 
 **What closing this takes.** Measuring is done. What remains is a decision, not
 a measurement: whether to write these figures into `mem-fit.cjs` and
