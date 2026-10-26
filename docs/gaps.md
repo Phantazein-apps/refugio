@@ -443,6 +443,31 @@ The context question above took the option that leaves these standing: capping
 tool results per turn does not touch the context, so every figure here is still
 good. Raising `num_ctx` would re-open all of them, and remains open.
 
+**What the macOS-only rewrite changed here, and what it did not.** Checked
+against `main` on 2026-10-16, after #55–#61.
+
+It did not change the figures. `machineSupport()` has always allowed 0.05 GB for
+the interface, and still does, so the 8 GB arithmetic above stands as written
+and the measurements do not need re-taking. Anyone reaching for that argument
+should stop here.
+
+What it did strand is `nativeTools`. The field rates a model on whether it could
+drive Open WebUI's native function calling rather than OWUI's prompt-based mode,
+and #56 removed Open WebUI. `scripts/mem-fit.cjs:23` already says so — "nothing
+decides anything on it any more; it stays only because models.json and
+chat/model-catalog.js carry the same field" — but `models.json` has not caught
+up: its `fields` block still defines `nativeTools` in Open WebUI's terms, every
+entry still carries a value for it, and `llama3.1:8b`'s note still reads "the
+first tier that drives Open WebUI's native function calling". The catalog is
+published to people whose REFUGIO has no Open WebUI in it.
+
+Three ways to take it, and this is a catalog decision rather than a measurement:
+drop the field and the notes that lean on it; redefine it against the v2 chat
+window's own tool calling, which would mean re-rating every entry, by hand or by
+eval; or keep it as recorded history and say in `fields` that nothing reads it.
+Whichever, it belongs with the two decisions above, because all three are edits
+to the same file.
+
 ## 13. The uninstaller leaves the WhatsApp link behind
 
 `uninstall-refugio` asks before deleting the WhatsApp link, and then deletes
